@@ -14,6 +14,8 @@ from services.google_sheets import GoogleSheetsService
 from utils.helpers_sheets import _retry
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
 
+IVA = 1.19
+
 # Creamos el Servicio de Metabase y de GoogleSheets
 def initialize_services():
     if "metabase_service" in st.session_state and "google_sheets_service" in st.session_state:
@@ -86,7 +88,7 @@ def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> pd.DataFrame:
 
 # --> Carga de Saldos de Clientes (saldosDF)
 @st.cache_data(show_spinner="Cargando Saldos de Clientes desde Google Sheets...")
-def load_client_balances() -> tuple[dict, dict]:
+def load_client_balances() -> dict[str, dict[str, float]]:
 
     # -- Paso 1: Traer Datos de Ahorros
     # Primero Obtenemos la Spreadsheet de Saldos desde Google Sheets
@@ -152,8 +154,13 @@ def load_client_balances() -> tuple[dict, dict]:
     saldosDict = defaultdict(lambda: 0, saldosDict)
     porCobrarDict = defaultdict(lambda: 0, porCobrarDict)
 
-    # Devolvemos ambos Diccionarios
-    return saldosDict, porCobrarDict
+    # Creamos un Diccionario General
+    generalDict = {
+        'Saldos': saldosDict,
+        'PorCobrar': porCobrarDict
+    }
+
+    return generalDict # type: ignore
 
 # --> Carga de PaB Ideal de Crédito
 @st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...")
