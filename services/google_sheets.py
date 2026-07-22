@@ -1,4 +1,4 @@
-# Usando Pip8
+# Usando Pep8
 # Librerías de Python
 import json
 import os
@@ -32,5 +32,28 @@ class GoogleSheetsService:
             raise ValueError(f"Spreadsheet with ID '{spreadsheet_id}' not found.")
         except WorksheetNotFound:
             raise ValueError(f"Worksheet '{worksheet_name}' not found in spreadsheet '{spreadsheet_id}'.")
+        except APIError as e:
+            raise RuntimeError(f"API error occurred: {e}")
+
+    # Método para Obtener una Worksheet como un objeto de gspread
+    def get_worksheet(self, spreadsheet_id: str, worksheet_name: str) -> gspread.Worksheet:
+        try:
+            spreadsheet = _retry(lambda: self.client.open_by_key(spreadsheet_id))
+            worksheet = _retry(lambda: spreadsheet.worksheet(worksheet_name))
+            return worksheet
+        except SpreadsheetNotFound:
+            raise ValueError(f"Spreadsheet with ID '{spreadsheet_id}' not found.")
+        except WorksheetNotFound:
+            raise ValueError(f"Worksheet '{worksheet_name}' not found in spreadsheet '{spreadsheet_id}'.")
+        except APIError as e:
+            raise RuntimeError(f"API error occurred: {e}")
+
+    # Método para Obtener una Spreadsheet como un objeto de gspread
+    def get_spreadsheet(self, spreadsheet_id: str) -> gspread.Spreadsheet:
+        try:
+            spreadsheet = _retry(lambda: self.client.open_by_key(spreadsheet_id))
+            return spreadsheet
+        except SpreadsheetNotFound:
+            raise ValueError(f"Spreadsheet with ID '{spreadsheet_id}' not found.")
         except APIError as e:
             raise RuntimeError(f"API error occurred: {e}")
