@@ -8,6 +8,7 @@ import gspread
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from modules.constants import DEFAULT_DISCOUNT_PL
 from modules.forms import crear_diccionario_aliados
 from services.metabase import MetabaseService
 from services.google_sheets import GoogleSheetsService
@@ -298,6 +299,9 @@ def load_addendums() -> pd.DataFrame:
 
     # Quitamos Datos donde algún PaB sea menor a 2
     addendumsDF = addendumsDF[(addendumsDF['PaB_Origen'] >= 2) & (addendumsDF['PaB_Propuesta'] >= 2)]
+
+    # Creamos la Columna PaB_PL como PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
+    addendumsDF['PaB_PL'] = addendumsDF['PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
 
     # Devolvemos el Diccionario de Addendums
     return addendumsDF

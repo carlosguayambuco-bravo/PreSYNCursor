@@ -99,7 +99,7 @@ def rellenar_formulario():
     addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente) & (addsDF['Estado'] == 'Activo')]
     if not addendum_activo.empty:
         # Añadimos los Addendums a las Deudas Activas
-        deudas_activas_df = pd.concat([deudas_activas_df, addendum_activo[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen']]], ignore_index=True)
+        deudas_activas_df = pd.concat([deudas_activas_df, addendum_activo[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen','PaB_PL']]], ignore_index=True)
 
     # Mostramos las Características del Cliente (Saldos, Por Cobrar y Pricing)
     with st.expander("Características del Cliente"):
@@ -160,6 +160,8 @@ def rellenar_formulario():
     if not st.session_state['deudas_seleccionadas']:
         st.warning("Debe seleccionar al menos una deuda activa para poder continuar con el llenado del formulario.")
         st.stop()
+
+    # Siguiente Paso: 
 
     # Filtramos el DF para dejar solo las Deudas Seleccionadas
     deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]

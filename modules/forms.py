@@ -5,10 +5,10 @@ from typing import Literal, Optional
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from utils.initializer import load_client_balances, IVA
+from utils.initializer import load_client_balances, IVA, load_pab_ideal
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
 from utils.helpers_sheets import appendDataFrameToEnd
-from .constants import DEFAULT_DISCOUNT_PL, MAX_OFFERED_DISCOUNT, MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME
+from .constants import DEFAULT_DISCOUNT_PL, MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME
 
 # Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
 class Aliado:
@@ -68,7 +68,7 @@ def crear_diccionario_aliados(df: pd.DataFrame) -> dict:
     # Paso 3: Devolver el Diccionario de Aliados
     return aliados_dict
 
-# Función Auxiliar para Obtener el Descuento Óptimo para una Referencia
+# Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
 def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago_total_original: float, descuento_pl: float):
     # Paso 1: Obtener el Ahorro y el Por Cobrar de la Referencia
     saldosDict = load_client_balances()
@@ -79,7 +79,42 @@ def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago
     descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA) - 1)
 
     # Paso 3: Devolver el Descuento Óptimo con Piso descuento_pl y techo 1
-    return min(max(descuento_optimo, descuento_pl), MAX_OFFERED_DISCOUNT)
+    return min(max(descuento_optimo, descuento_pl), 1)
+
+# Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por Pago Crédito
+def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float):
+    # Paso 1: Obtener el Ahorro y el Por Cobrar de la Referencia
+    saldosDict = load_client_balances()
+    ahorro = saldosDict['Saldos'][referencia]
+    por_cobrar = saldosDict['PorCobrar'][referencia]
+
+    # Paso 2: Obtener el PaB Ideal de las Deudas Seleccionadas
+    pabIdealDict = load_pab_ideal()
+    montoIdeal = 0
+    for deuda in deudas:
+        if deuda in pabIdealDict:
+            montoIdeal += pabIdealDict[deuda]
+        else:
+            return 1 # Si no está alguna no se puede realizar el cálculo
+
+    # Paso 3: Calcular el Descuento Óptimo
+    descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA) - 1)
+
+    # Paso 4: Devolver el Descuento Óptimo con Techo 1
+    return min(descuento_optimo, 1)
+
+# Función para Obtener el Descuento Óptimo General para una Referencia, según el Tipo de Liquidación
+def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float, tipo_pago: Literal['Tradicional','Estructurado','Refi','Crédito','Verificar']):
+    if tipo_pago in ['Tradicional','Estructurado','Refi']:
+        return obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
+    elif tipo_pago == 'Crédito':
+        return obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
+    elif tipo_pago == 'Verificar':
+        descuento_tradicional = obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
+        descuento_credito = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
+        return min(descuento_tradicional, descuento_credito)
+    else:
+        return 1
 
 # Función Auxiliar para obtener la referencia dada una deuda
 st.cache_data(ttl=3600, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
