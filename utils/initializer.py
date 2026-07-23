@@ -40,9 +40,10 @@ SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
 REFCHANGES_SHEET_ID = '1jcPPhtF2YK3Kr7P_A0Mgh2OqhOfnVWB2to3UPoSH5tE'
 PABIDEAL_SHEET_ID = '1Obm0O5hfIIzCMy5RvdX5b1JBf3pmzIrYdYa1vPOB83M'
 ALIADOS_SHEET_ID = '1px7MX8zMKPe-PeCTvpNkX4kFMp1XL5IuBUrP1oGftiw'
+MASIVAS_SHEET_ID = '1sOIk9BAa2VE-P-wnMPDJh8_hYLGgO5WaJL7m9LIM2is'
 
 # --> Carga de Cambios de Referencias
-@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...")
+@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=3600)
 def load_reference_changes() -> dict[str,str]:
 
     # Primero Obtenemos la Spreadsheet de Cambios de Referencias desde Google Sheets
@@ -87,7 +88,7 @@ def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> pd.DataFrame:
     return df
 
 # --> Carga de Saldos de Clientes (saldosDF)
-@st.cache_data(show_spinner="Cargando Saldos de Clientes desde Google Sheets...")
+@st.cache_data(show_spinner="Cargando Saldos de Clientes desde Google Sheets...", ttl=3600)
 def load_client_balances() -> dict[str, dict[str, float]]:
 
     # -- Paso 1: Traer Datos de Ahorros
@@ -163,7 +164,7 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     return generalDict # type: ignore
 
 # --> Carga de PaB Ideal de Crédito
-@st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...")
+@st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...", ttl=3600)
 def load_pab_ideal() -> dict:
 
     # Primero Obtenemos la Spreadsheet de PaB Ideal desde Google Sheets
@@ -205,7 +206,7 @@ def load_pab_ideal() -> dict:
     return pabIdealDict
 
 # --> Carga de Datos de Aliados
-@st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...")
+@st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...", ttl=3600)
 def load_aliados() -> dict:
 
     # Primero Obtenemos la Spreadsheet de Aliados desde Google Sheets
@@ -219,3 +220,84 @@ def load_aliados() -> dict:
 
     # Devolvemos el Diccionario de Aliados
     return aliados_dict
+
+# --> Carga de Datos de Masivas
+@st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=3600)
+def load_masivas() -> dict:
+    # Primero Obtenemos la Spreadsheet de Masivas desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Bases mes actual 2024" (PORQUE ESE NOMBRE ;_( Carita Triste )
+    masivasDF = google_sheets_service.get_sheet_as_dataframe(MASIVAS_SHEET_ID, 'Bases mes actual 2024')
+
+    # Renombramos las Columnas
+    masivasDF = masivasDF.rename(columns={
+        'ID': 'Id_Deuda',
+        'Propuesta Pago': 'PaB_Propuesta',
+        'Monto Pago Estructurado': 'PaB_Estructurado',
+        'Plazo Estructurado': 'Plazo_Estructurado',
+        'Portafolio': 'Es_Portafolio',
+    })
+
+    # Quitamos los Datos donde Id_Deuda sea NaN
+    masivasDF = masivasDF.dropna(subset=['Id_Deuda'])
+
+    # Dejamos solo las Columnas Necesarias
+    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'Es_Portafolio']]
+    # Volvemos la Id_Deuda a String
+    masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    # Volvemos los PaB a Número
+    masivasDF['PaB_Propuesta'] = masivasDF['PaB_Propuesta'].apply(cleanNumber)
+    masivasDF['PaB_Propuesta'] = pd.to_numeric(masivasDF['PaB_Propuesta'], errors='coerce')
+    masivasDF['PaB_Estructurado'] = masivasDF['PaB_Estructurado'].apply(cleanNumber)
+    masivasDF['PaB_Estructurado'] = pd.to_numeric(masivasDF['PaB_Estructurado'], errors='coerce')
+    # Volvemos el Plazo a Número 
+    masivasDF['Plazo_Estructurado'] = masivasDF['Plazo_Estructurado'].apply(cleanNumber)
+    masivasDF['Plazo_Estructurado'] = pd.to_numeric(masivasDF['Plazo_Estructurado'], errors='coerce')
+    # Volvemos el Portafolio a Booleano
+    masivasDF['Es_Portafolio'] = masivasDF['Es_Portafolio'].apply(lambda x: x == 'SI' if isinstance(x, str) else False)
+
+    # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
+    masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
+
+    # Creamos el Diccionario de Masivas
+    masivas_dict = masivasDF.set_index('Id_Deuda').to_dict(orient='index')
+
+    # Devolvemos el Diccionario de Masivas
+    return masivas_dict
+
+# --> Carga de Addendums de Aliados
+@st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=3600)
+def load_addendums() -> pd.DataFrame:
+    # Primero Obtenemos la Spreadsheet de Addendums desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "ADD"
+    addendumsDF = google_sheets_service.get_sheet_as_dataframe(MASIVAS_SHEET_ID, 'ADD')
+
+    # Renombramos las Columnas
+    addendumsDF = addendumsDF.rename(columns={
+        'ID_Addendum': 'Id_Deuda',
+        'Cédula': 'Cedula',
+        'Banco': 'Banco',
+        'Deuda Bravo': 'PaB_Origen',
+        'Propuesta de pago': 'PaB_Propuesta',
+    })
+    # Dejamos solo las Columnas Necesarias
+    addendumsDF = addendumsDF[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen', 'PaB_Propuesta']]
+    # Quitamos Datos donde el Id_Deuda sea NaN
+    addendumsDF = addendumsDF.dropna(subset=['Id_Deuda'])
+    # Volvemos la Id_Deuda y Cedula a String
+    addendumsDF['Id_Deuda'] = addendumsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    addendumsDF['Cedula'] = addendumsDF['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+    # Volvemos los PaB a Número
+    addendumsDF['PaB_Origen'] = addendumsDF['PaB_Origen'].apply(cleanNumber)
+    addendumsDF['PaB_Origen'] = pd.to_numeric(addendumsDF['PaB_Origen'], errors='coerce')
+    addendumsDF['PaB_Propuesta'] = addendumsDF['PaB_Propuesta'].apply(cleanNumber)
+    addendumsDF['PaB_Propuesta'] = pd.to_numeric(addendumsDF['PaB_Propuesta'], errors='coerce')
+
+    # Quitamos Datos donde algún PaB sea menor a 2
+    addendumsDF = addendumsDF[(addendumsDF['PaB_Origen'] >= 2) & (addendumsDF['PaB_Propuesta'] >= 2)]
+
+    # Devolvemos el Diccionario de Addendums
+    return addendumsDF

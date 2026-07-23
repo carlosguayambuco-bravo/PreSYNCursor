@@ -3,13 +3,19 @@
 import os
 import json
 # Librerías de Terceros
-import streamlit as st
+import holidays
+import numpy as np
 import pandas as pd
+import streamlit as st
 
 mesesDict = {
     1: 'Enero',2: 'Febrero',3: 'Marzo',4: 'Abril',5: 'Mayo',6: 'Junio',
     7: 'Julio',8: 'Agosto',9: 'Septiembre',10: 'Octubre',11: 'Noviembre',12: 'Diciembre'
 }
+
+# Agregamos el offset para que tenga en cuenta solo business days
+co_holidays = holidays.country_holidays('CO', years=pd.Timestamp.now().year)
+co_bday = pd.offsets.CustomBusinessDay(holidays=co_holidays) # type: ignore
 
 LIMITE_MEC = 4 # El Día límite para Considerar el Día como mes operativo
 
@@ -83,3 +89,49 @@ def getMesOperativo() -> pd.Timestamp:
         mes_operativo = today
 
     return mes_operativo.replace(day=1)  # Retornamos el primer día del mes operativo
+
+# Función Auxiliar para Realizar el Parsing a un String de %
+def parsePercentage(value, default_value: float = 0.15) -> float:
+    if isinstance(value, str):
+        value = value.replace('%', '').strip()
+        try:
+            return float(value) / 100.0
+        except ValueError:
+            return default_value
+    elif isinstance(value, (int, float)):
+        if 0 <= value <= 1:
+            return value
+        return value / 100.0
+    else:
+        return default_value
+
+# Función Auxiliar para Obtener la Diferencia en Días Hábiles en float entre dos fechas
+def getBDDaysDiffFloat(firstDate: pd.Timestamp, secondDate: pd.Timestamp, change_order: bool = True) -> float:
+    # Verificamos que no sean NaT
+    if pd.isna(firstDate) or pd.isna(secondDate):
+        return np.nan
+
+    # Verificamos el Orden Correcto de Fechas
+    if change_order:
+        start, end = sorted([firstDate, secondDate])
+    else:
+        start, end = firstDate, secondDate
+
+    # Verificamos que la Comparación sea Correcta
+    if start > end:
+        return 0
+
+    # 1. Normalize dates to calculate 'full' business days in between
+    # We use 'floor' to get the count of midnight-to-midnight periods
+    full_bus_days = len(pd.date_range(start=start.floor('D'), end=end.floor('D'), freq=co_bday)) - 1
+
+    # 2. Handle the fractional part of the start and end days
+    # We subtract the time elapsed on the first day and add time elapsed on the last
+    # This assumes a "day" is 24 hours.
+    start_fraction = (start.hour + start.minute / 60 + start.second / 3600) / 24
+    end_fraction = (end.hour + end.minute / 60 + end.second / 3600) / 24
+
+    # Total = Full Days - (Time passed on start day) + (Time passed on end day)
+    float_diff = full_bus_days - start_fraction + end_fraction
+
+    return round(float_diff, 4)

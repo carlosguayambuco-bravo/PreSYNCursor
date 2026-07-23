@@ -3,6 +3,7 @@
 # Librerías de Terceros
 # Librerías Locales
 
+# --- Queries a Metabase ---
 QUERY_DEBT_TO_REFERENCE = """
 SELECT
     bcrd.bank_reference AS Referencia
@@ -56,18 +57,22 @@ PL_Programa AS (
 )
 
 SELECT
-    bcrd.id as Id_Deuda,
-    bcrd.bank_reference as Referencia,
-    bcrd.amount as PaB_Origen,
-    pl.PB_PL as PaB_PL,
-    vsp.success_commission_percentage as Pricing
+    bcrd.id AS Id_Deuda,
+    bcrd.bank_reference AS Referencia,
+    bcr.document_number AS Cedula,
+    bcrd.financial_entity_name AS Banco,
+    bcrd.amount AS PaB_Origen,
+    pl.PB_PL AS PaB_PL,
+    vsp.success_commission_percentage AS Pricing
 FROM dealer_public.berex_credit_repair_debts bcrd
-    LEFT JOIN PL_Programa pl
+    LEFT JOIN PL_Programa AS pl
         ON bcrd.id = pl.debt_id
-    LEFT JOIN vanex_public.leads_lead ll
+    LEFT JOIN vanex_public.leads_lead AS ll
         ON ll.tracker_id = bcrd.tracker_id
-    LEFT JOIN vanex_public.settlement_plan vsp
+    LEFT JOIN vanex_public.settlement_plan AS vsp
         ON vsp.lead_id = ll.id
+    LEFT JOIN dealer_public.berex_credit_repairs AS bcr
+        ON bcr.id = bcrd.credit_repair_id
 WHERE 
     bcrd.status IN ('new','negotiation','lawsuit')
     AND NOT(bcrd.sub_state IN ('liquidated','liquidated_with_credit','liquidation_in_process','cancelled','drop_requested','liquidation_structured_payment'))
@@ -75,5 +80,22 @@ WHERE
     AND bcrd.bank_reference = '{referencia}'
 """
 
+QUERY_LAST_UPDATE = """"
+SELECT
+    MAX(bda.updated_at) AS Ultima_Actualizacion,
+    bda.debt_id AS Id_Deuda
+FROM dealer_public.berex_debt_activities AS bda
+WHERE 
+    bda.debt_id IN ({debt_ids}) AND
+    bda.end = '{email}'
+GROUP BY bda.debt_id
+"""
+
+# --- Constantes de Solicitudes ---
 SOLICITUDES_SHEETS_ID = "1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk"
 SOLICITUDES_WORKSHEET_NAME = "Solicitudes_Nuevas"
+
+DEFAULT_DISCOUNT_PL = 0.15
+MAX_OFFERED_DISCOUNT = 0.8
+
+MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE = 5
