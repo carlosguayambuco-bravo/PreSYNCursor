@@ -8,14 +8,11 @@ import gspread
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from modules.constants import DEFAULT_DISCOUNT_PL
 from modules.forms import crear_diccionario_aliados
 from services.metabase import MetabaseService
 from services.google_sheets import GoogleSheetsService
 from utils.helpers_sheets import _retry
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
-
-IVA = 1.19
 
 # Creamos el Servicio de Metabase y de GoogleSheets
 def initialize_services():

@@ -3,6 +3,8 @@
 # Librerías de Terceros
 # Librerías Locales
 
+IVA = 1.19
+
 # --- Queries a Metabase ---
 QUERY_DEBT_TO_REFERENCE = """
 SELECT

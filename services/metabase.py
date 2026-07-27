@@ -50,7 +50,7 @@ class MetabaseService:
         return self.session_id
 
     # Método para ejecutar una consulta en Metabase y obtener los resultados
-    def run_query(self, query: str) -> pd.DataFrame:
+    def execute_query(self, query: str) -> pd.DataFrame:
         # Obtenemos el Session ID actual
         current_session_id = self.get_session_id()
         # Definimos el Endpoint de la API para ejecutar la consulta
@@ -101,7 +101,7 @@ class MetabaseService:
             ))
             self.query_attempts += 1
 
-            return self.run_query(query)  # Reintento de la Consulta
+            return self.execute_query(query)  # Reintento de la Consulta
             
         # Tercer Error: Algun Error Adicional
         except Exception as e:

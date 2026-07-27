@@ -5,10 +5,10 @@ from typing import Literal, Optional
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from utils.initializer import load_client_balances, IVA, load_pab_ideal
+from data.data_loader import load_client_balances, load_pab_ideal
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
 from utils.helpers_sheets import appendDataFrameToEnd
-from .constants import DEFAULT_DISCOUNT_PL, MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME
+from modules.constants import MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME, IVA
 
 # Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
 class Aliado:
@@ -115,71 +115,6 @@ def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: floa
         return min(descuento_tradicional, descuento_credito)
     else:
         return 1
-
-# Función Auxiliar para obtener la referencia dada una deuda
-st.cache_data(ttl=3600, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
-def obtener_referencia_por_deuda(*,deuda: str) -> str:
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service = st.session_state["metabase_service"]
-    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Referencia
-    query = QUERY_DEBT_TO_REFERENCE.format(debt_id=deuda)
-    # Paso 3: Obtener la Referencia desde Metabase
-    referencia_df = metabase_service.execute_query(query)
-    # Paso 4: Devolver la Referencia si Existe, de lo Contrario Devolver None
-    if not referencia_df.empty:
-        return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
-    return ""
-
-# Función Auxiliar para Obtener las Deudas Activas de una Referencia
-@st.cache_data(ttl=3600, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
-def obtener_deudas_activas(*,referencia: str) -> pd.DataFrame:
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service = st.session_state["metabase_service"]
-    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
-    query = QUERY_ACTIVE_DEBTS.format(referencia=referencia)
-    # Paso 3: Obtener las Deudas Activas desde Metabase
-    deudas_df = metabase_service.execute_query(query)
-
-    # Paso 4: -- Limpieza de Datos --
-    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
-    deudas_df.dropna(subset=['Id_Deuda'], inplace=True)
-    deudas_df['Id_Deuda'] = deudas_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
-    # Volvemos la Columna Referencia y Cedula a String
-    deudas_df['Referencia'] = deudas_df['Referencia'].apply(lambda x: str(x).replace(".0", "").strip())
-    deudas_df['Cedula'] = deudas_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
-    # Volvemos las Columnas PaB_Origen y PaB_PL a Números
-    deudas_df['PaB_Origen'] = pd.to_numeric(deudas_df['PaB_Origen'], errors='coerce')
-    deudas_df['PaB_PL'] = pd.to_numeric(deudas_df['PaB_PL'], errors='coerce')
-    # Imputamos los Valores Nulos de PaB_Origen con 0
-    imputeNans(deudas_df, col='PaB_Origen', value=0)
-    # Imputamos los Valores Nulos de PaB_PL como: PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
-    maskPLNaN = deudas_df['PaB_PL'].isna()
-    deudas_df.loc[maskPLNaN, 'PaB_PL'] = deudas_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
-    # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
-    deudas_df['Pricing'] = deudas_df['Pricing'].apply(parsePercentage)
-
-    # Paso 5: Devolver el DataFrame de Deudas Activas
-    return deudas_df
-
-# Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
-@st.cache_data(ttl=3600, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 100,)
-def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service = st.session_state["metabase_service"]
-    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
-    query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
-    # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
-    ultima_actualizacion_df = metabase_service.execute_query(query)
-    # Paso 4: -- Limpieza de Datos --
-    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
-    ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
-    ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
-    # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
-    ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
-    # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
-    if not ultima_actualizacion_df.empty:
-        return ultima_actualizacion_df['Ultima_Actualizacion'].max()
-    return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=30) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
 
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
 def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) -> tuple[bool, float]:
