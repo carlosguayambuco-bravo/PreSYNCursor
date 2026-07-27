@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import Permit, PERMISSIONS_DICT
-from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE
+from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT
 from modules.forms import crear_diccionario_aliados
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -27,7 +27,7 @@ HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 
 # --> Carga de Cambios de Referencias
-@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=HOUR_WAIT)
 def load_reference_changes() -> dict[str,str]:
 
     # Primero Obtenemos la Spreadsheet de Cambios de Referencias desde Google Sheets
@@ -72,7 +72,7 @@ def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> pd.DataFrame:
     return df
 
 # --> Carga de Saldos de Clientes (saldosDF)
-@st.cache_data(show_spinner="Cargando Saldos de Clientes desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Saldos de Clientes desde Google Sheets...", ttl=HOUR_WAIT)
 def load_client_balances() -> dict[str, dict[str, float]]:
 
     # -- Paso 1: Traer Datos de Ahorros
@@ -148,7 +148,7 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     return generalDict # type: ignore
 
 # --> Carga de PaB Ideal de Crédito
-@st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...", ttl=HOUR_WAIT)
 def load_pab_ideal() -> dict:
 
     # Primero Obtenemos la Spreadsheet de PaB Ideal desde Google Sheets
@@ -190,7 +190,7 @@ def load_pab_ideal() -> dict:
     return pabIdealDict
 
 # --> Carga de Datos de Aliados
-@st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
 def load_aliados() -> dict:
 
     # Primero Obtenemos la Spreadsheet de Aliados desde Google Sheets
@@ -206,7 +206,7 @@ def load_aliados() -> dict:
     return aliados_dict
 
 # --> Carga de Datos de Masivas
-@st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
 def load_masivas() -> dict:
     # Primero Obtenemos la Spreadsheet de Masivas desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -251,7 +251,7 @@ def load_masivas() -> dict:
     return masivas_dict
 
 # --> Carga de Addendums de Aliados
-@st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
 def load_addendums() -> pd.DataFrame:
     # Primero Obtenemos la Spreadsheet de Addendums desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -290,7 +290,7 @@ def load_addendums() -> pd.DataFrame:
     return addendumsDF
 
 # Función Auxiliar para Obtener las Deudas Liquidadas del MEC
-@st.cache_data(show_spinner="Cargando Deudas Liquidadas desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Deudas Liquidadas desde Google Sheets...", ttl=HOUR_WAIT)
 def load_liquidaciones() -> set:
     # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -315,7 +315,7 @@ def load_liquidaciones() -> set:
 
 
 # Función Auxiliar para Cargar el HeadCount de Negociación
-@st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=HOUR_WAIT)
 def load_headcount_negociacion() -> pd.DataFrame:
     # Primero Obtenemos la Spreadsheet de HeadCount desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -347,7 +347,7 @@ def load_headcount_negociacion() -> pd.DataFrame:
     return hc_negociacion_df
 
 # Función Auxiliar para Cargar la Configuración de la Aplicación
-@st.cache_data(show_spinner="Cargando Configuración de la Aplicación desde Google Sheets...", ttl=3600)
+@st.cache_data(show_spinner="Cargando Configuración de la Aplicación desde Google Sheets...", ttl=HOUR_WAIT)
 def load_app_config() -> dict:
     # Primero Obtenemos la Spreadsheet de Configuración desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -371,7 +371,7 @@ def load_app_config() -> dict:
     return config_dict
 
 # Función Auxiliar para Cargar los Permisos de Usuarios Especiales
-@st.cache_data(show_spinner="Cargando Permisos de Usuarios Especiales desde Google Sheets...", ttl=86400)
+@st.cache_data(show_spinner="Cargando Permisos de Usuarios Especiales desde Google Sheets...", ttl=DAY_WAIT)
 def load_special_user_permissions() -> dict:
     # Primero Obtenemos la Spreadsheet de Configuración desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -391,7 +391,7 @@ def load_special_user_permissions() -> dict:
 # --- Queries a MetaBase ---
 
 # Función Auxiliar para obtener la referencia dada una deuda
-@st.cache_data(ttl=3600, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
 def obtener_referencia_por_deuda(*,deuda: str) -> str:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
@@ -405,7 +405,7 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
     return ""
 
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia
-@st.cache_data(ttl=3600, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
 def obtener_deudas_activas(*,referencia: str) -> pd.DataFrame:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
@@ -436,7 +436,7 @@ def obtener_deudas_activas(*,referencia: str) -> pd.DataFrame:
     return deudas_df
 
 # Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
-@st.cache_data(ttl=3600, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 100,)
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 100,)
 def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
