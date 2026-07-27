@@ -8,12 +8,13 @@ import gspread
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from core.permissions import Permit, PERMISSIONS_DICT
 from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE
 from modules.forms import crear_diccionario_aliados
-from services.metabase import MetabaseService
 from services.google_sheets import GoogleSheetsService
-from utils.helpers_sheets import _retry
+from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
+from utils.helpers_sheets import _retry
 
 # ----- Funciones de Carga de Información ---
 SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
@@ -21,6 +22,9 @@ REFCHANGES_SHEET_ID = '1jcPPhtF2YK3Kr7P_A0Mgh2OqhOfnVWB2to3UPoSH5tE'
 PABIDEAL_SHEET_ID = '1Obm0O5hfIIzCMy5RvdX5b1JBf3pmzIrYdYa1vPOB83M'
 ALIADOS_SHEET_ID = '1px7MX8zMKPe-PeCTvpNkX4kFMp1XL5IuBUrP1oGftiw'
 MASIVAS_SHEET_ID = '1sOIk9BAa2VE-P-wnMPDJh8_hYLGgO5WaJL7m9LIM2is'
+LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
+HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
+CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 
 # --> Carga de Cambios de Referencias
 @st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=3600)
@@ -285,9 +289,109 @@ def load_addendums() -> pd.DataFrame:
     # Devolvemos el Diccionario de Addendums
     return addendumsDF
 
+# Función Auxiliar para Obtener las Deudas Liquidadas del MEC
+@st.cache_data(show_spinner="Cargando Deudas Liquidadas desde Google Sheets...", ttl=3600)
+def load_liquidaciones() -> set:
+    # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "BD del mes"
+    liquidacionesDF = google_sheets_service.get_sheet_as_dataframe(LIQUIDACIONES_SHEET_ID, 'BD del mes')
+
+    # Renombramos la Columna ID a Id_Deuda
+    liquidacionesDF = liquidacionesDF.rename(columns={'Deuda Berex':'Id_Deuda'})
+
+    # Dejamos solo la Columna Id_Deuda
+    liquidacionesDF = liquidacionesDF[['Id_Deuda']]
+
+    # Volvemos la Id_Deuda a String
+    liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Creamos un Set con las Deudas Liquidadas
+    liquidaciones_set = set(liquidacionesDF['Id_Deuda'].tolist())
+
+    # Devolvemos el Set de Deudas Liquidadas
+    return liquidaciones_set
+
+
+# Función Auxiliar para Cargar el HeadCount de Negociación
+@st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=3600)
+def load_headcount_negociacion() -> pd.DataFrame:
+    # Primero Obtenemos la Spreadsheet de HeadCount desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "HC Negociación"
+    hc_negociacion_df = google_sheets_service.get_sheet_as_dataframe(HCNEGO_SHEET_ID, 'HC Negociación')
+
+    # Renombramos las Columnas
+    hc_negociacion_df = hc_negociacion_df.rename(columns={
+        'email': 'Correo',
+        'employee_id': 'ID_Empleado',
+        'name': 'Nombre',
+        'job_title': 'Nombre_Empleo',
+        'status': 'Estado',
+        'cedula': 'Cedula',
+    })
+
+    # Dejamos solo las Columnas Necesarias
+    hc_negociacion_df = hc_negociacion_df[['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado', 'Cedula']]
+
+    # Volvemos la Columna ID_Empleado y Cedula a String
+    hc_negociacion_df['ID_Empleado'] = hc_negociacion_df['ID_Empleado'].apply(lambda s: str(s).replace('.0','').strip())
+    hc_negociacion_df['Cedula'] = hc_negociacion_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+
+    # Creamos Columna Es_Negociador como True si el Nombre Empleo contiene negociador (ignorando mayúsculas/minúsculas), de lo contrario False
+    hc_negociacion_df['Es_Negociador'] = hc_negociacion_df['Nombre_Empleo'].str.contains('negociador', case=False, na=False, regex=False)
+
+    # Devolvemos el DataFrame de HeadCount de Negociación
+    return hc_negociacion_df
+
+# Función Auxiliar para Cargar la Configuración de la Aplicación
+@st.cache_data(show_spinner="Cargando Configuración de la Aplicación desde Google Sheets...", ttl=3600)
+def load_app_config() -> dict:
+    # Primero Obtenemos la Spreadsheet de Configuración desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Configs"
+    configs_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Configs')
+
+    # Renombramos las Columnas
+    configs_df = configs_df.rename(columns={
+        'Config': 'Config',
+        'Value': 'Value',
+    })
+
+    # Dejamos solo las Columnas Necesarias
+    configs_df = configs_df[['Config', 'Value']]
+
+    # Creamos un Diccionario de Configuración
+    config_dict = configs_df.set_index('Config')['Value'].to_dict()
+
+    # Devolvemos el Diccionario de Configuración
+    return config_dict
+
+# Función Auxiliar para Cargar los Permisos de Usuarios Especiales
+@st.cache_data(show_spinner="Cargando Permisos de Usuarios Especiales desde Google Sheets...", ttl=86400)
+def load_special_user_permissions() -> dict:
+    # Primero Obtenemos la Spreadsheet de Configuración desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Ahora Abrimos la Hoja "Usuarios" de las Configuraciones de la Aplicación
+    special_users_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Usuarios')
+
+    # A la Columna Permisos la Convertimos a Lista de Permisos
+    special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda s: [p.strip() for p in str(s).split(',')] if pd.notnull(s) else [])
+
+    # Ahora cambiamos la Búsqueda de Permisos según el Nombre y el Diccionario
+    special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda perms: [PERMISSIONS_DICT[p] for p in perms if p in PERMISSIONS_DICT])
+
+    # Convertimos el DataFrame a un Diccionario
+    return special_users_df.set_index('Correo')['Permisos'].to_dict()
+
+# --- Queries a MetaBase ---
 
 # Función Auxiliar para obtener la referencia dada una deuda
-st.cache_data(ttl=3600, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
+@st.cache_data(ttl=3600, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
 def obtener_referencia_por_deuda(*,deuda: str) -> str:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
