@@ -4,11 +4,13 @@
 from collections import defaultdict
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
+from pandera.typing import DataFrame
 import gspread
 import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import Permit, PERMISSIONS_DICT
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, ConfigsSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, UserPermissionsSchema
 from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT
 from modules.forms import crear_diccionario_aliados
 from services.google_sheets import GoogleSheetsService
@@ -25,6 +27,7 @@ MASIVAS_SHEET_ID = '1sOIk9BAa2VE-P-wnMPDJh8_hYLGgO5WaJL7m9LIM2is'
 LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
 HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
+CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
 
 # --> Carga de Cambios de Referencias
 @st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=HOUR_WAIT)
@@ -49,7 +52,7 @@ def load_reference_changes() -> dict[str,str]:
     return refChangesDict
 
 # Función Auxiliar de Procesamiento de Información de DF de Saldos
-def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> pd.DataFrame:
+def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> DataFrame[AhorroSchema]:
     # Obtenemos los Datos como un DF
     df = _retry(lambda: get_as_dataframe(ws, evaluate_formulas=True, skiprows=3))
 
@@ -67,6 +70,9 @@ def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> pd.DataFrame:
     # Volvemos el Saldo a Número
     df['Ahorro_Total'] = df['Ahorro_Total'].apply(cleanNumber)
     df['Ahorro_Total'] = pd.to_numeric(df['Ahorro_Total'], errors='coerce')
+
+    # Validamos el DF con el esquema
+    df = AhorroSchema.validate(df)
 
     # Devolvemos el DF
     return df
@@ -124,7 +130,10 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     xcobrarDF = xcobrarDF[['Referencia', 'Por_Cobrar']]
 
     # Realizamos una Agrupación por Referencia y dejamos la suma de Por_Cobrar
-    xcobrarDF = xcobrarDF.groupby('Referencia', as_index=False)['Por_Cobrar'].sum()
+    xcobrarDF = xcobrarDF.groupby('Referencia')['Por_Cobrar'].sum().reset_index()
+
+    # Validamos el DF con el esquema
+    xcobrarDF = PorCobrarSchema.validate(xcobrarDF)
 
     # Concatenamos ambos DFs en uno solo
     finalDF = pd.merge(saldosDF, xcobrarDF, on='Referencia', how='outer')
@@ -181,6 +190,9 @@ def load_pab_ideal() -> dict:
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     pab_ideal_df = pab_ideal_df.drop_duplicates(subset=['Id_Deuda'], keep='last')
 
+    # Validamos el DF
+    pab_ideal_df = PaBIdealSchema.validate(pab_ideal_df)
+
     # Creamos el Diccionario de Búsqueda para Id_Deuda -> PaB_Ideal_Credito
     pabIdealDict = pab_ideal_df.set_index('Id_Deuda')['PaB_Ideal_Credito'].to_dict()
     # Volvemos el Diccionario a defaultdict con valor por defecto 0
@@ -198,6 +210,9 @@ def load_aliados() -> dict:
 
     # Obtenemos el DF de la Hoja "AlianzasVigentes"
     aliadosDF = google_sheets_service.get_sheet_as_dataframe(ALIADOS_SHEET_ID, 'AlianzasVigentes')
+
+    # Validamos el DF con el esquema
+    aliadosDF = AliadosSchema.validate(aliadosDF)
 
     # Creamos el Diccionario de Aliados usando la función auxiliar
     aliados_dict = crear_diccionario_aliados(aliadosDF)
@@ -244,6 +259,9 @@ def load_masivas() -> dict:
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
 
+    # Validamos el DF
+    masivasDF = MasivasSchema.validate(masivasDF)
+
     # Creamos el Diccionario de Masivas
     masivas_dict = masivasDF.set_index('Id_Deuda').to_dict(orient='index')
 
@@ -286,6 +304,9 @@ def load_addendums() -> pd.DataFrame:
     # Creamos la Columna PaB_PL como PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
     addendumsDF['PaB_PL'] = addendumsDF['PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
 
+    # Validamos el DF con el esquema
+    addendumsDF = AddendumsSchema.validate(addendumsDF)
+
     # Devolvemos el Diccionario de Addendums
     return addendumsDF
 
@@ -306,6 +327,9 @@ def load_liquidaciones() -> set:
 
     # Volvemos la Id_Deuda a String
     liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Validad el DF con el esquema
+    liquidacionesDF = LiquidationsSchema.validate(liquidacionesDF)
 
     # Creamos un Set con las Deudas Liquidadas
     liquidaciones_set = set(liquidacionesDF['Id_Deuda'].tolist())
@@ -343,6 +367,9 @@ def load_headcount_negociacion() -> pd.DataFrame:
     # Creamos Columna Es_Negociador como True si el Nombre Empleo contiene negociador (ignorando mayúsculas/minúsculas), de lo contrario False
     hc_negociacion_df['Es_Negociador'] = hc_negociacion_df['Nombre_Empleo'].str.contains('negociador', case=False, na=False, regex=False)
 
+    # Validamos el DF con el esquema
+    hc_negociacion_df = HeadCountSchema.validate(hc_negociacion_df)
+
     # Devolvemos el DataFrame de HeadCount de Negociación
     return hc_negociacion_df
 
@@ -355,17 +382,14 @@ def load_app_config() -> dict:
     # Obtenemos el DF de la Hoja "Configs"
     configs_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Configs')
 
-    # Renombramos las Columnas
-    configs_df = configs_df.rename(columns={
-        'Config': 'Config',
-        'Value': 'Value',
-    })
-
     # Dejamos solo las Columnas Necesarias
-    configs_df = configs_df[['Config', 'Value']]
+    configs_df = configs_df[['Config_Name', 'Value']]
+
+    # Validamos el DF con el esquema
+    configs_df = ConfigsSchema.validate(configs_df)
 
     # Creamos un Diccionario de Configuración
-    config_dict = configs_df.set_index('Config')['Value'].to_dict()
+    config_dict = configs_df.set_index('Config_Name')['Value'].to_dict()
 
     # Devolvemos el Diccionario de Configuración
     return config_dict
@@ -385,8 +409,14 @@ def load_special_user_permissions() -> dict:
     # Ahora cambiamos la Búsqueda de Permisos según el Nombre y el Diccionario
     special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda perms: [PERMISSIONS_DICT[p] for p in perms if p in PERMISSIONS_DICT])
 
+    # Validamos el DF con el esquema
+    special_users_df = UserPermissionsSchema.validate(special_users_df)
+
     # Convertimos el DataFrame a un Diccionario
     return special_users_df.set_index('Correo')['Permisos'].to_dict()
+
+# Función Auxiliar para Cargar la Cartera Activa (Para Modelo de Búsqueda)
+@st.cache_data(show_spinner="Cargando Cartera Activa desde Google Sheets...", ttl=HOUR_WAIT)
 
 # --- Queries a MetaBase ---
 
