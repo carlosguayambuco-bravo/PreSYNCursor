@@ -1,5 +1,43 @@
+# Estándar usando Pep8
+# Librerías de Python
+# Librerías de Terceros
+import pandas as pd
 import pandera as pa
-from pandera.typing import DataFrame, Series
+# Librerías Locales
+from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD
+
+class SolicitudesSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de solicitudes.
+    """
+    Timestamp: pa.dtypes.Timestamp
+    Correo: str = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")  # Validación de correo electrónico
+    Referencia: str
+    Cedula: str = pa.Field(str_matches=r"^[\d\.]{9,11}$")  # Validación de cédula
+    Ids_Deuda: str  # Lista de Ids de Deuda como cadena separada por -
+    Casa_Cobro: str
+    Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
+    Monto_Solicitud: dict # Es un JSON que contiene el Monto por Deuda y los Plazos
+    Fecha_Esperada_Pago: pa.dtypes.Timestamp
+    Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD)
+    ID_Solicitud: str = pa.Field(unique=True)  # Aseguramos que ID_Solicitud sea único
+    Ejecutivo: str
+    Metadata_Solicitud: dict  # Es un JSON que contiene:
+    # - Estado de Comité: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
+    # - Estado de Ilocalizable: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
+    # - Pago Total Obligatorio: bool
+    # - Metodo de Pago: str ('Efectivo-Cheque','PSE','Transferencia')
+    # - Comentario Ejecutivo: str
+    # - Comentario Negociador: str
+    # - Fecha Llamada: str (YYYY-MM-DD HH:MM:SS)
+    Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD)
+    Fecha_Respuesta: pa.dtypes.Timestamp
+    Fecha_Limite_Pago: pa.dtypes.Timestamp
+    JSON_Respuesta: str  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
 
 class AhorroSchema(pa.DataFrameModel):
     """
@@ -64,10 +102,11 @@ class MasivasSchema(pa.DataFrameModel):
     Esquema para validar la estructura de los datos de masivas.
     """
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    Referencia: str
     PaB_Propuesta: float
     PaB_Estructurado: float
     Plazo_Estructurado: int
-    Es_Portafolio: bool
+    PaB_Portafolio: float
 
     class Config:
         strict = True  # Validación estricta de columnas
@@ -79,6 +118,7 @@ class AddendumsSchema(pa.DataFrameModel):
     """
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
     Cedula: str = pa.Field(str_matches=r"^[\d\.]{9,11}$")
+    Referencia: str
     Banco: str
     PaB_Origen: float
     PaB_Propuesta: float

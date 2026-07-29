@@ -1,72 +1,16 @@
 # Estándar usando Pep8
 # Librerías de Python
+from __future__ import annotations
 from typing import Literal, Optional
 # Librerías de Terceros
+import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_client_balances, load_pab_ideal
-from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
+from data.data_loader import load_app_config, load_client_balances, load_pab_ideal, load_masivas, load_addendums, load_reference_changes
+from utils.helpers_general import getBDDaysDiffFloat
 from utils.helpers_sheets import appendDataFrameToEnd
-from modules.constants import MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME, IVA
-
-# Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
-class Aliado:
-    def __init__(self,*,
-                nombre: str, 
-                bancos: list,
-                permite_contacto: bool,
-                aliado_formal: bool,
-                negociacion_bloque: bool,
-                pago_co_obligatorio: bool,
-                brinda_descuento_max: bool,
-                ):
-        self.nombre = nombre
-        self.bancos = bancos
-        self.permite_contacto = permite_contacto
-        self.aliado_formal = aliado_formal
-        self.negociacion_bloque = negociacion_bloque
-        self.pago_co_obligatorio = pago_co_obligatorio
-        self.brinda_descuento_max = brinda_descuento_max
-
-    def brinda_maximo_descuento(self) -> bool:
-        return self.brinda_descuento_max
-
-    def es_formal(self) -> bool:
-        return self.aliado_formal
-
-    def permite_contactar(self) -> bool:
-        return self.permite_contacto
-
-    def validar_banco(self, banco: str) -> bool:
-        return banco in self.bancos
-
-    def pagar_co_obligatorio(self) -> bool:
-        return self.pago_co_obligatorio
-
-    def negocia_en_bloque(self) -> bool:
-        return self.negociacion_bloque
-
-# Función Auxiliar para Crear un Diccionario de Aliados a partir de un DataFrame
-def crear_diccionario_aliados(df: pd.DataFrame) -> dict:
-    # Paso 1: Definir un Diccionario Vacío para Guardar los Aliados
-    aliados_dict = {}
-
-    # Paso 2: Iterar sobre cada Fila del DataFrame y Crear un Objeto Aliado
-    for _, row in df.iterrows():
-        current_aliado = Aliado(
-            nombre=row['Casa de Cobro'],
-            bancos=[banco.strip() for banco in row['Bancos'].split(',')],
-            permite_contacto=row['Permite Contacto'] == 'SI',
-            aliado_formal=row['Tipo Aliado'] == 'Formal',
-            negociacion_bloque=row['Negociación en Bloque'] == 'SI',
-            pago_co_obligatorio=row['Pago CO Obligatorio'] == 'SI',
-            brinda_descuento_max=row['Brinda Descuento Máximo'] == 'SI'
-        )
-        aliados_dict[current_aliado.nombre] = current_aliado
-
-    # Paso 3: Devolver el Diccionario de Aliados
-    return aliados_dict
+from modules.constants import SOLICITUDES_SHEETS_ID, SOLICITUDES_WORKSHEET_NAME, IVA
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
 def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago_total_original: float, descuento_pl: float):
@@ -122,8 +66,77 @@ def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) 
     fecha_actual = pd.Timestamp.now('America/Bogota').normalize()
     # Obtenemos la Diferencia en Días Hábiles entre Hoy y la Última Actualización
     dias_habiles_diff = getBDDaysDiffFloat(firstDate=ultima_actualizacion, secondDate=fecha_actual)
+    # Traemos la Configuracion de la Aplicacion
+    appConfig = load_app_config()
     # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
-    return dias_habiles_diff >= MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE, dias_habiles_diff
+    return dias_habiles_diff <= int(appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']), dias_habiles_diff
+
+# Función Auxiliar para Obtener las Deudas del Portafolio de Masivas
+def obtener_deudas_portafolio_masivas(*,deuda: str) -> list[str]:
+    # Paso 1: Cargamos las Masivas y los Cambios de Referencia
+    masivas_df = load_masivas()
+
+    # Paso 2: Buscamos la Deuda en las Masivas
+    masiva_row = masivas_df[(masivas_df['Id_Deuda'] == deuda) & (masivas_df['PaB_Portafolio'].notna())]
+    if not masiva_row.empty:
+        # Obtenemos la Referencia
+        ref_deuda = masiva_row['Referencia'].iloc[0] # type: ignore
+        # Ahora buscamos todas las Deudas con la misma Referencia y que tengan PaB_Portafolio no nulo
+        deudas_portafolio = masivas_df[(masivas_df['Referencia'] == ref_deuda) & (masivas_df['PaB_Portafolio'].notna())]['Id_Deuda'].tolist() # type: ignore
+        return deudas_portafolio
+
+    # Paso 3: Si no se encuentra, devolvemos una Lista Vacía
+    return []
+
+# Función Auxiliar para Obtener el Descuento por Base si Hay
+def obtener_descuento_base(*, deuda: str, portafolio: bool = False) -> float:
+    # Paso 1: Cargamos las Masivas y los Addendums
+    masivas_df = load_masivas()
+    addendums_df = load_addendums()
+
+    # Paso 2: Buscamos la Deuda en las Masivas
+    masiva_row = masivas_df[masivas_df['Id_Deuda'] == deuda]
+    if not masiva_row.empty:
+        if portafolio:
+            valor_portafolio = masiva_row['PaB_Portafolio'].iloc[0] # type: ignore
+            # Si es NaN lo volvemos 0
+            if pd.isna(valor_portafolio):
+                valor_portafolio = 0
+        else:
+            valor_portafolio = 0
+        return max(masiva_row['PaB_Propuesta'].iloc[0], valor_portafolio) # type: ignore
+
+    # Paso 3: Buscamos la Deuda en los Addendums
+    addendum_row = addendums_df[addendums_df['Id_Deuda'] == deuda]
+    if not addendum_row.empty:
+        return float(addendum_row['PaB_Propuesta'].values[0]) # type: ignore
+
+    # Paso 4: Si no se encuentra, devolvemos NaN
+    return np.nan
+
+# Función Auxiliar para Validar si se cumple la Restricción de Ofertas Menores a Base
+def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float], monto_prop: float) -> tuple[bool, str]:
+    # Obtenemos el Descuento Base para la Deuda
+    descuento_base = obtener_descuento_base(deuda=deuda, portafolio=False)
+    descuento_portafolio = obtener_descuento_base(deuda=deuda, portafolio=True)
+
+    if pd.notna(descuento_portafolio): # Si no es NaN comparamos
+        # Obtenemos las Deudas del Portafolio
+        deudas_portafolio = obtener_deudas_portafolio_masivas(deuda=deuda)
+        # Ahora Verificamos si todas las deudas del portafolio estan en la lista de deudas seleccionadas
+        if all(d in deudas_info.keys() for d in deudas_portafolio):
+            # Obtenemos el Valor Propuesto para dichas deudas
+            valor_propuesto_portafolio = sum(deudas_info[d] for d in deudas_portafolio)
+            # Comparamos con el Descuento Portafolio con el Valor Propuesto
+            if valor_propuesto_portafolio > descuento_portafolio:
+                return False, "El monto propuesto para las deudas {} es mayor al Pago en Portafolio actual de ${:,.0f}.".format(', '.join(deudas_portafolio), descuento_portafolio)
+
+    # Siguiente: Comparación Individual de la Deuda con el Descuento Base
+    if pd.notna(descuento_base): # Si no es NaN comparamos
+        if monto_prop > descuento_base:
+            return False, "El monto propuesto para la deuda {} es mayor al Pago Base actual de ${:,.0f}.".format(deuda, descuento_base)
+
+    return True, "La deuda cumple con la restricción de ofertas menores a base."
 
 # --- Respuestas de Formulario ---
 
@@ -133,7 +146,7 @@ class RespuestaFormulario:
                 correo: str,
                 Referencia: str,
                 Ids_Deuda: list[str],
-                aliado_solicitud: Aliado,
+                aliado_solicitud: 'Aliado',
                 tipo_solicitud: Literal['Validación','Acuerdo de pago'],
                 monto_solicitado: float,
                 observaciones: Optional[str] = None,
@@ -223,3 +236,61 @@ class RespuestaFormulario:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+
+# Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
+class Aliado:
+    def __init__(self,*,
+                nombre: str, 
+                bancos: list,
+                permite_contacto: bool,
+                aliado_formal: bool,
+                negociacion_bloque: bool,
+                pago_co_obligatorio: bool,
+                brinda_descuento_max: bool,
+                ):
+        self.nombre = nombre
+        self.bancos = bancos
+        self.permite_contacto = permite_contacto
+        self.aliado_formal = aliado_formal
+        self.negociacion_bloque = negociacion_bloque
+        self.pago_co_obligatorio = pago_co_obligatorio
+        self.brinda_descuento_max = brinda_descuento_max
+
+    def brinda_maximo_descuento(self) -> bool:
+        return self.brinda_descuento_max
+
+    def es_formal(self) -> bool:
+        return self.aliado_formal
+
+    def permite_contactar(self) -> bool:
+        return self.permite_contacto
+
+    def validar_banco(self, banco: str) -> bool:
+        return banco in self.bancos
+
+    def pagar_co_obligatorio(self) -> bool:
+        return self.pago_co_obligatorio
+
+    def negocia_en_bloque(self) -> bool:
+        return self.negociacion_bloque
+
+# Función Auxiliar para Crear un Diccionario de Aliados a partir de un DataFrame
+def crear_diccionario_aliados(df: pd.DataFrame) -> dict:
+    # Paso 1: Definir un Diccionario Vacío para Guardar los Aliados
+    aliados_dict = {}
+
+    # Paso 2: Iterar sobre cada Fila del DataFrame y Crear un Objeto Aliado
+    for _, row in df.iterrows():
+        current_aliado = Aliado(
+            nombre=row['Casa de Cobro'],
+            bancos=[banco.strip() for banco in row['Bancos'].split(',')],
+            permite_contacto=row['Permite Contacto'] == 'SI',
+            aliado_formal=row['Tipo Aliado'] == 'Formal',
+            negociacion_bloque=row['Negociación en Bloque'] == 'SI',
+            pago_co_obligatorio=row['Pago CO Obligatorio'] == 'SI',
+            brinda_descuento_max=row['Brinda Descuento Máximo'] == 'SI'
+        )
+        aliados_dict[current_aliado.nombre] = current_aliado
+
+    # Paso 3: Devolver el Diccionario de Aliados
+    return aliados_dict

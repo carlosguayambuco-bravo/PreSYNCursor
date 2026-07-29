@@ -2,6 +2,7 @@
 # Usando estándar Pep8
 # Librerías de Python
 from collections import defaultdict
+import json
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
 from pandera.typing import DataFrame
@@ -10,7 +11,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
 from modules.forms import crear_diccionario_aliados
 from services.google_sheets import GoogleSheetsService
@@ -19,6 +20,7 @@ from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mese
 from utils.helpers_sheets import _retry
 
 # ----- Funciones de Carga de Información ---
+SOLICITUDES_SHEET_ID = '1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk'
 SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
 REFCHANGES_SHEET_ID = '1jcPPhtF2YK3Kr7P_A0Mgh2OqhOfnVWB2to3UPoSH5tE'
 PABIDEAL_SHEET_ID = '1Obm0O5hfIIzCMy5RvdX5b1JBf3pmzIrYdYa1vPOB83M'
@@ -28,6 +30,34 @@ LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
 HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
+
+#--> Carga de Solicitudes del Mes en Curso
+@st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=HOUR_WAIT)
+def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
+
+    # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Solicitudes_MEC"
+    solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
+
+    # Volvemos las Columnas Necesarias a Timestamp
+    for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
+        solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)
+
+    # Volvemos las Columnas Referencia y Cedula a String
+    for col in ['Referencia', 'Cedula']:
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+
+    # Hacemos Parsing de la Columna Monto_Solicitud y Metadata_Solicitud a JSON
+    for col in ['Monto_Solicitud', 'Metadata_Solicitud']:
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notnull(s) else {})
+
+    # Validamos el DataFrame con el esquema
+    solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
+
+    # Devolvemos el DataFrame
+    return solicitudes_df
 
 # --> Carga de Cambios de Referencias
 @st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=HOUR_WAIT)
@@ -222,7 +252,7 @@ def load_aliados() -> dict:
 
 # --> Carga de Datos de Masivas
 @st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
-def load_masivas() -> dict:
+def load_masivas() -> DataFrame[MasivasSchema]:
     # Primero Obtenemos la Spreadsheet de Masivas desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
@@ -235,26 +265,42 @@ def load_masivas() -> dict:
         'Propuesta Pago': 'PaB_Propuesta',
         'Monto Pago Estructurado': 'PaB_Estructurado',
         'Plazo Estructurado': 'Plazo_Estructurado',
-        'Portafolio': 'Es_Portafolio',
+        'Monto Portafolio': 'PaB_Portafolio',
+        'Fecha': 'Fecha',
+        'Referencia': 'Referencia',
     })
+
+    # Volvemos la Columna Fecha a Datetime
+    masivasDF['Fecha'] = pd.to_datetime(masivasDF['Fecha'], errors='coerce', dayfirst=True)
+
+    # Ordenamos los Datos por Fecha y dejamos el último registro por Id_Deuda (el más reciente)
+    masivasDF = masivasDF.sort_values(by='Fecha', ascending=True)
+    masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
 
     # Quitamos los Datos donde Id_Deuda sea NaN
     masivasDF = masivasDF.dropna(subset=['Id_Deuda'])
 
     # Dejamos solo las Columnas Necesarias
-    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'Es_Portafolio']]
-    # Volvemos la Id_Deuda a String
+    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'PaB_Portafolio','Referencia']]
+
+    # Volvemos la Id_Deuda Y Referencia a String
     masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
     # Volvemos los PaB a Número
     masivasDF['PaB_Propuesta'] = masivasDF['PaB_Propuesta'].apply(cleanNumber)
     masivasDF['PaB_Propuesta'] = pd.to_numeric(masivasDF['PaB_Propuesta'], errors='coerce')
     masivasDF['PaB_Estructurado'] = masivasDF['PaB_Estructurado'].apply(cleanNumber)
     masivasDF['PaB_Estructurado'] = pd.to_numeric(masivasDF['PaB_Estructurado'], errors='coerce')
+    masivasDF['PaB_Portafolio'] = masivasDF['PaB_Portafolio'].apply(cleanNumber)
+    masivasDF['PaB_Portafolio'] = pd.to_numeric(masivasDF['PaB_Portafolio'], errors='coerce')
     # Volvemos el Plazo a Número 
     masivasDF['Plazo_Estructurado'] = masivasDF['Plazo_Estructurado'].apply(cleanNumber)
     masivasDF['Plazo_Estructurado'] = pd.to_numeric(masivasDF['Plazo_Estructurado'], errors='coerce')
-    # Volvemos el Portafolio a Booleano
-    masivasDF['Es_Portafolio'] = masivasDF['Es_Portafolio'].apply(lambda x: x == 'SI' if isinstance(x, str) else False)
 
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
@@ -262,11 +308,8 @@ def load_masivas() -> dict:
     # Validamos el DF
     masivasDF = MasivasSchema.validate(masivasDF)
 
-    # Creamos el Diccionario de Masivas
-    masivas_dict = masivasDF.set_index('Id_Deuda').to_dict(orient='index')
-
-    # Devolvemos el Diccionario de Masivas
-    return masivas_dict
+    # Devolvemos el DataFrame
+    return masivasDF
 
 # --> Carga de Addendums de Aliados
 @st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
@@ -284,14 +327,23 @@ def load_addendums() -> DataFrame[AddendumsSchema]:
         'Banco': 'Banco',
         'Deuda Bravo': 'PaB_Origen',
         'Propuesta de pago': 'PaB_Propuesta',
+        'Referencia': 'Referencia',
     })
     # Dejamos solo las Columnas Necesarias
-    addendumsDF = addendumsDF[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen', 'PaB_Propuesta']]
+    addendumsDF = addendumsDF[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen', 'PaB_Propuesta','Referencia']]
+
     # Quitamos Datos donde el Id_Deuda sea NaN
     addendumsDF = addendumsDF.dropna(subset=['Id_Deuda'])
-    # Volvemos la Id_Deuda y Cedula a String
+
+    # Volvemos la Id_Deuda, Referencia y Cedula a String
     addendumsDF['Id_Deuda'] = addendumsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    addendumsDF['Referencia'] = addendumsDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
     addendumsDF['Cedula'] = addendumsDF['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    addendumsDF['Referencia'] = addendumsDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
     # Volvemos los PaB a Número
     addendumsDF['PaB_Origen'] = addendumsDF['PaB_Origen'].apply(cleanNumber)
     addendumsDF['PaB_Origen'] = pd.to_numeric(addendumsDF['PaB_Origen'], errors='coerce')
@@ -312,7 +364,7 @@ def load_addendums() -> DataFrame[AddendumsSchema]:
 
 # Función Auxiliar para Obtener las Deudas Liquidadas del MEC
 @st.cache_data(show_spinner="Cargando Deudas Liquidadas desde Google Sheets...", ttl=HOUR_WAIT)
-def load_liquidaciones() -> set:
+def load_liquidaciones() -> set[str]:
     # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
@@ -439,6 +491,10 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
     cartera_activa_df['Cedula'] = cartera_activa_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
     cartera_activa_df['Id_Deuda'] = cartera_activa_df['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
 
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    cartera_activa_df['Referencia'] = cartera_activa_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
     # Volvemos la Columna Numero_Credito a String usando astype(str)
     cartera_activa_df['Numero_Credito'] = cartera_activa_df['Numero_Credito'].astype(str)
 
@@ -509,16 +565,20 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
 def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
+
     # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
     query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
+
     # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
     ultima_actualizacion_df = metabase_service.execute_query(query)
+
     # Paso 4: -- Limpieza de Datos --
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
     ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
     ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
     # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
     ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+
     # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
     if not ultima_actualizacion_df.empty:
         return ultima_actualizacion_df['Ultima_Actualizacion'].max()

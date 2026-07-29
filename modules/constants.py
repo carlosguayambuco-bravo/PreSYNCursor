@@ -10,6 +10,25 @@ HOUR_WAIT = 3600 # En Segundos
 DAY_WAIT = 86400 # En Segundos
 WEEK_WAIT = 604800 # En Segundos
 
+# --- Configuración de Validación de Datos ---
+ESTADOS_POSIBLES_SOLICITUD = [
+    'Exitosa',
+    'Vencida',
+    'No Exitosa',
+    'Erronea',
+    'Bajo Comité', # Estado Transitorio
+    'No esta con Aliado',
+    'Pago por Fuera',
+    'Titular Ilocalizable', # Estado Transitorio
+    'Validada por Fuera',
+]
+PAGOS_POSIBLES_SOLICITUD = [
+    'Tradicional',
+    'Estructuraado',
+    'Refi',
+    'Crédito',
+]
+
 # --- Queries a Metabase ---
 QUERY_DEBT_TO_REFERENCE = """
 SELECT
@@ -103,5 +122,3 @@ SOLICITUDES_SHEETS_ID = "1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk"
 SOLICITUDES_WORKSHEET_NAME = "Solicitudes_Nuevas"
 
 DEFAULT_DISCOUNT_PL = 0.15
-
-MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE = 5

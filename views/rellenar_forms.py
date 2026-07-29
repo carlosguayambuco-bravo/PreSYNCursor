@@ -4,21 +4,31 @@
 import streamlit as st
 import pandas as pd
 # Librerías Propias
-from modules.constants import MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE
-from modules.forms import cumple_condicion_actualizacion_deudas, obtener_referencia_por_deuda, obtener_deudas_activas, obtener_ultima_actualizacion_deudas
-from ui.forms_components import mostrar_seleccion_deudas
-from utils.helpers_general import getBDDaysDiffFloat
-from utils.initializer import load_aliados, load_client_balances, load_masivas, load_addendums
+from modules.forms import cumple_condicion_actualizacion_deudas
+from ui.forms_components import mostrar_seleccion_deudas, poner_monto_por_deuda
+from data.data_loader import load_aliados, load_app_config, load_client_balances, load_current_month_solicitudes, load_liquidaciones, load_masivas, load_addendums, load_pab_ideal, obtener_referencia_por_deuda, obtener_deudas_activas, obtener_ultima_actualizacion_deudas
 
 def rellenar_formulario():
-    # Cargamos los Balances
-    saldosDict = load_client_balances()
-    # Cargamos los Aliados
+    # Carga de Información Necesaria para el Formulario
+    # Se Necesita:
+    # Solicitudes MEC
+    solsDF = load_current_month_solicitudes()
+    # Aliados Actuales
     aliadosDict = load_aliados()
-    # Cargamos los Datos Masivos
-    masivosDict = load_masivas()
-    # Cargamos el DF de Addendums
+    # Saldos y Por Cobrar
+    saldosDict = load_client_balances()
+    # Addendums
     addsDF = load_addendums()
+    # PaB Ideal
+    pabIdealDF = load_pab_ideal()
+    # Deudas ya Liquidadas
+    debtsLiq = load_liquidaciones()
+    # Actualizaciones Masivas
+    masivasDF = load_masivas()
+    # Configuración del App
+    appConfig = load_app_config()
+
+
     # Inicializamos las Deudas Seleccionadas en el Session State si no Existe
     if 'deudas_seleccionadas' not in st.session_state:
         st.session_state['deudas_seleccionadas'] = []
@@ -78,6 +88,9 @@ def rellenar_formulario():
         # Obtenemos las Deudas Activas con la Referencia Obtenida
         deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
 
+    # Quitamos de las Deudas Activas las que ya han sido Liquidadas
+    deudas_activas_df = deudas_activas_df[~deudas_activas_df['Id_Deuda'].isin(debtsLiq)]
+
     # Si el DF sigue siendo vacío entonces no podemos hacer nada
     if deudas_activas_df.empty:
         st.error("No se encontraron deudas activas para la referencia proporcionada.")
@@ -89,12 +102,12 @@ def rellenar_formulario():
     # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
     cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
     if not cumple_condicion:
-        st.warning(f"La última actualización de las deudas activas fue hace {dias_habiles_diff:.2f} días hábiles, lo cual es menor al mínimo necesario de {MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE} días hábiles para poder continuar con el llenado del formulario.")
+        st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
+            dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+        ))
         st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
         st.stop()
 
-    # Obtenemos la Cédula del Cliente desde el DF de Deudas Activas
-    cedula_cliente = deudas_activas_df['Cedula'].iloc[0]
     # Verificamos si tiene algún Addendum Activo
     addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente) & (addsDF['Estado'] == 'Activo')]
     if not addendum_activo.empty:
@@ -109,7 +122,7 @@ def rellenar_formulario():
         saldoAntiguo = saldosDict['Saldos'][ref_antigua]
         saldoNuevo = saldosDict['Saldos'][referencia_cliente]
         saldoReal = max(saldoAntiguo, saldoNuevo)
-        porCobrarAntiguo = saldosDict['Por Cobrar'][referencia_cliente]
+        porCobrarAntiguo = saldosDict['Por Cobrar'][ref_antigua]
         porCobrarNuevo = saldosDict['Por Cobrar'][referencia_cliente]
         porCobrarReal = max(porCobrarAntiguo, porCobrarNuevo)
 
@@ -151,17 +164,70 @@ def rellenar_formulario():
     st.subheader("Selección de Deudas Activas")
 
     # Mostramos la Selección de Deudas
-    mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df)
+    mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
 
     # Guardamos la Referencia como Ultima en el Session_State
     st.session_state['ultima_referencia'] = referencia_cliente
+
+    # Filtramos el DF para dejar solo las Deudas Seleccionadas
+    deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
+
+    # Dado que añadimos info de los Addendums reescribimos la Columna Pricing con el valor máximo de Pricing entre las Deudas Seleccionadas
+    deudas_seleccionadas_df['Pricing'] = deudas_activas_df['Pricing'].max()
 
     # Verificamos que al menos una Deuda esté Seleccionada
     if not st.session_state['deudas_seleccionadas']:
         st.warning("Debe seleccionar al menos una deuda activa para poder continuar con el llenado del formulario.")
         st.stop()
 
-    # Siguiente Paso: 
+    # Siguiente Paso: Seleccionar Tipo de Solicitud y el Aliado
+    st.divider()
+    st.subheader("🫡Selección de Tipo de Solicitud y Aliado")
 
-    # Filtramos el DF para dejar solo las Deudas Seleccionadas
-    deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
+    col1, col2 = st.columns(2)
+
+    with col1:
+        tipo_solicitud = st.radio(
+            "Tipo de Solicitud",
+            ["**Validación**","**Acuerdo de Pago**","**Oferta de Acuerdo**"],
+            captions=[
+                '**Validación**: Averiguar descuento y/o Casa de Cobro',
+                '**Acuerdo de Pago**: Negociar un acuerdo de pago con el cliente',
+                '**Oferta de Acuerdo**: Ofertar un valor de pago, si se acepta, se genera un acuerdo de pago',
+            ],
+            index=None,
+            help="Seleccione el tipo de solicitud que desea realizar",
+        )
+    with col2:
+        aliado_seleccionado = st.selectbox(
+            "Aliado - Casa de Cobro",
+            options=list(aliadosDict.keys())+['Directo Base'],
+            help="Seleccione el aliado con el que desea realizar la solicitud",
+            index=None,
+        )
+
+    # Verificamos que ambos tengan una selección válida
+    if not tipo_solicitud or not aliado_seleccionado:
+        st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
+        st.stop()
+
+    # Limpiamos el Tipo de Solicitud Quitando los Asteriscos
+    tipo_solicitud = tipo_solicitud.replace('*','').strip()
+
+    st.divider()
+
+    # Mostramos la Selección de los Montos Propuestos por Deuda
+    poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+
+    # --- Siguiente: Alertas y Verificaciones ---
+
+    # Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
+    masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
+    if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
+        aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado]['Brinda Descuento Máximo']
+        if aliado_brinda_descuento_maximo:
+            st.warning("El aliado seleccionado brinda descuento máximo, por lo que una oferta de mejora de descuento puede no ser aceptada. Se recomienda revisar las condiciones de la solicitud antes de continuar.")
+
+    # Alerta 2: Verificacion de Descuentos en Base
+    if not masivas_locales.empty:
+        pass
