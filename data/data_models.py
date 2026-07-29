@@ -135,3 +135,35 @@ class UserPermissionsSchema(pa.DataFrameModel):
     class Config:
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
+
+class CarteraActivaSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de cartera activa.
+    """
+    Referencia: str 
+    Cedula: str = pa.Field(str_matches=r"^[\d\.]{9,11}$")  # Validación de cédula
+    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    Numero_Credito: str
+    Banco: str
+    PaB_Origen: float
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
+
+
+class DeudasActivasSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de deudas activas.
+    """
+    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    Referencia: str
+    Cedula: str = pa.Field(str_matches=r"^[\d\.]{9,11}$")  # Validación de cédula
+    Banco: str
+    PaB_Origen: float
+    PaB_PL: float
+    Pricing: float
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos

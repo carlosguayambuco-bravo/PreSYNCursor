@@ -8,6 +8,7 @@ IVA = 1.19
 # --- Configuraciones de Streamlit ---
 HOUR_WAIT = 3600 # En Segundos
 DAY_WAIT = 86400 # En Segundos
+WEEK_WAIT = 604800 # En Segundos
 
 # --- Queries a Metabase ---
 QUERY_DEBT_TO_REFERENCE = """

@@ -9,9 +9,9 @@ import gspread
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from core.permissions import Permit, PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, ConfigsSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, UserPermissionsSchema
-from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT
+from core.permissions import PERMISSIONS_DICT
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, UserPermissionsSchema
+from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
 from modules.forms import crear_diccionario_aliados
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -270,7 +270,7 @@ def load_masivas() -> dict:
 
 # --> Carga de Addendums de Aliados
 @st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
-def load_addendums() -> pd.DataFrame:
+def load_addendums() -> DataFrame[AddendumsSchema]:
     # Primero Obtenemos la Spreadsheet de Addendums desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
@@ -340,7 +340,7 @@ def load_liquidaciones() -> set:
 
 # Función Auxiliar para Cargar el HeadCount de Negociación
 @st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=HOUR_WAIT)
-def load_headcount_negociacion() -> pd.DataFrame:
+def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
     # Primero Obtenemos la Spreadsheet de HeadCount desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
@@ -416,7 +416,43 @@ def load_special_user_permissions() -> dict:
     return special_users_df.set_index('Correo')['Permisos'].to_dict()
 
 # Función Auxiliar para Cargar la Cartera Activa (Para Modelo de Búsqueda)
-@st.cache_data(show_spinner="Cargando Cartera Activa desde Google Sheets...", ttl=HOUR_WAIT)
+@st.cache_data(show_spinner="Cargando Cartera Activa desde Google Sheets...", ttl=WEEK_WAIT)
+def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
+    # Primero Obtenemos la Spreadsheet de Cartera Activa desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Cartera"
+    cartera_activa_df = google_sheets_service.get_sheet_as_dataframe(CARTERA_ACTIVA_SHEET_ID, 'Cartera')
+
+    # Renombramos las Columnas
+    cartera_activa_df = cartera_activa_df.rename(columns={
+        'id_deuda': 'Id_Deuda',
+        'Referencia': 'Referencia',
+        'cedula': 'Cedula',
+        'deuda bravo': 'PaB_Origen',
+        'numero_credito': 'Numero_Credito',
+        'Banco Normalizado': 'Banco',
+    })
+
+    # Volvemos las Columnas Referencia, Cedula y Id_Deuda a String
+    cartera_activa_df['Referencia'] = cartera_activa_df['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+    cartera_activa_df['Cedula'] = cartera_activa_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+    cartera_activa_df['Id_Deuda'] = cartera_activa_df['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Volvemos la Columna Numero_Credito a String usando astype(str)
+    cartera_activa_df['Numero_Credito'] = cartera_activa_df['Numero_Credito'].astype(str)
+
+    # Volvemos la Columna PaB_Origen a Número
+    cartera_activa_df['PaB_Origen'] = pd.to_numeric(cartera_activa_df['PaB_Origen'], errors='coerce')
+
+    # Dejamos solo las Columnas Necesarias
+    cartera_activa_df = cartera_activa_df[['Id_Deuda', 'Referencia', 'Cedula', 'PaB_Origen', 'Numero_Credito', 'Banco']]
+
+    # Validamos el DF con el esquema
+    cartera_activa_df = CarteraActivaSchema.validate(cartera_activa_df)
+
+    # Devolvemos el DataFrame de Cartera Activa
+    return cartera_activa_df
 
 # --- Queries a MetaBase ---
 
@@ -436,7 +472,7 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
 
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
-def obtener_deudas_activas(*,referencia: str) -> pd.DataFrame:
+def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
     # Paso 2: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
@@ -461,6 +497,9 @@ def obtener_deudas_activas(*,referencia: str) -> pd.DataFrame:
     deudas_df.loc[maskPLNaN, 'PaB_PL'] = deudas_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
     # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
     deudas_df['Pricing'] = deudas_df['Pricing'].apply(parsePercentage)
+
+    # Validamos el DF con el esquema
+    deudas_df = DeudasActivasSchema.validate(deudas_df)
 
     # Paso 5: Devolver el DataFrame de Deudas Activas
     return deudas_df
