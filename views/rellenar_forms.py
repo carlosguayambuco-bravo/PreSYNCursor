@@ -1,11 +1,14 @@
 # Estándar usando Pep8
 # Librerías de Python
+import json
 # Librerías de Terceros
 import streamlit as st
 import pandas as pd
 # Librerías Propias
+from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas
-from ui.forms_components import mostrar_alertas_masivas, mostrar_seleccion_deudas, poner_monto_por_deuda
+from modules.constants import PAGOS_POSIBLES_SOLICITUD
+from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 from data.data_loader import load_aliados, load_app_config, load_client_balances, load_current_month_solicitudes, load_liquidaciones, load_masivas, load_addendums, load_pab_ideal, obtener_referencia_por_deuda, obtener_deudas_activas, obtener_ultima_actualizacion_deudas
 
 def rellenar_formulario():
@@ -132,9 +135,12 @@ def rellenar_formulario():
             st.session_state['por_cobrar_real'] = porCobrarReal
             st.session_state['pricing'] = '{:.2f}%'.format(pricing * 100)
 
+            # Reiniciamos las Deudas Seleccionadas si la Referencia Cambia
+            st.session_state['deudas_seleccionadas'] = []
+
         # Ahora los Vamos Poniendo como Inputs en el Formulario
         with colSaldos:
-            st.number_input("Saldo del Cliente",
+            st.number_input("**Saldo del Cliente**",
                 disabled=False, 
                 format="%0.0f",
                 help="Saldo del Cliente según lo que se reporta en SALDOS",
@@ -142,7 +148,7 @@ def rellenar_formulario():
                 icon="💰",
             )
         with colPorCobrar:
-            st.number_input("Por Cobrar del Cliente",
+            st.number_input("**Por Cobrar del Cliente**",
                 disabled=False, 
                 format="%0.0f",
                 help="Por Cobrar del Cliente según lo que se reporta en SALDOS",
@@ -150,7 +156,7 @@ def rellenar_formulario():
                 icon="💸",
             )
         with colPricing:
-            st.text_input("Pricing del Cliente",
+            st.text_input("**Pricing del Cliente**",
                 disabled=True,
                 help="Pricing del Cliente según lo que se reporta en la Base de Datos",
                 key = "pricing",
@@ -186,7 +192,7 @@ def rellenar_formulario():
 
     with col1:
         tipo_solicitud = st.radio(
-            "Tipo de Solicitud",
+            "**Tipo de Solicitud**",
             ["**Validación**","**Acuerdo de Pago**","**Oferta de Acuerdo**"],
             captions=[
                 '**Validación**: Averiguar descuento y/o Casa de Cobro',
@@ -198,7 +204,7 @@ def rellenar_formulario():
         )
     with col2:
         aliado_seleccionado = st.selectbox(
-            "Aliado - Casa de Cobro",
+            "**Aliado - Casa de Cobro**",
             options=list(aliadosDict.keys())+['Directo Base'],
             help="Seleccione el aliado con el que desea realizar la solicitud",
             index=None,
@@ -215,7 +221,16 @@ def rellenar_formulario():
     st.divider()
 
     # Mostramos la Selección de los Montos Propuestos por Deuda
-    poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+    info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+
+    # Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
+    if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
+        mostrar_monto_recomendado(
+            referencia=referencia_cliente,
+            deudas=st.session_state['deudas_seleccionadas'],
+            pricing=deudas_seleccionadas_df['Pricing'].max(),
+            deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
+        )
 
     deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in st.session_state['deudas_seleccionadas']}
 
@@ -234,10 +249,19 @@ def rellenar_formulario():
         if aliado_brinda_pago_obligatorio:
             st.warning("Dadas las Características del Aliado seleccionado, se requiere el pago obligatorio en caso de realizarse la validación.")
 
-    # Alerta 3: Verificacion de Descuentos en Base
+    # Alerta 3: Verificar si el Aliado da Posibilidades de Cuotas
+    if aliado_seleccionado != 'Directo Base':
+        # Verificamos si Permite Cuotas
+        aliado_brinda_cuotas = aliadosDict[aliado_seleccionado].permite_cuotas()
+        # Verificamos si en la Solciitud se realiza una opción a cuotas
+        solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
+        if not aliado_brinda_cuotas and solicitud_a_cuotas:
+            st.warning("El aliado seleccionado no brinda la posibilidad de cuotas, por lo que se recomienda revisar las condiciones de la solicitud antes de continuar.")
+
+    # Alerta 4: Verificacion de Descuentos en Base
     if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
         #  Verificamos por cada Deuda si se cumple
-        avanzar_proceso = mostrar_alertas_masivas(deudas_info=deudas_info)
+        avanzar_proceso = mostrar_alertas_masivas_deudas(deudas_info=deudas_info)
     else:
         avanzar_proceso = True
 
@@ -245,10 +269,99 @@ def rellenar_formulario():
         st.error("La(s) Deuda(s) seleccionada(s) ya tienen una oferta de pago menor a la Solicitada")
         st.stop()
 
-    # --- Siguiente: Guardar los Inputs del Formulario Actuales en el Session_State ---
-    formRequirements = {
-        'referencia_cliente': referencia_cliente,
-        'aliado_seleccionado': aliado_seleccionado,
-        'tipo_solicitud': tipo_solicitud,
-        'info_deudas': deudas_info,
+    # --- Siguiente: Si es Acuerdo o Oferta de Pago dar Especificaciones
+    if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
+        st.divider()
+
+        st.subheader("💰 Especificaciones del Acuerdo de Pago")
+
+        # Creamos 2 Columnas: Fecha Esperada de Pago y Tipo de Pago
+        colFechaPago, colTipoPago = st.columns(2)
+
+        with colFechaPago:
+            fecha_esperada_pago = st.date_input(
+                "**Fecha Esperada de Pago**",
+                value="today",
+                help="Seleccione la fecha esperada de pago del acuerdo",
+            )
+            # Volvemos la Fecha a Timestamp
+            fecha_esperada_pago = pd.Timestamp(fecha_esperada_pago)
+
+        with colTipoPago:
+            # Verificamos los Pagos Posibles según la Cantidad de Cuotas
+            solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
+            if solicitud_a_cuotas:
+                posibles_pagos = ['Estructuraado','Refi']
+            else:
+                posibles_pagos = ['Tradicional','Crédito']
+
+            tipo_pago = st.selectbox(
+                "**Tipo de Pago**",
+                options=posibles_pagos,
+                help="Seleccione el tipo de pago que se realizará en el acuerdo",
+                index=None,
+            )
+
+        # Verificamos que ambos tengan una selección válida
+        if not fecha_esperada_pago or not tipo_pago:
+            st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
+            st.stop()
+    else:
+        fecha_esperada_pago = None
+        tipo_pago = None
+
+    # Mostramos el Resumen de la Solicitud dentro de un expander
+    with st.expander("Ver Resumen de la Solicitud"):
+        mostrar_resumen_solicitud(
+            referencia=referencia_cliente,
+            deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
+            info_completa_deudas=info_completa_deudas,
+            tipo_solicitud=tipo_solicitud,
+            nombre_aliado=aliado_seleccionado,
+            fecha_esperada_pago=fecha_esperada_pago,
+            tipo_pago=tipo_pago,
+        )
+
+    # --- Siguiente: Botón de Envío del Formulario ---
+    st.divider()
+    st.subheader("✅ Envío del Formulario")
+
+    # Vamos a Construir la Respuesta como un Diccionario
+    response_info = {
+        "Referencia": referencia_cliente,
+        'Cedula': deudas_seleccionadas_df['Cedula'].iloc[0],
+        'Ids_Deuda': '.'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
+        'Casa_Cobro': aliado_seleccionado,
+        'Tipo_Solicitud': tipo_solicitud,
+        'Monto_Solicitud': json.dumps(info_completa_deudas),
+        'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
+        'Tipo_Pago': tipo_pago if tipo_pago else '',
     }
+
+    # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
+    colBoton, colMensaje = st.columns([1, 2])
+
+    with colBoton:
+        # Definimos la Condición de Habilitación del Botón de Envío
+        boton_habilitado = (referencia_cliente != st.session_state.get('ultima_referencia_enviada', ''))
+        enviar_formulario = st.button(
+            "Enviar Formulario",
+            help="Presione este botón para enviar el formulario (Solo se envía una vez)",
+            type="primary",
+            key="enviar_formulario",
+            disabled= boton_habilitado,
+        )
+
+    with colMensaje:
+        if enviar_formulario:
+            # Intentamos Subir la Respuesta a Google Sheets
+            success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
+
+            if success_response:
+                # Actualizamos el Session State para que no se pueda enviar nuevamente
+                st.session_state['ultima_referencia_enviada'] = referencia_cliente
+                st.success("Formulario enviado correctamente!, ℹ️ID de Solicitud: {}".format(new_id))
+            else:
+                st.error("Error al enviar el formulario. Por favor, intente nuevamente.")
+        else:
+            st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")

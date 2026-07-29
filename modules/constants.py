@@ -122,4 +122,6 @@ GROUP BY bda.debt_id
 SOLICITUDES_SHEETS_ID = "1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk"
 SOLICITUDES_WORKSHEET_NAME = "Solicitudes_Nuevas"
 
+SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud para que no se repita con el ID de la Deuda
+
 DEFAULT_DISCOUNT_PL = 0.15

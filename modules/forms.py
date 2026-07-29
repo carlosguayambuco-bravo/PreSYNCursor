@@ -48,17 +48,10 @@ def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], prici
     return min(descuento_optimo, 1)
 
 # Función para Obtener el Descuento Óptimo General para una Referencia, según el Tipo de Liquidación
-def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float, tipo_pago: Literal['Tradicional','Estructurado','Refi','Crédito','Verificar']):
-    if tipo_pago in ['Tradicional','Estructurado','Refi']:
-        return obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
-    elif tipo_pago == 'Crédito':
-        return obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
-    elif tipo_pago == 'Verificar':
-        descuento_tradicional = obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
-        descuento_credito = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
-        return min(descuento_tradicional, descuento_credito)
-    else:
-        return 1
+def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float) -> tuple[float, str]:
+    descuento_trad = obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
+    descuento_cred = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
+    return min(descuento_trad, descuento_cred), "Tradicional" if descuento_trad <= descuento_cred else "Crédito"
 
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
 def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) -> tuple[bool, float]:
@@ -153,6 +146,7 @@ class Aliado:
                 negociacion_bloque: bool,
                 pago_co_obligatorio: bool,
                 brinda_descuento_max: bool,
+                permiso_cuotas: bool
                 ):
         self.nombre = nombre
         self.bancos = bancos
@@ -161,6 +155,7 @@ class Aliado:
         self.negociacion_bloque = negociacion_bloque
         self.pago_co_obligatorio = pago_co_obligatorio
         self.brinda_descuento_max = brinda_descuento_max
+        self.permiso_cuotas = permiso_cuotas
 
     def brinda_maximo_descuento(self) -> bool:
         return self.brinda_descuento_max
@@ -180,6 +175,9 @@ class Aliado:
     def negocia_en_bloque(self) -> bool:
         return self.negociacion_bloque
 
+    def permite_cuotas(self) -> bool:
+        return self.permiso_cuotas
+
 # Función Auxiliar para Crear un Diccionario de Aliados a partir de un DataFrame
 def crear_diccionario_aliados(df: pd.DataFrame) -> dict:
     # Paso 1: Definir un Diccionario Vacío para Guardar los Aliados
@@ -194,7 +192,8 @@ def crear_diccionario_aliados(df: pd.DataFrame) -> dict:
             aliado_formal=row['Tipo Aliado'] == 'Formal',
             negociacion_bloque=row['Negociación en Bloque'] == 'SI',
             pago_co_obligatorio=row['Pago CO Obligatorio'] == 'SI',
-            brinda_descuento_max=row['Brinda Descuento Máximo'] == 'SI'
+            brinda_descuento_max=row['Brinda Descuento Máximo'] == 'SI',
+            permiso_cuotas=row['Permite Cuotas'] == 'SI',
         )
         aliados_dict[current_aliado.nombre] = current_aliado
 
