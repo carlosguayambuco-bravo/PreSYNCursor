@@ -7,7 +7,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_models import DeudasActivasSchema
 from data.data_loader import load_masivas, load_addendums
-from modules.forms import obtener_descuento_base
+from modules.forms import obtener_descuento_base, validar_descuento_base
 
 def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> None:
     st.subheader("Deudas Activas del Cliente")
@@ -106,7 +106,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             # Obtenemos el Descuento en Base
             descuento_base = obtener_descuento_base(deuda=row['Id_Deuda'])
             if not pd.isna(descuento_base):
-                st.text('${:,.0f}'.format(descuento_base))
+                st.text('${:.0f}'.format(descuento_base))
             else:
                 st.text("N/A")
 
@@ -122,7 +122,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
                     value=monto_propuesto, 
                     step=100.0, 
                     format="%.0f", 
-                    key=f"monto_prop_{row['Id_Deuda']}", 
+                    key=f"monto_propuesto_{row['Id_Deuda']}", 
                     disabled=True
                 )
             else:
@@ -132,7 +132,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
                     value=row['PaB_Origen'], 
                     step=100.0, 
                     format="%.0f", 
-                    key=f"monto_prop_{row['Id_Deuda']}"
+                    key=f"monto_propuesto_{row['Id_Deuda']}"
                 )
 
     # Ahora con todos los Montos Propuestos, actualizamos el Session State de pago_total
@@ -140,5 +140,36 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         st.session_state['pago_total'] = pago_total
     else:
         st.session_state['pago_total'] = sum(
-            st.session_state[f"monto_prop_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
+            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
         )
+
+def mostrar_alertas_masivas(*, deudas_info: dict[str, float]) -> bool:
+    """
+    Muestra alertas en Streamlit si alguna de las deudas seleccionadas tiene un monto propuesto menor al descuento base.
+    
+    Args:
+        deudas_info (dict): Diccionario con Id_Deuda como clave y Monto Propuesto como valor.
+    Returns:
+        bool: True si alguna deuda cumple con la condición, False en caso contrario.
+    """
+
+    alguna_deuda_cumple = False  # Variable para verificar si alguna deuda cumple con la condición
+    with st.expander("Verificación de Descuentos en Base"):
+        for deuda in deudas_info.keys():
+            cumple, mensaje = validar_descuento_base(deuda=deuda, deudas_info=deudas_info)
+
+            colDeuda, colMensaje = st.columns([1, 4])
+
+            with colDeuda:
+                st.text(f"**Deuda**: {deuda}")
+
+            with colMensaje:
+                if cumple:
+                    st.success(mensaje)
+                else:
+                    st.error(mensaje)
+
+            if cumple:
+                alguna_deuda_cumple = True  # Al menos una deuda cumple con la condición
+
+    return alguna_deuda_cumple

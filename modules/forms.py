@@ -79,10 +79,11 @@ def obtener_deudas_portafolio_masivas(*,deuda: str) -> list[str]:
     # Paso 2: Buscamos la Deuda en las Masivas
     masiva_row = masivas_df[(masivas_df['Id_Deuda'] == deuda) & (masivas_df['PaB_Portafolio'].notna())]
     if not masiva_row.empty:
-        # Obtenemos la Referencia
+        # Obtenemos la Referencia y la Casa de Cobro
         ref_deuda = masiva_row['Referencia'].iloc[0] # type: ignore
-        # Ahora buscamos todas las Deudas con la misma Referencia y que tengan PaB_Portafolio no nulo
-        deudas_portafolio = masivas_df[(masivas_df['Referencia'] == ref_deuda) & (masivas_df['PaB_Portafolio'].notna())]['Id_Deuda'].tolist() # type: ignore
+        casa_cobro = masiva_row['Casa_Cobro'].iloc[0] # type: ignore
+        # Ahora buscamos todas las Deudas con la misma Referencia y la misma Casa de Cobro que tengan PaB_Portafolio no nulo
+        deudas_portafolio = masivas_df[(masivas_df['Referencia'] == ref_deuda) & (masivas_df['Casa_Cobro'] == casa_cobro) & (masivas_df['PaB_Portafolio'].notna())]['Id_Deuda'].tolist() # type: ignore
         return deudas_portafolio
 
     # Paso 3: Si no se encuentra, devolvemos una Lista Vacía
@@ -115,7 +116,7 @@ def obtener_descuento_base(*, deuda: str, portafolio: bool = False) -> float:
     return np.nan
 
 # Función Auxiliar para Validar si se cumple la Restricción de Ofertas Menores a Base
-def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float], monto_prop: float) -> tuple[bool, str]:
+def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float]) -> tuple[bool, str]:
     # Obtenemos el Descuento Base para la Deuda
     descuento_base = obtener_descuento_base(deuda=deuda, portafolio=False)
     descuento_portafolio = obtener_descuento_base(deuda=deuda, portafolio=True)
@@ -133,109 +134,14 @@ def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float], monto_p
 
     # Siguiente: Comparación Individual de la Deuda con el Descuento Base
     if pd.notna(descuento_base): # Si no es NaN comparamos
-        if monto_prop > descuento_base:
+        if deudas_info[deuda] > descuento_base:
             return False, "El monto propuesto para la deuda {} es mayor al Pago Base actual de ${:,.0f}.".format(deuda, descuento_base)
 
     return True, "La deuda cumple con la restricción de ofertas menores a base."
 
+# # Función para Verificar 
+
 # --- Respuestas de Formulario ---
-
-# Clase Respuesta Formulario
-class RespuestaFormulario:
-    def __init__(self, *,
-                correo: str,
-                Referencia: str,
-                Ids_Deuda: list[str],
-                aliado_solicitud: 'Aliado',
-                tipo_solicitud: Literal['Validación','Acuerdo de pago'],
-                monto_solicitado: float,
-                observaciones: Optional[str] = None,
-                fecha_esperada_pago: Optional[pd.Timestamp] = None,
-                tipo_pago: Optional[Literal['Tradicional','Estructurado','Refi','Crédito']] = None,
-                plazos_pago: Optional[int] = None,
-                monto_promesa_deposito: Optional[float] = None,
-                fecha_promesa_deposito: Optional[pd.Timestamp] = None,
-                ):
-        self.correo = correo
-        self.Referencia = Referencia
-        self.Ids_Deuda = Ids_Deuda
-        self.aliado_solicitud = aliado_solicitud
-        self.tipo_solicitud = tipo_solicitud
-        self.monto_solicitado = monto_solicitado
-        self.observaciones = observaciones
-        self.fecha_esperada_pago = fecha_esperada_pago
-        self.tipo_pago = tipo_pago
-        self.plazos_pago = plazos_pago
-        self.monto_promesa_deposito = monto_promesa_deposito
-        self.fecha_promesa_deposito = fecha_promesa_deposito
-
-    def obtener_df_subida(self) -> pd.DataFrame:
-        # Creamos un Diccionario con los Datos de la Respuesta
-        data = {
-            'Timestamp': pd.Timestamp.now('America/Bogota').strftime('%Y-%m-%d %H:%M:%S'),
-            'Correo': self.correo,
-            'Referencia': self.Referencia,
-            'Ids_Deuda': '-'.join(self.Ids_Deuda),
-            'Casa de Cobro': self.aliado_solicitud.nombre,
-            'Tipo de Solicitud': self.tipo_solicitud,
-            'Monto Solicitado': self.monto_solicitado,
-            'Observaciones': self.observaciones,
-            'Fecha Esperada de Pago': self.fecha_esperada_pago,
-            'Tipo de Pago': self.tipo_pago,
-            'Plazos de Pago': self.plazos_pago,
-            'Promesa de Depósito': self.monto_promesa_deposito,
-            'Fecha Promesada': self.fecha_promesa_deposito,
-            'Estado Solicitud': 'Sin Tocar',
-        }
-        # Devolvemos un DataFrame con un Solo Registro
-        return pd.DataFrame([data])
-
-    def validar_respuesta(self) -> bool:
-        # Validamos que los Campos Obligatorios Estén Completos
-        if not self.correo or not self.Referencia or not self.Ids_Deuda or not self.aliado_solicitud or not self.tipo_solicitud or not self.monto_solicitado:
-            return False
-        # Validamos que el Monto Solicitado sea Mayor a 0
-        if self.monto_solicitado <= 0:
-            return False
-        # Validamos que la Fecha Esperada de Pago sea Mayor o Igual a Hoy si Existe
-        if self.fecha_esperada_pago and self.fecha_esperada_pago <= pd.Timestamp.now('America/Bogota').normalize():
-            return False
-        # Validamos que la Fecha Promesada de Depósito sea Mayor o Igual a Hoy si Existe
-        if self.fecha_promesa_deposito and self.fecha_promesa_deposito <= pd.Timestamp.now('America/Bogota').normalize():
-            return False
-        # Validamos que el Monto de Promesa de Depósito sea Mayor a 0 si Existe
-        if self.monto_promesa_deposito and self.monto_promesa_deposito <= 0:
-            return False
-        # Si Todas las Validaciones Pasan, Devolvemos True
-        return True
-
-    def subir_respuesta(self) -> bool:
-        # Paso 1: Obtener el Servicio de Google Sheets
-        google_sheets_service = st.session_state["google_sheets_service"]
-        # Paso 2: Validar la Respuesta antes de Subirla
-        if not self.validar_respuesta():
-            st.error("La respuesta del formulario no es válida. Por favor, revise los campos obligatorios y las fechas.")
-            return False
-        # Paso 3: Obtener el DataFrame de la Respuesta
-        df_respuesta = self.obtener_df_subida()
-        # Paso 4: Obtener la Worksheet de Respuestas desde Google Sheets
-        worksheet = google_sheets_service.get_worksheet(
-            spreadsheet_id=SOLICITUDES_SHEETS_ID,
-            worksheet_name=SOLICITUDES_WORKSHEET_NAME
-        )
-        # Paso 5: Añadir la Respuesta al Final de la Worksheet
-        try:
-            appendDataFrameToEnd(worksheet, df_respuesta)
-            return True
-        except Exception as e:
-            st.error(f"Error al subir la respuesta del formulario: {e}")
-            return False
-
-    def actualizar_campos_respuesta(self, **kwargs):
-        # Actualizamos los Campos de la Respuesta con los Valores Proporcionados
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
 
 # Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
 class Aliado:

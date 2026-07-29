@@ -21,6 +21,7 @@ ESTADOS_POSIBLES_SOLICITUD = [
     'Pago por Fuera',
     'Titular Ilocalizable', # Estado Transitorio
     'Validada por Fuera',
+    'Sin Tocar', # Estado Transitorio
 ]
 PAGOS_POSIBLES_SOLICITUD = [
     'Tradicional',

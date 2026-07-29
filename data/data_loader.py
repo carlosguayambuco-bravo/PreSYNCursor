@@ -266,22 +266,15 @@ def load_masivas() -> DataFrame[MasivasSchema]:
         'Monto Pago Estructurado': 'PaB_Estructurado',
         'Plazo Estructurado': 'Plazo_Estructurado',
         'Monto Portafolio': 'PaB_Portafolio',
-        'Fecha': 'Fecha',
         'Referencia': 'Referencia',
+        'Casa de Cobro': 'Casa_Cobro',
     })
 
-    # Volvemos la Columna Fecha a Datetime
-    masivasDF['Fecha'] = pd.to_datetime(masivasDF['Fecha'], errors='coerce', dayfirst=True)
-
-    # Ordenamos los Datos por Fecha y dejamos el último registro por Id_Deuda (el más reciente)
-    masivasDF = masivasDF.sort_values(by='Fecha', ascending=True)
-    masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
-
-    # Quitamos los Datos donde Id_Deuda sea NaN
-    masivasDF = masivasDF.dropna(subset=['Id_Deuda'])
+    # Quitamos los Datos donde Id_Deuda o Casa_Cobro sea NaN
+    masivasDF = masivasDF.dropna(subset=['Id_Deuda', 'Casa_Cobro'])
 
     # Dejamos solo las Columnas Necesarias
-    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'PaB_Portafolio','Referencia']]
+    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'PaB_Portafolio','Referencia','Casa_Cobro']]
 
     # Volvemos la Id_Deuda Y Referencia a String
     masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())

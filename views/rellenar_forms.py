@@ -5,14 +5,12 @@ import streamlit as st
 import pandas as pd
 # Librerías Propias
 from modules.forms import cumple_condicion_actualizacion_deudas
-from ui.forms_components import mostrar_seleccion_deudas, poner_monto_por_deuda
+from ui.forms_components import mostrar_alertas_masivas, mostrar_seleccion_deudas, poner_monto_por_deuda
 from data.data_loader import load_aliados, load_app_config, load_client_balances, load_current_month_solicitudes, load_liquidaciones, load_masivas, load_addendums, load_pab_ideal, obtener_referencia_por_deuda, obtener_deudas_activas, obtener_ultima_actualizacion_deudas
 
 def rellenar_formulario():
     # Carga de Información Necesaria para el Formulario
     # Se Necesita:
-    # Solicitudes MEC
-    solsDF = load_current_month_solicitudes()
     # Aliados Actuales
     aliadosDict = load_aliados()
     # Saldos y Por Cobrar
@@ -219,15 +217,38 @@ def rellenar_formulario():
     # Mostramos la Selección de los Montos Propuestos por Deuda
     poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
 
+    deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in st.session_state['deudas_seleccionadas']}
+
     # --- Siguiente: Alertas y Verificaciones ---
 
     # Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
     masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
     if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
-        aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado]['Brinda Descuento Máximo']
+        aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado].brinda_maximo_descuento()
         if aliado_brinda_descuento_maximo:
             st.warning("El aliado seleccionado brinda descuento máximo, por lo que una oferta de mejora de descuento puede no ser aceptada. Se recomienda revisar las condiciones de la solicitud antes de continuar.")
 
-    # Alerta 2: Verificacion de Descuentos en Base
-    if not masivas_locales.empty:
-        pass
+    # Alerta 2: Pago Obligatorio de Solicitud (Para Validación)
+    if tipo_solicitud == 'Validación' and aliado_seleccionado != 'Directo Base':
+        aliado_brinda_pago_obligatorio = aliadosDict[aliado_seleccionado].pagar_co_obligatorio()
+        if aliado_brinda_pago_obligatorio:
+            st.warning("Dadas las Características del Aliado seleccionado, se requiere el pago obligatorio en caso de realizarse la validación.")
+
+    # Alerta 3: Verificacion de Descuentos en Base
+    if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
+        #  Verificamos por cada Deuda si se cumple
+        avanzar_proceso = mostrar_alertas_masivas(deudas_info=deudas_info)
+    else:
+        avanzar_proceso = True
+
+    if not avanzar_proceso:
+        st.error("La(s) Deuda(s) seleccionada(s) ya tienen una oferta de pago menor a la Solicitada")
+        st.stop()
+
+    # --- Siguiente: Guardar los Inputs del Formulario Actuales en el Session_State ---
+    formRequirements = {
+        'referencia_cliente': referencia_cliente,
+        'aliado_seleccionado': aliado_seleccionado,
+        'tipo_solicitud': tipo_solicitud,
+        'info_deudas': deudas_info,
+    }

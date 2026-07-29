@@ -103,6 +103,7 @@ class MasivasSchema(pa.DataFrameModel):
     """
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
     Referencia: str
+    Casa_Cobro: str
     PaB_Propuesta: float
     PaB_Estructurado: float
     Plazo_Estructurado: int
