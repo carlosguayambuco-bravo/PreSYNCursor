@@ -10,6 +10,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de solicitudes.
     """
+    ID_Solicitud: str = pa.Field(unique=True)  # Aseguramos que ID_Solicitud sea único
     Timestamp: pa.dtypes.Timestamp
     Correo: str = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")  # Validación de correo electrónico
     Referencia: str
@@ -20,7 +21,6 @@ class SolicitudesSchema(pa.DataFrameModel):
     Monto_Solicitud: dict # Es un JSON que contiene el Monto por Deuda y los Plazos
     Fecha_Esperada_Pago: pa.dtypes.Timestamp
     Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD)
-    ID_Solicitud: str = pa.Field(unique=True)  # Aseguramos que ID_Solicitud sea único
     Ejecutivo: str
     Metadata_Solicitud: dict  # Es un JSON que contiene:
     # - Estado de Comité: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)

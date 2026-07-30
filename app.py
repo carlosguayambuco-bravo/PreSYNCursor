@@ -1,15 +1,19 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
+import streamlit as st
 # Librerías Locales
-from utils.initializer import initialize_services, initialize_test_states
-from views.rellenar_forms import rellenar_formulario
+from utils.initializer import initialize_services, initialize_test_states, initialize_data
+from views.rellenar_forms import rellenar_formulario_view
 
-# Inicializamos los servicios
-initialize_services()
+# Definimos si estamos en Modo Debugging
+modo_debugging = st.secrets['debugging_mode']
+
+initialize_services(modo_debugging)  # Inicializamos los servicios de la aplicación
+
+initialize_data(modo_debugging)  # Inicializamos los datos de la aplicación
 
 # Inicializamos los estados de prueba
 initialize_test_states()
 
-# Ejecutamos la view de rellenar formulario
-rellenar_formulario()
+st.title("Formulario de Solicitud de MEC")

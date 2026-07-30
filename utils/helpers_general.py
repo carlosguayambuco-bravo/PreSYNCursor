@@ -7,6 +7,8 @@ import holidays
 import numpy as np
 import pandas as pd
 import streamlit as st
+# Librerías Locales
+from modules.constants import LIMITE_MEC
 
 mesesDict = {
     1: 'Enero',2: 'Febrero',3: 'Marzo',4: 'Abril',5: 'Mayo',6: 'Junio',
@@ -16,8 +18,6 @@ mesesDict = {
 # Agregamos el offset para que tenga en cuenta solo business days
 co_holidays = holidays.country_holidays('CO', years=pd.Timestamp.now().year)
 co_bday = pd.offsets.CustomBusinessDay(holidays=co_holidays) # type: ignore
-
-LIMITE_MEC = 4 # El Día límite para Considerar el Día como mes operativo
 
 # Función Auxiliar para imputar NaNs
 def imputeNans(df: pd.DataFrame, col: str, value):

@@ -5,7 +5,6 @@ import json
 # Librerías de Terceros
 import pandas as pd
 import requests
-from requests.exceptions import ChunkedEncodingError, ConnectionError, Timeout
 
 MAX_QUERY_ATTEMPTS = 3
 

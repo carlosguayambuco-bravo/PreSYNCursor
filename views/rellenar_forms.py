@@ -6,28 +6,26 @@ import streamlit as st
 import pandas as pd
 # Librerías Propias
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas
-from modules.constants import PAGOS_POSIBLES_SOLICITUD
+from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
-from data.data_loader import load_aliados, load_app_config, load_client_balances, load_current_month_solicitudes, load_liquidaciones, load_masivas, load_addendums, load_pab_ideal, obtener_referencia_por_deuda, obtener_deudas_activas, obtener_ultima_actualizacion_deudas
 
-def rellenar_formulario():
+def rellenar_formulario_view():
     # Carga de Información Necesaria para el Formulario
     # Se Necesita:
     # Aliados Actuales
-    aliadosDict = load_aliados()
+    aliadosDict = st.session_state['aliados_dict']
     # Saldos y Por Cobrar
-    saldosDict = load_client_balances()
+    saldosDict = st.session_state['saldos_dict']
     # Addendums
-    addsDF = load_addendums()
+    addsDF = st.session_state['addendums_df']
     # PaB Ideal
-    pabIdealDF = load_pab_ideal()
+    pabIdealDF = st.session_state['pab_ideal_dict']
     # Deudas ya Liquidadas
-    debtsLiq = load_liquidaciones()
+    debtsLiq = st.session_state['liquidations_set']
     # Actualizaciones Masivas
-    masivasDF = load_masivas()
+    masivasDF = st.session_state['masivas_df']
     # Configuración del App
-    appConfig = load_app_config()
+    appConfig = st.session_state['app_config_dict']
 
 
     # Inicializamos las Deudas Seleccionadas en el Session State si no Existe
