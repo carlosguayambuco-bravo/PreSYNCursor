@@ -16,7 +16,7 @@ class GoogleSheetsService:
 
     # Inicializa el cliente de gspread con las credenciales proporcionadas
     def _init_client(self, credentials: dict):
-        creds = Credentials.from_service_account_info(credentials)
+        creds = Credentials.from_service_account_info(credentials, scopes=['https://www.googleapis.com/auth/spreadsheets'])
         self.client = gspread.authorize(creds)
 
     # Método para obtener los Datos de una hoja de cálculo como un DataFrame de pandas

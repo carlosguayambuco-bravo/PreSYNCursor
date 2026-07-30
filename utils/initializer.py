@@ -5,7 +5,8 @@ import json
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_addendums, load_aliados, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions
+from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions
+from modules.classes import crear_diccionario_aliados
 from services.metabase import MetabaseService
 from services.google_sheets import GoogleSheetsService
 
@@ -24,7 +25,7 @@ def initialize_services(debugging_mode: bool = False):
         st.success("Metabase Service Initialized")
 
     # Inicializamos el Servicio de GoogleSheets
-    google_sheets_credentials = st.secrets["google_credentials"]
+    google_sheets_credentials = json.loads(st.secrets["google_credentials"]['json'])
     google_sheets_service = GoogleSheetsService(google_sheets_credentials)
 
     if debugging_mode:
@@ -52,10 +53,6 @@ def initialize_data(debugging_mode: bool = False):
         st.session_state["pab_ideal_dict"] = load_pab_ideal()
         if debugging_mode:
             st.success("PaB Ideal Loaded")
-    if not ("aliados_dict" in st.session_state):
-        st.session_state["aliados_dict"] = load_aliados()
-        if debugging_mode:
-            st.success("Aliados Loaded")
     if not ("masivas_df" in st.session_state):
         st.session_state["masivas_df"] = load_masivas()
         if debugging_mode:
@@ -84,6 +81,11 @@ def initialize_data(debugging_mode: bool = False):
         st.session_state["cartera_activa_df"] = load_cartera_activa()
         if debugging_mode:
             st.success("Cartera Activa Loaded")
+    if not ("aliados_dict" in st.session_state):
+            aliados_df = load_aliados_dataframe()
+            st.session_state["aliados_dict"] = crear_diccionario_aliados(aliados_df)
+            if debugging_mode:
+                st.success("Aliados Loaded")
 
 # Función Auxiliar para Inicializar Estados de prueba
 def initialize_test_states():

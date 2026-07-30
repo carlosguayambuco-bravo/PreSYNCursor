@@ -7,7 +7,7 @@ from utils.initializer import initialize_services, initialize_test_states, initi
 from views.rellenar_forms import rellenar_formulario_view
 
 # Definimos si estamos en Modo Debugging
-modo_debugging = st.secrets['debugging_mode']
+modo_debugging = st.secrets.get('debugging_mode',True)
 
 initialize_services(modo_debugging)  # Inicializamos los servicios de la aplicación
 
@@ -16,4 +16,4 @@ initialize_data(modo_debugging)  # Inicializamos los datos de la aplicación
 # Inicializamos los estados de prueba
 initialize_test_states()
 
-st.title("Formulario de Solicitud de MEC")
+rellenar_formulario_view()  # Ejecutamos la vista principal para rellenar formularios

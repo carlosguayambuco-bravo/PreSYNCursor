@@ -44,12 +44,12 @@ def rellenar_formulario_view():
 
     # Referencia del Cliente
     with cols[0]:
-        referencia_cliente = st.number_input("Referencia del Cliente, Ejemplo: 3007083770", help="Ingrese la referencia del cliente")
+        referencia_cliente = st.number_input("Referencia del Cliente", help="Ingrese la referencia del cliente, Ejemplo: 3007083770", format="%d", step=1, min_value=0)
 
     # Deuda Representante del Cliente
     with cols[1]:
         id_deuda = st.number_input("Id_Deuda del Cliente, Ejemplo: 123456789",
-        help="Ingrese el Id de alguna deuda del cliente",
+        help="Ingrese el Id de alguna deuda del cliente (Solo válido cuando la Referencia no se encuentra)",
         format="%d", step=1, min_value=0,
         disabled = (not st.session_state.get('id_rep_needed',False)),
         )
@@ -334,6 +334,9 @@ def rellenar_formulario_view():
         'Monto_Solicitud': json.dumps(info_completa_deudas),
         'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
         'Tipo_Pago': tipo_pago if tipo_pago else '',
+        'Metadata_Solicitud': json.dumps({
+            'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0],
+        }),
     }
 
     # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito

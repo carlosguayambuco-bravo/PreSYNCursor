@@ -12,11 +12,9 @@ import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
-from modules.constants import DEFAULT_DISCOUNT_PL, QUERY_DEBT_TO_REFERENCE, QUERY_ACTIVE_DEBTS, QUERY_LAST_UPDATE, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
-from modules.forms import crear_diccionario_aliados
+from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
 from services.google_sheets import GoogleSheetsService
-from services.metabase import MetabaseService
-from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
+from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
 from utils.helpers_sheets import _retry
 
 # ----- Funciones de Carga de Información ---
@@ -38,6 +36,8 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
+    st.info("Intentando cargar solicitudes...")
+
     # Obtenemos el DF de la Hoja "Solicitudes_MEC"
     solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
 
@@ -47,14 +47,17 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
 
     # Volvemos las Columnas Referencia y Cedula a String
     for col in ['Referencia', 'Cedula']:
-        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
     # Hacemos Parsing de la Columna Monto_Solicitud y Metadata_Solicitud a JSON
     for col in ['Monto_Solicitud', 'Metadata_Solicitud']:
-        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notnull(s) else {})
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
 
-    # Validamos el DataFrame con el esquema
-    solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
+    # Validamos el DataFrame con el esquema (Si no esta vacio)
+    if not solicitudes_df.empty:
+        solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
+    else:
+        solicitudes_df = SolicitudesSchema.empty()
 
     # Devolvemos el DataFrame
     return solicitudes_df
@@ -70,7 +73,7 @@ def load_reference_changes() -> dict[str,str]:
     ref_changes_ws = google_sheets_service.get_worksheet(REFCHANGES_SHEET_ID, 'Cambios de Referencia')
 
     # Obtenemos los Valores como records
-    ref_values = _retry(lambda: ref_changes_ws.get_all_records())
+    ref_values = _retry(lambda: ref_changes_ws.get_all_values())
 
     ## La llave sera la referencia vieja y el valor la referencia nueva
     if len(ref_values)>0 and len(ref_values[0])>1:
@@ -118,7 +121,7 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     saldos_sheet = google_sheets_service.get_spreadsheet(SALDOS_SHEET_ID)
 
     # Traemos el Diccionario de Cambios de Referencias
-    refChangesDict = load_reference_changes()
+    refChangesDict = st.session_state["changes_references_dict"]
 
     # Ahora Iteramos sobre cada Worksheet y obtenemos los datos como DataFrames
     saldosDFList = []
@@ -175,8 +178,8 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     saldosDict = finalDF.set_index('Referencia')['Ahorro_Total'].to_dict()
     porCobrarDict = finalDF.set_index('Referencia')['Por_Cobrar'].to_dict()
     # Volvemos los Diccionarios a defaultdict con valor por defecto 0
-    saldosDict = defaultdict(lambda: 0, saldosDict)
-    porCobrarDict = defaultdict(lambda: 0, porCobrarDict)
+    saldosDict = defaultdict(int, saldosDict)
+    porCobrarDict = defaultdict(int, porCobrarDict)
 
     # Creamos un Diccionario General
     generalDict = {
@@ -199,7 +202,7 @@ def load_pab_ideal() -> dict:
     pab_ideal_df = google_sheets_service.get_sheet_as_dataframe(PABIDEAL_SHEET_ID, nombre_hoja)
 
     # Renombramos Columna PB Ideal a PaB_Ideal_Credito
-    pabIdealDF = pabIdealDF.rename(columns={'PB Ideal':'PaB_Ideal_Credito','Id deuda':'Id_Deuda'}) # type: ignore
+    pab_ideal_df = pab_ideal_df.rename(columns={'PB Ideal':'PaB_Ideal_Credito','Id deuda':'Id_Deuda'}) # type: ignore
 
     # Volvemos la Id_Deuda a String
     pab_ideal_df['Id_Deuda'] = pab_ideal_df['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
@@ -226,29 +229,36 @@ def load_pab_ideal() -> dict:
     # Creamos el Diccionario de Búsqueda para Id_Deuda -> PaB_Ideal_Credito
     pabIdealDict = pab_ideal_df.set_index('Id_Deuda')['PaB_Ideal_Credito'].to_dict()
     # Volvemos el Diccionario a defaultdict con valor por defecto 0
-    pabIdealDict = defaultdict(lambda: 0, pabIdealDict)
+    pabIdealDict = defaultdict(int, pabIdealDict)
 
     # Devolvemos el Diccionario de PaB Ideal de Crédito
     return pabIdealDict
 
 # --> Carga de Datos de Aliados
 @st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
-def load_aliados() -> dict:
+def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
 
     # Primero Obtenemos la Spreadsheet de Aliados desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
     # Obtenemos el DF de la Hoja "AlianzasVigentes"
-    aliadosDF = google_sheets_service.get_sheet_as_dataframe(ALIADOS_SHEET_ID, 'AlianzasVigentes')
+    aliados_df = google_sheets_service.get_sheet_as_dataframe(ALIADOS_SHEET_ID, 'AlianzasVigentes')
+
+    # Dejamos solo las Columnas Necesarias según el esquema
+    aliados_df = aliados_df[AliadosSchema.__fields__.keys()]
+
+    # Convertimos las Columnas de 'SI|NO' a Booleano
+    boolean_columns = ['Permite Contacto', 'Cruza Base', 'SYNC', 'Negociación en Bloque', 'Contraofertas de Pago Obligatorio', 'Brindan Máx. Descuento', 'Pago a Cuotas']
+
+    for col in boolean_columns:
+        aliados_df[col] = aliados_df[col].astype(str)  # Aseguramos que sean strings
+        aliados_df[col] = aliados_df[col].str.contains('SI', case=False, na=False)
 
     # Validamos el DF con el esquema
-    aliadosDF = AliadosSchema.validate(aliadosDF)
+    aliados_df = AliadosSchema.validate(aliados_df)
 
-    # Creamos el Diccionario de Aliados usando la función auxiliar
-    aliados_dict = crear_diccionario_aliados(aliadosDF)
-
-    # Devolvemos el Diccionario de Aliados
-    return aliados_dict
+    # Devolvemos el DataFrame de Aliados
+    return aliados_df
 
 # --> Carga de Datos de Masivas
 @st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
@@ -281,7 +291,7 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
 
     # Cargamos los Cambios de Referencia y los Aplicamos
-    refChangesDict = load_reference_changes()
+    refChangesDict = st.session_state["changes_references_dict"]
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
 
     # Volvemos los PaB a Número
@@ -294,6 +304,9 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     # Volvemos el Plazo a Número 
     masivasDF['Plazo_Estructurado'] = masivasDF['Plazo_Estructurado'].apply(cleanNumber)
     masivasDF['Plazo_Estructurado'] = pd.to_numeric(masivasDF['Plazo_Estructurado'], errors='coerce')
+
+    # Quitamos Datos donde PaB_Propuesta sea Nulo
+    masivasDF = masivasDF[masivasDF['PaB_Propuesta'].notna()]
 
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
@@ -334,7 +347,7 @@ def load_addendums() -> DataFrame[AddendumsSchema]:
     addendumsDF['Cedula'] = addendumsDF['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
 
     # Cargamos los Cambios de Referencia y los Aplicamos
-    refChangesDict = load_reference_changes()
+    refChangesDict = st.session_state["changes_references_dict"]
     addendumsDF['Referencia'] = addendumsDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
 
     # Volvemos los PaB a Número
@@ -367,6 +380,9 @@ def load_liquidaciones() -> set[str]:
     # Renombramos la Columna ID a Id_Deuda
     liquidacionesDF = liquidacionesDF.rename(columns={'Deuda Berex':'Id_Deuda'})
 
+    # Quitamos Datos donde Id_Deuda sea NaN
+    liquidacionesDF = liquidacionesDF.dropna(subset=['Id_Deuda'])
+
     # Dejamos solo la Columna Id_Deuda
     liquidacionesDF = liquidacionesDF[['Id_Deuda']]
 
@@ -389,8 +405,8 @@ def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
     # Primero Obtenemos la Spreadsheet de HeadCount desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
-    # Obtenemos el DF de la Hoja "HC Negociación"
-    hc_negociacion_df = google_sheets_service.get_sheet_as_dataframe(HCNEGO_SHEET_ID, 'HC Negociación')
+    # Obtenemos el DF de la Hoja "HC"
+    hc_negociacion_df = google_sheets_service.get_sheet_as_dataframe(HCNEGO_SHEET_ID, 'HC')
 
     # Renombramos las Columnas
     hc_negociacion_df = hc_negociacion_df.rename(columns={
@@ -405,12 +421,18 @@ def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
     # Dejamos solo las Columnas Necesarias
     hc_negociacion_df = hc_negociacion_df[['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado', 'Cedula']]
 
+    # Quitamos Datos con NaN
+    hc_negociacion_df = hc_negociacion_df.dropna(subset=['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado'])
+
     # Volvemos la Columna ID_Empleado y Cedula a String
     hc_negociacion_df['ID_Empleado'] = hc_negociacion_df['ID_Empleado'].apply(lambda s: str(s).replace('.0','').strip())
     hc_negociacion_df['Cedula'] = hc_negociacion_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
 
     # Creamos Columna Es_Negociador como True si el Nombre Empleo contiene negociador (ignorando mayúsculas/minúsculas), de lo contrario False
     hc_negociacion_df['Es_Negociador'] = hc_negociacion_df['Nombre_Empleo'].str.contains('negociador', case=False, na=False, regex=False)
+
+    # Quitamos Datos donde Cedula sea NaN o vacía
+    hc_negociacion_df = hc_negociacion_df[hc_negociacion_df['Cedula'].notna() & (hc_negociacion_df['Cedula'] != '')]
 
     # Validamos el DF con el esquema
     hc_negociacion_df = HeadCountSchema.validate(hc_negociacion_df)
@@ -485,7 +507,7 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
     cartera_activa_df['Id_Deuda'] = cartera_activa_df['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
 
     # Cargamos los Cambios de Referencia y los Aplicamos
-    refChangesDict = load_reference_changes()
+    refChangesDict = st.session_state["changes_references_dict"]
     cartera_activa_df['Referencia'] = cartera_activa_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
 
     # Volvemos la Columna Numero_Credito a String usando astype(str)
@@ -496,6 +518,9 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
 
     # Dejamos solo las Columnas Necesarias
     cartera_activa_df = cartera_activa_df[['Id_Deuda', 'Referencia', 'Cedula', 'PaB_Origen', 'Numero_Credito', 'Banco']]
+
+    # Eliminamos Duplicados por Id_Deuda, dejando el Primer registro
+    cartera_activa_df = cartera_activa_df.drop_duplicates(subset=['Id_Deuda'], keep='first')
 
     # Validamos el DF con el esquema
     cartera_activa_df = CarteraActivaSchema.validate(cartera_activa_df)

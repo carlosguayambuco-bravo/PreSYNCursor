@@ -87,6 +87,7 @@ SELECT
     bcrd.id AS Id_Deuda,
     bcrd.bank_reference AS Referencia,
     bcr.document_number AS Cedula,
+    bcr.full_name AS Nombre_Cliente,
     bcrd.financial_entity_name AS Banco,
     bcrd.amount AS PaB_Origen,
     pl.PB_PL AS PaB_PL,
@@ -104,7 +105,7 @@ WHERE
     bcrd.status IN ('new','negotiation','lawsuit')
     AND NOT(bcrd.sub_state IN ('liquidated','liquidated_with_credit','liquidation_in_process','cancelled','drop_requested','liquidation_structured_payment'))
     AND vsp.winner IS TRUE
-    AND bcrd.bank_reference = '{referencia}'
+    AND bcrd.bank_reference = '{referencia};'
 """
 
 QUERY_LAST_UPDATE = """"
