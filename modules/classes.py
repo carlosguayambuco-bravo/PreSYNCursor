@@ -11,6 +11,7 @@ class Aliado:
     def __init__(self,*,
                 nombre: str, 
                 bancos: list,
+                ejecutivo: str,
                 permite_contacto: bool,
                 aliado_formal: bool,
                 negociacion_bloque: bool,
@@ -20,12 +21,19 @@ class Aliado:
                 ):
         self.nombre = nombre
         self.bancos = bancos
+        self.ejecutivo = ejecutivo
         self.permite_contacto = permite_contacto
         self.aliado_formal = aliado_formal
         self.negociacion_bloque = negociacion_bloque
         self.pago_co_obligatorio = pago_co_obligatorio
         self.brinda_descuento_max = brinda_descuento_max
         self.permiso_cuotas = permiso_cuotas
+
+    def obtener_nombre(self) -> str:
+        return self.nombre
+
+    def obtener_ejecutivo(self) -> str:
+        return self.ejecutivo
 
     def brinda_maximo_descuento(self) -> bool:
         return self.brinda_descuento_max
@@ -58,6 +66,7 @@ def crear_diccionario_aliados(df: DataFrame[AliadosSchema]) -> dict:
         current_aliado = Aliado(
             nombre=row['Nombre Normalizado'],
             bancos=[banco.strip() for banco in row['Bancos'].split(',')] if pd.notna(row['Bancos']) else [],
+            ejecutivo=row['Ejecutivo'] if pd.notna(row['Ejecutivo']) else '',
             permite_contacto=row['Permite Contacto'] == 'SI',
             aliado_formal=row['Tipo Aliado'] == 'Formal',
             negociacion_bloque=row['Negociación en Bloque'] == 'SI',

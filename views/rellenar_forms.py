@@ -311,7 +311,7 @@ def rellenar_formulario_view():
         tipo_pago = None
 
     # Mostramos el Resumen de la Solicitud dentro de un expander
-    with st.expander("Ver Resumen de la Solicitud"):
+    with st.expander("Ver Resumen de la Solicitud", expanded=True):
         mostrar_resumen_solicitud(
             referencia=referencia_cliente,
             deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
@@ -334,6 +334,7 @@ def rellenar_formulario_view():
         'Casa_Cobro': aliado_seleccionado,
         'Tipo_Solicitud': tipo_solicitud,
         'Monto_Solicitud': json.dumps(info_completa_deudas),
+        'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
         'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
         'Tipo_Pago': tipo_pago if tipo_pago else '',
         'Metadata_Solicitud': json.dumps({
@@ -344,28 +345,36 @@ def rellenar_formulario_view():
     # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
     colBoton, colMensaje = st.columns([1, 2])
 
+    ya_enviado = (referencia_cliente != '') and (referencia_cliente == st.session_state.get('ultima_referencia_enviada'))
+
     with colBoton:
-        # Definimos la Condición de Habilitación del Botón de Envío
-        boton_habilitado = (referencia_cliente != st.session_state.get('ultima_referencia_enviada', ''))
         enviar_formulario = st.button(
             "Enviar Formulario",
             help="Presione este botón para enviar el formulario (Solo se envía una vez)",
             type="primary",
             key="enviar_formulario",
-            disabled= not boton_habilitado,
+            disabled=ya_enviado,
         )
 
     with colMensaje:
-        if enviar_formulario:
-            # Intentamos Subir la Respuesta a Google Sheets
+        if enviar_formulario and not ya_enviado:
+            # 1. Bloqueamos inmediatamente para evitar dobles clics en cola
+            st.session_state['ultima_referencia_enviada'] = referencia_cliente
+
+            # 2. Ejecutamos el proceso a Google Sheets
             with st.spinner("Enviando formulario..."):
                 success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
 
             if success_response:
-                # Actualizamos el Session State para que no se pueda enviar nuevamente
-                st.session_state['ultima_referencia_enviada'] = referencia_cliente
-                st.success("Formulario enviado correctamente!, ℹ️ID de Solicitud: {}".format(new_id))
+                st.success(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}")
+                # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
+                st.rerun()
             else:
+                # Si hubo error, liberamos el candado para que el usuario pueda reintentar
+                st.session_state['ultima_referencia_enviada'] = None
                 st.error("Error al enviar el formulario. Por favor, intente nuevamente.")
+
+        elif ya_enviado:
+            st.info("Esta referencia ya fue enviada previamente.")
         else:
             st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")
