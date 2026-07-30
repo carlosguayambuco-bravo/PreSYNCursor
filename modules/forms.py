@@ -46,7 +46,7 @@ def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], prici
     descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA) - 1)
 
     # Paso 4: Devolver el Descuento Óptimo con Techo 1
-    return min(descuento_optimo, 1)
+    return max(min(descuento_optimo, 1),0.15)
 
 # Función para Obtener el Descuento Óptimo General para una Referencia, según el Tipo de Liquidación
 def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float) -> tuple[float, str]:

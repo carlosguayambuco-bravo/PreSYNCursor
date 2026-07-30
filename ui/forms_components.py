@@ -69,63 +69,86 @@ def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: flo
 def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[dict[str,Any]]:
     st.subheader("🗒️ Montos Propuestos por Deuda")
 
-    # Creamos una Copia de las Deudas Activas
+    # 1. Copia de DataFrame y cálculo de %Total
     deudas_activas_df_copy = deudas_activas_df.copy()
+    suma_pab = deudas_activas_df_copy['PaB_Origen'].sum()
+    deudas_activas_df_copy['%Total'] = (
+        deudas_activas_df_copy['PaB_Origen'] / suma_pab if suma_pab > 0 else 0
+    )
 
-    # Agregamos la Columna %Total como PaB_Origen / Suma de PaB_Origen de todas las deudas activas
-    deudas_activas_df_copy['%Total'] = deudas_activas_df_copy['PaB_Origen'] / deudas_activas_df_copy['PaB_Origen'].sum()
-
-    # Inicializamos el Session State usar_para_todos
+    # 2. Inicialización de valores por primera vez (Valores por defecto)
     if 'usar_para_todos' not in st.session_state:
         st.session_state['usar_para_todos'] = True
 
-    # Vamos a crear: Un Input para Pago Total ,un Selector para ver si usar ese monto como Portafolio
-    # Y un tercero que es habilitar la Opción a Cuotas, individualmente para 1 deuda o para todas las deudas.
+    if 'pago_total' not in st.session_state:
+        st.session_state['pago_total'] = float(suma_pab * 0.6)
+
+    for _, row in deudas_activas_df_copy.iterrows():
+        key_monto = f"monto_propuesto_{row['Id_Deuda']}"
+        key_cuotas = f"num_cuotas_{row['Id_Deuda']}"
+        if key_monto not in st.session_state:
+            st.session_state[key_monto] = float(st.session_state['pago_total'] * row['%Total'])
+        if key_cuotas not in st.session_state:
+            st.session_state[key_cuotas] = 1
+
+    # 3. LÓGICA DE RECALCULO (Se ejecuta ANTES de dibujar los inputs en pantalla)
+    if st.session_state['usar_para_todos']:
+        # Si la opción "Distribuir" está activa, actualizamos el estado de cada deuda
+        for _, row in deudas_activas_df_copy.iterrows():
+            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = float(
+                st.session_state['pago_total'] * row['%Total']
+            )
+    else:
+        # Si se edita individualmente, recalculamos el total como la suma de las deudas
+        st.session_state['pago_total'] = float(sum(
+            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
+        ))
+
+    # 4. Renderizado de Controles Principales
     colPagoTotal, colUsarParaTodos, colCuotas = st.columns([2, 1, 1])
+
     with colPagoTotal:
-        pago_total = st.number_input(
+        st.number_input(
             "Monto Total a Pagar",
             min_value=0.0,
-            value=st.session_state.get('pago_total', deudas_activas_df_copy['PaB_Origen'].sum() * 0.6), # De prueba
             step=100.0,
             format="%.0f",
-            key="pago_total_input",
+            key="pago_total",  # Vinculado directamente al Session State
             help="Ingresar el Monto a Pagar por todas las Deudas",
             disabled=not st.session_state['usar_para_todos']
         )
-        # Guardamos el Valor en el Session State
-        st.session_state['pago_total'] = pago_total
+
     with colUsarParaTodos:
-        usar_para_todos = st.checkbox(
+        st.checkbox(
             "Distribuir el Monto entre Deudas",
             key="usar_para_todos",
-            help="Si se selecciona, el Monto Total se distribuirá entre las deudas activas según su %Total. Si no se selecciona, se podrá ingresar un monto individual para cada deuda."
-            )
+            help="Si se selecciona, el Monto Total se distribuirá según el %Total."
+        )
+
     with colCuotas:
         tipo_cuotas = st.selectbox(
             "Habilitar Solicitud a Cuotas",
             options=["No", "Por Deuda", "Para Todas las Deudas"],
             key="tipo_cuotas",
-            help="Si se selecciona, se podrá configurar el pago en cuotas para todas las Deudas o de forma Individual"
-            )
+            help="Configurar pago en cuotas"
+        )
 
+    num_cuotas_global = 1
     if tipo_cuotas == 'Para Todas las Deudas':
-        # Mostramos un Slider para seleccionar el Número de Cuotas (1 a 60)
-        num_cuotas = st.slider(
+        num_cuotas_global = st.slider(
             "Número de Cuotas",
             min_value=1,
             max_value=60,
             value=12,
             step=1,
-            key="num_cuotas",
-            help="Seleccione el número de cuotas para el pago total"
+            key="num_cuotas_global"
         )
 
-    # Creamos las Columnas de la Tabla: Id_Deuda, PaB_Origen, Monto_Propuesto, %Total, Monto Propuesto (Input), Cuotas (Input)
+    # 5. Encabezados de la Tabla
     if tipo_cuotas == 'Por Deuda':
-        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotas = st.columns([2, 2, 2, 1, 2, 2], gap = "small", vertical_alignment="center")
+        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotasCol = st.columns([2, 2, 2, 1, 3, 2], gap="small", vertical_alignment="center")
     else:
-        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 2], gap = "small", vertical_alignment="center")
+        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 3], gap="small", vertical_alignment="center")
 
     with colIdDeuda:
         st.markdown("**Id Deuda**")
@@ -138,19 +161,21 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
     with colMontoPropuesto:
         st.markdown("**Monto Propuesto**")
     if tipo_cuotas == 'Por Deuda':
-        with colCuotas:
+        with colCuotasCol: # type: ignore
             st.markdown("**Número de Cuotas**")
 
+    # 6. Renderizado de Filas de la Tabla
     for _, row in deudas_activas_df_copy.iterrows():
+        id_deuda = row['Id_Deuda']
+
         with colIdDeuda:
-            st.text(row['Id_Deuda'])
+            st.text(id_deuda)
 
         with colPaBOrigen:
             st.text('${:,.0f}'.format(row['PaB_Origen']))
 
         with colProp:
-            # Obtenemos el Descuento en Base
-            descuento_base = obtener_descuento_base(deuda=row['Id_Deuda'])
+            descuento_base = obtener_descuento_base(deuda=id_deuda)
             if not pd.isna(descuento_base):
                 st.text('${:,.0f}'.format(descuento_base))
             else:
@@ -160,52 +185,47 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             st.text('{:.2%}'.format(row['%Total']))
 
         with colMontoPropuesto:
-            monto_propuesto_deuda = st.number_input(
+            # Al no definir 'value', toma automáticamente el valor de st.session_state[key]
+            st.number_input(
                 "",
-                min_value=0.0, 
-                value=st.session_state.get(f"monto_propuesto_{row['Id_Deuda']}", pago_total * row['%Total']),
-                step=100.0, 
-                format="%.0f", 
-                disabled=usar_para_todos,
+                min_value=0.0,
+                step=100.0,
+                format="%.0f",
+                disabled=st.session_state['usar_para_todos'],
                 label_visibility="collapsed",
-                key=f"monto_propuesto_{row['Id_Deuda']}_input",
+                key=f"monto_propuesto_{id_deuda}",
                 help="Ingrese el Monto Propuesto para esta Deuda"
             )
-            if usar_para_todos:
-                st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = pago_total * row['%Total']
-            else:
-                st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = monto_propuesto_deuda
 
         if tipo_cuotas == 'Por Deuda':
-            with colCuotas:
-                num_cuotas_deuda = st.number_input(
+            with colCuotasCol: # type: ignore
+                st.number_input(
                     "",
                     min_value=1,
                     max_value=60,
-                    value=st.session_state.get(f"num_cuotas_{row['Id_Deuda']}", 1),
                     step=1,
                     label_visibility="collapsed",
-                    key=f"num_cuotas_{row['Id_Deuda']}_input",
+                    key=f"num_cuotas_{id_deuda}",
                     help="Seleccione el número de cuotas para esta deuda"
                 )
-                # Guardamos el Valor en el Session State
-                st.session_state[f"num_cuotas_{row['Id_Deuda']}"] = num_cuotas_deuda
 
-    # Ahora con todos los Montos Propuestos, actualizamos el Session State de pago_total
-    if not usar_para_todos:
-        st.session_state['pago_total'] = sum(
-            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
-        )
-
-    # Ahora Creamos la Lista de Información por Cada Deuda
+    # 7. Construcción de la Respuesta Final
     info_completa_deudas = []
     for _, row in deudas_activas_df_copy.iterrows():
-        deuda_info = {
-            "Id_Deuda": row['Id_Deuda'],
-            "Monto_Propuesto": st.session_state[f"monto_propuesto_{row['Id_Deuda']}"],
-            "Num_Cuotas": st.session_state.get(f"num_cuotas_{row['Id_Deuda']}", 1) if (tipo_cuotas == 'Por Deuda') else num_cuotas if (tipo_cuotas == 'Para Todas las Deudas') else 1
-        }
-        info_completa_deudas.append(deuda_info)
+        id_deuda = row['Id_Deuda']
+
+        if tipo_cuotas == 'Por Deuda':
+            cuotas_val = st.session_state.get(f"num_cuotas_{id_deuda}", 1)
+        elif tipo_cuotas == 'Para Todas las Deudas':
+            cuotas_val = num_cuotas_global
+        else:
+            cuotas_val = 1
+
+        info_completa_deudas.append({
+            "Id_Deuda": id_deuda,
+            "Monto_Propuesto": st.session_state[f"monto_propuesto_{id_deuda}"],
+            "Num_Cuotas": cuotas_val
+        })
 
     return info_completa_deudas
 
