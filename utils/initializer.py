@@ -37,55 +37,72 @@ def initialize_services(debugging_mode: bool = False):
 
 # Función Auxiliar para Inicializar los Datos
 def initialize_data(debugging_mode: bool = False):
+    anyChange = False
     if not ("solicitudes_mec_df" in st.session_state):
         st.session_state["solicitudes_mec_df"] = load_current_month_solicitudes()
+        anyChange = True
         if debugging_mode:
             st.success("Current Month Solicitudes Loaded")
     if not ("changes_references_dict" in st.session_state):
         st.session_state["changes_references_dict"] = load_reference_changes()
+        anyChange = True
         if debugging_mode:
             st.success("Reference Changes Loaded")
     if not ("saldos_dict" in st.session_state):
         st.session_state["saldos_dict"] = load_client_balances()
+        anyChange = True
         if debugging_mode:
             st.success("Client Balances Loaded")
     if not ("pab_ideal_dict" in st.session_state):
         st.session_state["pab_ideal_dict"] = load_pab_ideal()
+        anyChange = True
         if debugging_mode:
             st.success("PaB Ideal Loaded")
     if not ("masivas_df" in st.session_state):
         st.session_state["masivas_df"] = load_masivas()
+        anyChange = True
         if debugging_mode:
             st.success("Masivas Loaded")
     if not ("addendums_df" in st.session_state):
         st.session_state["addendums_df"] = load_addendums()
+        anyChange = True
         if debugging_mode:
             st.success("Addendums Loaded")
     if not ("liquidations_set" in st.session_state):
         st.session_state["liquidations_set"] = load_liquidaciones()
+        anyChange = True
         if debugging_mode:
             st.success("Liquidations Set Initialized")
     if not ("headcount_df" in st.session_state):
         st.session_state["headcount_df"] = load_headcount_negociacion()
+        anyChange = True
         if debugging_mode:
             st.success("Headcount Data Loaded")
     if not ("app_config_dict" in st.session_state):
         st.session_state["app_config_dict"] = load_app_config()
+        anyChange = True
         if debugging_mode:
             st.success("App Config Loaded")
     if not ("special_user_permissions_dict" in st.session_state):
+        anyChange = True
         st.session_state["special_user_permissions_dict"] = load_special_user_permissions()
         if debugging_mode:
             st.success("Special User Permissions Loaded")
     if not ("cartera_activa_df" in st.session_state):
+        anyChange = True
         st.session_state["cartera_activa_df"] = load_cartera_activa()
         if debugging_mode:
             st.success("Cartera Activa Loaded")
     if not ("aliados_dict" in st.session_state):
-            aliados_df = load_aliados_dataframe()
-            st.session_state["aliados_dict"] = crear_diccionario_aliados(aliados_df)
-            if debugging_mode:
-                st.success("Aliados Loaded")
+        anyChange = True
+        aliados_df = load_aliados_dataframe()
+        st.session_state["aliados_dict"] = crear_diccionario_aliados(aliados_df)
+        if debugging_mode:
+            st.success("Aliados Loaded")
+
+    st.toast("✅Datos Inicializados con Éxito", icon="⏳")
+    if anyChange:
+        st.rerun()
 
 # Función Auxiliar para Inicializar Estados de prueba
 def initialize_test_states():

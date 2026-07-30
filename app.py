@@ -8,6 +8,7 @@ from views.rellenar_forms import rellenar_formulario_view
 
 # Definimos si estamos en Modo Debugging
 modo_debugging = st.secrets.get('debugging_mode',True)
+st.set_page_config(layout="wide")
 
 initialize_services(modo_debugging)  # Inicializamos los servicios de la aplicación
 

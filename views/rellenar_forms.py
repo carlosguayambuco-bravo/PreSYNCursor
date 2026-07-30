@@ -18,8 +18,6 @@ def rellenar_formulario_view():
     saldosDict = st.session_state['saldos_dict']
     # Addendums
     addsDF = st.session_state['addendums_df']
-    # PaB Ideal
-    pabIdealDF = st.session_state['pab_ideal_dict']
     # Deudas ya Liquidadas
     debtsLiq = st.session_state['liquidations_set']
     # Actualizaciones Masivas
@@ -80,8 +78,10 @@ def rellenar_formulario_view():
         referencia_cliente = obtener_referencia_por_deuda(deuda=id_deuda)
 
         # Si la Referencia sigue siendo Vació entonces no podemos hacer nada
-        if not referencia_cliente:
+        if not referencia_cliente and not st.session_state.get('id_rep_needed', False):
+            st.session_state['id_rep_needed'] = True
             st.error("No se encontró una referencia asociada al Id_Deuda proporcionado.")
+            st.rerun()
             st.stop()
 
         # Obtenemos las Deudas Activas con la Referencia Obtenida
@@ -136,6 +136,7 @@ def rellenar_formulario_view():
             st.session_state['pricing'] = '{:.2f}%'.format(pricing * 100)
 
             # Reiniciamos las Deudas Seleccionadas si la Referencia Cambia
+            st.session_state['deudas_seleccionadas'] = []
             deudas_seleccionadas = []
 
         # Ahora los Vamos Poniendo como Inputs en el Formulario
@@ -333,13 +334,14 @@ def rellenar_formulario_view():
         'Ids_Deuda': '.'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
         'Casa_Cobro': aliado_seleccionado,
         'Tipo_Solicitud': tipo_solicitud,
-        'Monto_Solicitud': json.dumps(info_completa_deudas),
+        'Datos_Solicitud': json.dumps(info_completa_deudas),
         'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
         'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
         'Tipo_Pago': tipo_pago if tipo_pago else '',
         'Metadata_Solicitud': json.dumps({
             'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0],
         }),
+        'Estado_Solicitud': 'Sin Tocar',
     }
 
     # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito

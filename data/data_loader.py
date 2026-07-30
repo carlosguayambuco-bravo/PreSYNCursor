@@ -49,9 +49,12 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     for col in ['Referencia', 'Cedula']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
-    # Hacemos Parsing de la Columna Monto_Solicitud y Metadata_Solicitud a JSON
-    for col in ['Monto_Solicitud', 'Metadata_Solicitud']:
+    # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
+    for col in ['Datos_Solicitud', 'Metadata_Solicitud']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
+
+    # Imputamos Ejecutivo con 'Sin Asignar'
+    imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
 
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
@@ -104,8 +107,11 @@ def processDF(ws: gspread.Worksheet, refChangesDict: dict) -> DataFrame[AhorroSc
     df['Ahorro_Total'] = df['Ahorro_Total'].apply(cleanNumber)
     df['Ahorro_Total'] = pd.to_numeric(df['Ahorro_Total'], errors='coerce')
 
-    # Validamos el DF con el esquema
-    df = AhorroSchema.validate(df)
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if not df.empty:
+        df = AhorroSchema.validate(df)
+    else:
+        df = AhorroSchema.empty()
 
     # Devolvemos el DF
     return df
@@ -165,8 +171,12 @@ def load_client_balances() -> dict[str, dict[str, float]]:
     # Realizamos una Agrupación por Referencia y dejamos la suma de Por_Cobrar
     xcobrarDF = xcobrarDF.groupby('Referencia')['Por_Cobrar'].sum().reset_index()
 
-    # Validamos el DF con el esquema
-    xcobrarDF = PorCobrarSchema.validate(xcobrarDF)
+    # Si el DF está vacío, lo validamos con el esquema vacío
+    if xcobrarDF.empty:
+        xcobrarDF = PorCobrarSchema.empty()
+    else:
+        # Validamos el DF con el esquema
+        xcobrarDF = PorCobrarSchema.validate(xcobrarDF)
 
     # Concatenamos ambos DFs en uno solo
     finalDF = pd.merge(saldosDF, xcobrarDF, on='Referencia', how='outer')
@@ -223,8 +233,11 @@ def load_pab_ideal() -> dict:
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     pab_ideal_df = pab_ideal_df.drop_duplicates(subset=['Id_Deuda'], keep='last')
 
-    # Validamos el DF
-    pab_ideal_df = PaBIdealSchema.validate(pab_ideal_df)
+    # Validamos el DF (Si no esta vacío)
+    if not pab_ideal_df.empty:
+        pab_ideal_df = PaBIdealSchema.validate(pab_ideal_df)
+    else:
+        pab_ideal_df = PaBIdealSchema.empty()
 
     # Creamos el Diccionario de Búsqueda para Id_Deuda -> PaB_Ideal_Credito
     pabIdealDict = pab_ideal_df.set_index('Id_Deuda')['PaB_Ideal_Credito'].to_dict()
@@ -254,8 +267,11 @@ def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
         aliados_df[col] = aliados_df[col].astype(str)  # Aseguramos que sean strings
         aliados_df[col] = aliados_df[col].str.contains('SI', case=False, na=False)
 
-    # Validamos el DF con el esquema
-    aliados_df = AliadosSchema.validate(aliados_df)
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if not aliados_df.empty:
+        aliados_df = AliadosSchema.validate(aliados_df)
+    else:
+        aliados_df = AliadosSchema.empty()
 
     # Devolvemos el DataFrame de Aliados
     return aliados_df
@@ -311,8 +327,11 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
     masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
 
-    # Validamos el DF
-    masivasDF = MasivasSchema.validate(masivasDF)
+    # Validamos el DF (Si no esta vacío)
+    if not masivasDF.empty:
+        masivasDF = MasivasSchema.validate(masivasDF)
+    else:
+        masivasDF = MasivasSchema.empty()
 
     # Devolvemos el DataFrame
     return masivasDF
@@ -362,8 +381,12 @@ def load_addendums() -> DataFrame[AddendumsSchema]:
     # Creamos la Columna PaB_PL como PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
     addendumsDF['PaB_PL'] = addendumsDF['PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
 
-    # Validamos el DF con el esquema
-    addendumsDF = AddendumsSchema.validate(addendumsDF)
+    # Si el DF está vacío, lo validamos con el esquema vacío
+    if addendumsDF.empty:
+        addendumsDF = AddendumsSchema.empty()
+    else:
+        # Validamos el DF con el esquema
+        addendumsDF = AddendumsSchema.validate(addendumsDF)
 
     # Devolvemos el Diccionario de Addendums
     return addendumsDF
@@ -389,8 +412,12 @@ def load_liquidaciones() -> set[str]:
     # Volvemos la Id_Deuda a String
     liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
 
-    # Validad el DF con el esquema
-    liquidacionesDF = LiquidationsSchema.validate(liquidacionesDF)
+    # Si el DF está vacío, lo validamos con el esquema vacío
+    if liquidacionesDF.empty:
+        liquidacionesDF = LiquidationsSchema.empty()
+    else:
+        # Validad el DF con el esquema
+        liquidacionesDF = LiquidationsSchema.validate(liquidacionesDF)
 
     # Creamos un Set con las Deudas Liquidadas
     liquidaciones_set = set(liquidacionesDF['Id_Deuda'].tolist())
@@ -434,8 +461,12 @@ def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
     # Quitamos Datos donde Cedula sea NaN o vacía
     hc_negociacion_df = hc_negociacion_df[hc_negociacion_df['Cedula'].notna() & (hc_negociacion_df['Cedula'] != '')]
 
-    # Validamos el DF con el esquema
-    hc_negociacion_df = HeadCountSchema.validate(hc_negociacion_df)
+    # Si el DF está vacío, lo validamos con el esquema vacío
+    if hc_negociacion_df.empty:
+        hc_negociacion_df = HeadCountSchema.empty()
+    else:
+        # Validamos el DF con el esquema
+        hc_negociacion_df = HeadCountSchema.validate(hc_negociacion_df)
 
     # Devolvemos el DataFrame de HeadCount de Negociación
     return hc_negociacion_df
@@ -452,8 +483,11 @@ def load_app_config() -> dict:
     # Dejamos solo las Columnas Necesarias
     configs_df = configs_df[['Config_Name', 'Value']]
 
-    # Validamos el DF con el esquema
-    configs_df = ConfigsSchema.validate(configs_df)
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if configs_df.empty:
+        configs_df = ConfigsSchema.empty()
+    else:
+        configs_df = ConfigsSchema.validate(configs_df)
 
     # Creamos un Diccionario de Configuración
     config_dict = configs_df.set_index('Config_Name')['Value'].to_dict()
@@ -476,8 +510,11 @@ def load_special_user_permissions() -> dict:
     # Ahora cambiamos la Búsqueda de Permisos según el Nombre y el Diccionario
     special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda perms: [PERMISSIONS_DICT[p] for p in perms if p in PERMISSIONS_DICT])
 
-    # Validamos el DF con el esquema
-    special_users_df = UserPermissionsSchema.validate(special_users_df)
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if special_users_df.empty:
+        special_users_df = UserPermissionsSchema.empty()
+    else:
+        special_users_df = UserPermissionsSchema.validate(special_users_df)
 
     # Convertimos el DataFrame a un Diccionario
     return special_users_df.set_index('Correo')['Permisos'].to_dict()
@@ -522,8 +559,11 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
     # Eliminamos Duplicados por Id_Deuda, dejando el Primer registro
     cartera_activa_df = cartera_activa_df.drop_duplicates(subset=['Id_Deuda'], keep='first')
 
-    # Validamos el DF con el esquema
-    cartera_activa_df = CarteraActivaSchema.validate(cartera_activa_df)
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if cartera_activa_df.empty:
+        cartera_activa_df = CarteraActivaSchema.empty()
+    else:
+        cartera_activa_df = CarteraActivaSchema.validate(cartera_activa_df)
 
     # Devolvemos el DataFrame de Cartera Activa
     return cartera_activa_df

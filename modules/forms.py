@@ -7,7 +7,7 @@ import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_aliados_dataframe, load_app_config, load_client_balances, load_pab_ideal, load_masivas, load_addendums
+from data.data_loader import load_aliados_dataframe, load_app_config, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
 from data.data_models import DeudasActivasSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
@@ -133,6 +133,18 @@ def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float]) -> tupl
 
     return True, "La deuda cumple con la restriccion de ofertas menores a base."
 
+# Función para Obtener el Nombre del Negociador dado el Email
+def obtener_nombre_negociador(*, email: str) -> str:
+    # Paso 1: Obtener los Datos del Headcount
+    headcount_df = load_headcount_negociacion()
+    # Paso 2: Filtrar el DataFrame por el Email
+    negociador_row = headcount_df[headcount_df['Correo'] == email]
+
+    # Paso 3: Devolver el Nombre del Negociador si Existe, de lo Contrario Devolver 'No Encontrado'
+    if not negociador_row.empty:
+        return negociador_row['Nombre'].values[0] # type: ignore
+    return "No Encontrado"
+
 # --- Queries a MetaBase ---
 
 # Función Auxiliar para obtener la referencia dada una deuda
@@ -158,6 +170,10 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     query = QUERY_ACTIVE_DEBTS.format(referencia=referencia)
     # Paso 3: Obtener las Deudas Activas desde Metabase
     deudas_df = metabase_service.execute_query(query)
+
+    if deudas_df.empty:
+        # Si el DataFrame está vacío, devolvemos un DataFrame vacío con el esquema
+        return DeudasActivasSchema.empty()
 
     # Paso 4: -- Limpieza de Datos --
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
@@ -194,6 +210,9 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
 
     # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
     ultima_actualizacion_df = metabase_service.execute_query(query)
+
+    if ultima_actualizacion_df.empty:
+        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=30) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
 
     # Paso 4: -- Limpieza de Datos --
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos

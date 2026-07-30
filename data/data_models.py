@@ -2,7 +2,7 @@
 # Librerías de Python
 # Librerías de Terceros
 import pandas as pd
-import pandera as pa
+import pandera.pandas as pa
 # Librerías Locales
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD
 
@@ -18,7 +18,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     Ids_Deuda: str  # Lista de Ids de Deuda como cadena separada por -
     Casa_Cobro: str
     Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
-    Monto_Solicitud: dict # Es un JSON que contiene el Monto por Deuda y los Plazos
+    Datos_Solicitud: dict # Es un JSON que contiene el Monto por Deuda y los Plazos
     Fecha_Esperada_Pago: pa.dtypes.Timestamp
     Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD)
     Ejecutivo: str

@@ -23,6 +23,7 @@ ESTADOS_POSIBLES_SOLICITUD = [
     'Validada por Fuera',
     'Sin Tocar', # Estado Transitorio
 ]
+
 PAGOS_POSIBLES_SOLICITUD = [
     'Tradicional',
     'Estructuraado',

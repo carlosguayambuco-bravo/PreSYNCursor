@@ -223,6 +223,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
         info_completa_deudas.append({
             "Id_Deuda": id_deuda,
+            "Banco": row['Banco'],
             "Monto_Propuesto": st.session_state[f"monto_propuesto_{id_deuda}"],
             "Num_Cuotas": cuotas_val
         })
