@@ -1,6 +1,7 @@
 # Archivo para Inicializar los Servicios de la Aplicación
 # Usando estándar Pep8
 # Librerías de Python
+import json
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
@@ -19,9 +20,14 @@ def initialize_services():
     metabase_service = MetabaseService(metabase_username, metabase_password, metabase_mainDB_id)
 
     # Inicializamos el Servicio de GoogleSheets
-    google_sheets_credentials = st.secrets["google_sheets"]["credentials"]
+    google_sheets_credentials = json.loads(st.secrets["google_sheets_credentials"])
     google_sheets_service = GoogleSheetsService(google_sheets_credentials)
 
     # Guardamos los servicios en el estado de la aplicación para que estén disponibles globalmente
     st.session_state["metabase_service"] = metabase_service
     st.session_state["google_sheets_service"] = google_sheets_service
+
+# Función Auxiliar para Inicializar Estados de prueba
+def initialize_test_states():
+    if "user_email" not in st.session_state:
+        st.session_state["user_email"] = "maurcio.valencia@gobravo.com.co"
