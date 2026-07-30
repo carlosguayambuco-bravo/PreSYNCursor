@@ -86,6 +86,8 @@ def rellenar_formulario_view():
 
         # Obtenemos las Deudas Activas con la Referencia Obtenida
         deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
+    else:
+        ref_antigua = referencia_cliente
 
     # Quitamos de las Deudas Activas las que ya han sido Liquidadas
     deudas_activas_df = deudas_activas_df[~deudas_activas_df['Id_Deuda'].isin(debtsLiq)]
@@ -108,7 +110,7 @@ def rellenar_formulario_view():
         st.stop()
 
     # Verificamos si tiene algún Addendum Activo
-    addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente) & (addsDF['Estado'] == 'Activo')]
+    addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente)]
     if not addendum_activo.empty:
         # Añadimos los Addendums a las Deudas Activas
         deudas_activas_df = pd.concat([deudas_activas_df, addendum_activo[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen','PaB_PL']]], ignore_index=True)
@@ -121,8 +123,8 @@ def rellenar_formulario_view():
         saldoAntiguo = saldosDict['Saldos'][ref_antigua]
         saldoNuevo = saldosDict['Saldos'][referencia_cliente]
         saldoReal = max(saldoAntiguo, saldoNuevo)
-        porCobrarAntiguo = saldosDict['Por Cobrar'][ref_antigua]
-        porCobrarNuevo = saldosDict['Por Cobrar'][referencia_cliente]
+        porCobrarAntiguo = saldosDict['PorCobrar'][ref_antigua]
+        porCobrarNuevo = saldosDict['PorCobrar'][referencia_cliente]
         porCobrarReal = max(porCobrarAntiguo, porCobrarNuevo)
 
         pricing = deudas_activas_df['Pricing'].max()
@@ -134,7 +136,7 @@ def rellenar_formulario_view():
             st.session_state['pricing'] = '{:.2f}%'.format(pricing * 100)
 
             # Reiniciamos las Deudas Seleccionadas si la Referencia Cambia
-            st.session_state['deudas_seleccionadas'] = []
+            deudas_seleccionadas = []
 
         # Ahora los Vamos Poniendo como Inputs en el Formulario
         with colSaldos:
@@ -166,19 +168,19 @@ def rellenar_formulario_view():
     st.subheader("Selección de Deudas Activas")
 
     # Mostramos la Selección de Deudas
-    mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
+    deudas_seleccionadas = mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
 
     # Guardamos la Referencia como Ultima en el Session_State
     st.session_state['ultima_referencia'] = referencia_cliente
 
     # Filtramos el DF para dejar solo las Deudas Seleccionadas
-    deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
+    deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(deudas_seleccionadas)]
 
     # Dado que añadimos info de los Addendums reescribimos la Columna Pricing con el valor máximo de Pricing entre las Deudas Seleccionadas
     deudas_seleccionadas_df['Pricing'] = deudas_activas_df['Pricing'].max()
 
     # Verificamos que al menos una Deuda esté Seleccionada
-    if not st.session_state['deudas_seleccionadas']:
+    if not deudas_seleccionadas:
         st.warning("Debe seleccionar al menos una deuda activa para poder continuar con el llenado del formulario.")
         st.stop()
 
@@ -225,17 +227,17 @@ def rellenar_formulario_view():
     if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
         mostrar_monto_recomendado(
             referencia=referencia_cliente,
-            deudas=st.session_state['deudas_seleccionadas'],
+            deudas=deudas_seleccionadas,
             pricing=deudas_seleccionadas_df['Pricing'].max(),
             deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
         )
 
-    deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in st.session_state['deudas_seleccionadas']}
+    deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in deudas_seleccionadas}
 
     # --- Siguiente: Alertas y Verificaciones ---
 
     # Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
-    masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(st.session_state['deudas_seleccionadas'])]
+    masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
     if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
         aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado].brinda_maximo_descuento()
         if aliado_brinda_descuento_maximo:
@@ -350,13 +352,14 @@ def rellenar_formulario_view():
             help="Presione este botón para enviar el formulario (Solo se envía una vez)",
             type="primary",
             key="enviar_formulario",
-            disabled= boton_habilitado,
+            disabled= not boton_habilitado,
         )
 
     with colMensaje:
         if enviar_formulario:
             # Intentamos Subir la Respuesta a Google Sheets
-            success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
+            with st.spinner("Enviando formulario..."):
+                success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
 
             if success_response:
                 # Actualizamos el Session State para que no se pueda enviar nuevamente

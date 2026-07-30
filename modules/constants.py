@@ -93,22 +93,22 @@ SELECT
     pl.PB_PL AS PaB_PL,
     vsp.success_commission_percentage AS Pricing
 FROM dealer_public.berex_credit_repair_debts bcrd
+    LEFT JOIN dealer_public.berex_credit_repairs AS bcr
+        ON bcr.id = bcrd.credit_repair_id
     LEFT JOIN PL_Programa AS pl
         ON bcrd.id = pl.debt_id
     LEFT JOIN vanex_public.leads_lead AS ll
-        ON ll.tracker_id = bcrd.tracker_id
+        ON ll.tracker_id = bcr.tracker_id
     LEFT JOIN vanex_public.settlement_plan AS vsp
         ON vsp.lead_id = ll.id
-    LEFT JOIN dealer_public.berex_credit_repairs AS bcr
-        ON bcr.id = bcrd.credit_repair_id
 WHERE 
-    bcrd.status IN ('new','negotiation','lawsuit')
+    bcrd.state IN ('new','negotiation','lawsuit')
     AND NOT(bcrd.sub_state IN ('liquidated','liquidated_with_credit','liquidation_in_process','cancelled','drop_requested','liquidation_structured_payment'))
     AND vsp.winner IS TRUE
-    AND bcrd.bank_reference = '{referencia};'
+    AND bcrd.bank_reference = '{referencia}';
 """
 
-QUERY_LAST_UPDATE = """"
+QUERY_LAST_UPDATE = """
 SELECT
     MAX(bda.updated_at) AS Ultima_Actualizacion,
     bda.debt_id AS Id_Deuda
@@ -116,8 +116,7 @@ FROM dealer_public.berex_debt_activities AS bda
 WHERE 
     bda.debt_id IN ({debt_ids}) AND
     bda.end = '{email}'
-GROUP BY bda.debt_id
-"""
+GROUP BY bda.debt_id;"""
 
 # --- Constantes de Solicitudes ---
 SOLICITUDES_SHEETS_ID = "1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk"

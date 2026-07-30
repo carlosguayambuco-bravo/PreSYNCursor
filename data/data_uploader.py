@@ -14,7 +14,7 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
     response_df = pd.DataFrame([response_info])
 
     # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
-    sheets_service: GoogleSheetsService = st.session_state['sheets_service']
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
 
     # Abrimos la Worksheet 'Solicitudes_MEC' usando el servicio de Sheets
     responses_ws = sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
@@ -34,7 +34,7 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         new_id = 1
 
     # Agregamos el nuevo ID a la respuesta
-    response_df['ID'] = new_id
+    response_df['ID_Solicitud'] = new_id
 
     # Subimos la respuesta a Google Sheets
     try:

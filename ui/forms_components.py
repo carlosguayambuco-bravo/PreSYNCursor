@@ -9,7 +9,7 @@ import streamlit as st
 from data.data_models import DeudasActivasSchema
 from modules.forms import obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
 
-def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> None:
+def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[str]:
     st.subheader("Deudas Activas del Cliente")
     st.info("Seleccione las deudas que desea incluir en el formulario de alianzas")
 
@@ -42,7 +42,12 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
             st.text(row['Banco'])
 
         with colPaBOrigen:
-            st.text('${:;.0f}'.format(row['PaB_Origen']))
+            st.text('${:,.0f}'.format(row['PaB_Origen']))
+
+    # Definimos los Ids elegidos de las Deudas Seleccionadas
+    deudas_seleccionadas = [deuda for deuda in deudas_activas_df['Id_Deuda'] if st.session_state.get(f"deuda_{deuda}", False)]
+
+    return deudas_seleccionadas
 
 def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: float, deudas_seleccionadas_df: DataFrame[DeudasActivasSchema]) -> None:
     st.subheader("💰 Monto Recomendado para el Acuerdo")
@@ -81,13 +86,15 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         pago_total = st.number_input(
             "Monto Total a Pagar",
             min_value=0.0,
-            value=1000.0,
+            value=st.session_state.get('pago_total', deudas_activas_df_copy['PaB_Origen'].sum() * 0.6), # De prueba
             step=100.0,
             format="%.0f",
-            key="pago_total",
+            key="pago_total_input",
             help="Ingresar el Monto a Pagar por todas las Deudas",
-            disabled=st.session_state['usar_para_todos']
+            disabled=not st.session_state['usar_para_todos']
         )
+        # Guardamos el Valor en el Session State
+        st.session_state['pago_total'] = pago_total
     with colUsarParaTodos:
         usar_para_todos = st.checkbox(
             "Distribuir el Monto entre Deudas",
@@ -116,9 +123,9 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
     # Creamos las Columnas de la Tabla: Id_Deuda, PaB_Origen, Monto_Propuesto, %Total, Monto Propuesto (Input), Cuotas (Input)
     if tipo_cuotas == 'Por Deuda':
-        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotas = st.columns([2, 2, 2, 1, 2, 2], gap = "small")
+        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotas = st.columns([2, 2, 2, 1, 2, 2], gap = "small", vertical_alignment="center")
     else:
-        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 2], gap = "small")
+        colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 2], gap = "small", vertical_alignment="center")
 
     with colIdDeuda:
         st.markdown("**Id Deuda**")
@@ -139,13 +146,13 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             st.text(row['Id_Deuda'])
 
         with colPaBOrigen:
-            st.text('${:;.0f}'.format(row['PaB_Origen']))
+            st.text('${:,.0f}'.format(row['PaB_Origen']))
 
         with colProp:
             # Obtenemos el Descuento en Base
             descuento_base = obtener_descuento_base(deuda=row['Id_Deuda'])
             if not pd.isna(descuento_base):
-                st.text('${:.0f}'.format(descuento_base))
+                st.text('${:,.0f}'.format(descuento_base))
             else:
                 st.text("N/A")
 
@@ -153,29 +160,36 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             st.text('{:.2%}'.format(row['%Total']))
 
         with colMontoPropuesto:
-            st.number_input(
+            monto_propuesto_deuda = st.number_input(
                 "",
                 min_value=0.0, 
-                value=pago_total * row['%Total'],
+                value=st.session_state.get(f"monto_propuesto_{row['Id_Deuda']}", pago_total * row['%Total']),
                 step=100.0, 
                 format="%.0f", 
-                key=f"monto_propuesto_{row['Id_Deuda']}",
                 disabled=usar_para_todos,
+                label_visibility="collapsed",
+                key=f"monto_propuesto_{row['Id_Deuda']}_input",
+                help="Ingrese el Monto Propuesto para esta Deuda"
             )
             if usar_para_todos:
                 st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = pago_total * row['%Total']
+            else:
+                st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = monto_propuesto_deuda
 
         if tipo_cuotas == 'Por Deuda':
             with colCuotas:
-                st.number_input(
+                num_cuotas_deuda = st.number_input(
                     "",
                     min_value=1,
                     max_value=60,
-                    value=12,
+                    value=st.session_state.get(f"num_cuotas_{row['Id_Deuda']}", 1),
                     step=1,
-                    key=f"num_cuotas_{row['Id_Deuda']}",
+                    label_visibility="collapsed",
+                    key=f"num_cuotas_{row['Id_Deuda']}_input",
                     help="Seleccione el número de cuotas para esta deuda"
                 )
+                # Guardamos el Valor en el Session State
+                st.session_state[f"num_cuotas_{row['Id_Deuda']}"] = num_cuotas_deuda
 
     # Ahora con todos los Montos Propuestos, actualizamos el Session State de pago_total
     if not usar_para_todos:
@@ -213,7 +227,7 @@ def mostrar_alertas_masivas_deudas(*, deudas_info: dict[str, float]) -> bool:
             colDeuda, colMensaje = st.columns([1, 4])
 
             with colDeuda:
-                st.text(f"**Deuda**: {deuda}")
+                st.markdown(f"**Deuda**: {deuda}")
 
             with colMensaje:
                 if cumple:
@@ -263,7 +277,7 @@ def mostrar_resumen_solicitud(*,
             with colIdDeuda:
                 st.text(deuda['Id_Deuda'])
             with colMontoPropuesto:
-                st.text('${:;.0f}'.format(deuda['Monto_Propuesto']))
+                st.text('${:,.0f}'.format(deuda['Monto_Propuesto']))
             with colNumCuotas:
                 st.text(deuda['Num_Cuotas'])
 

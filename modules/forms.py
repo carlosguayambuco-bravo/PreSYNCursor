@@ -57,13 +57,13 @@ def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: floa
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
 def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) -> tuple[bool, float]:
     # Obtenemos la Fecha Actual Normalizada a Hoy (Sin Hora)
-    fecha_actual = pd.Timestamp.now('America/Bogota').normalize()
+    fecha_actual = pd.Timestamp.now('America/Bogota').normalize().tz_localize(None)
     # Obtenemos la Diferencia en Días Hábiles entre Hoy y la Última Actualización
     dias_habiles_diff = getBDDaysDiffFloat(firstDate=ultima_actualizacion, secondDate=fecha_actual)
     # Traemos la Configuracion de la Aplicacion
     appConfig = load_app_config()
     # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
-    return dias_habiles_diff <= int(appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']), dias_habiles_diff
+    return dias_habiles_diff <= float(appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']), dias_habiles_diff
 
 # Función Auxiliar para Obtener las Deudas del Portafolio de Masivas
 def obtener_deudas_portafolio_masivas(*,deuda: str) -> list[str]:

@@ -5,7 +5,7 @@ import json
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions
+from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions # type: ignore
 from modules.classes import crear_diccionario_aliados
 from services.metabase import MetabaseService
 from services.google_sheets import GoogleSheetsService
