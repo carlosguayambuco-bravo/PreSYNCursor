@@ -312,7 +312,7 @@ def rellenar_formulario_view():
         tipo_pago = None
 
     # Mostramos el Resumen de la Solicitud dentro de un expander
-    with st.expander("Ver Resumen de la Solicitud", expanded=True):
+    with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
         mostrar_resumen_solicitud(
             referencia=referencia_cliente,
             deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore

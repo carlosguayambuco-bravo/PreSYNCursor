@@ -142,7 +142,14 @@ def obtener_nombre_negociador(*, email: str) -> str:
 
     # Paso 3: Devolver el Nombre del Negociador si Existe, de lo Contrario Devolver 'No Encontrado'
     if not negociador_row.empty:
-        return negociador_row['Nombre'].values[0] # type: ignore
+        nombre_completo = negociador_row['Nombre'].values[0] # type: ignore
+        # Ahora Vamos a dejar solo el Primer Nombre y el Primer Apellido
+        nombre_partes = nombre_completo.split() # type: ignore
+        if len(nombre_partes) >= 4:
+            return "{} {}".format(nombre_partes[0], nombre_partes[2])
+        else:
+            return nombre_completo # type: ignore
+
     return "No Encontrado"
 
 # --- Queries a MetaBase ---
