@@ -311,6 +311,13 @@ def rellenar_formulario_view():
         fecha_esperada_pago = None
         tipo_pago = None
 
+    # Mostramos un Campo para añadir Comentarios Adicionales sobre la Solicitud
+    comentario_adicional = st.text_area(
+        "**Comentarios Adicionales sobre la Solicitud**",
+        value="",
+        help="Ingrese cualquier comentario adicional sobre la solicitud (Ejemplo: Válidar Máximo Descuento)",
+    )
+
     # Mostramos el Resumen de la Solicitud dentro de un expander
     with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
         mostrar_resumen_solicitud(
@@ -340,6 +347,7 @@ def rellenar_formulario_view():
         'Tipo_Pago': tipo_pago if tipo_pago else '',
         'Metadata_Solicitud': json.dumps({
             'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0],
+            'Comentario_Adicional': comentario_adicional,
         }),
         'Estado_Solicitud': 'Sin Tocar',
     }
@@ -374,7 +382,7 @@ def rellenar_formulario_view():
             else:
                 # Si hubo error, liberamos el candado para que el usuario pueda reintentar
                 st.session_state['ultima_referencia_enviada'] = None
-                st.error("Error al enviar el formulario. Por favor, intente nuevamente.")
+                st.toast("Error al enviar el formulario. Por favor, intente nuevamente.")
 
         elif ya_enviado:
             st.info("Esta referencia ya fue enviada previamente.")

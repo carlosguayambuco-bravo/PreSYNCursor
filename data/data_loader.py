@@ -41,6 +41,9 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     # Obtenemos el DF de la Hoja "Solicitudes_MEC"
     solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
 
+    # Guardamos los Headers en el Session State
+    st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
+
     # Volvemos las Columnas Necesarias a Timestamp
     for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
         solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)

@@ -201,6 +201,7 @@ class DeudasActivasSchema(pa.DataFrameModel):
     Referencia: str
     Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,12}$")  # Validación de cédula
     Nombre_Cliente: str
+    Numero_Credito: str
     Banco: str
     PaB_Origen: float
     PaB_PL: float

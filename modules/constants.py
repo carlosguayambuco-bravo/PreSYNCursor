@@ -12,16 +12,31 @@ WEEK_WAIT = 604800 # En Segundos
 
 # --- Configuración de Validación de Datos ---
 ESTADOS_POSIBLES_SOLICITUD = [
+    'Exitosa', # La Solicitud fue Respondida y Finalizada con Éxito (Se parte que es exitosa si se logró una validación con alguna de las deudas)
+    'Vencida', # La Solicitud no fue gestionada en un lapso de XX Días Hábiles
+    'No Exitosa', # La Solciitud fue validáda pero no tuvó éxito
+    'Erronea', # La Solicitud fue subida con datos erroneos o incompletos
+    'Bajo Comité', # Estado Transitorio: Significa que para seguir escalando la solicitud se requiere que vaya a comité y se pagué
+    'No esta con Aliado', # La Solicitud fue brindada con un aliado pero no se encuentra con el mismo, por lo que no se puede continuar con la gestión
+    'Titular Ilocalizable', # Estado Transitorio: Significa que el titular de la deuda no se encuentra localizable, por lo que no se puede continuar con la gestión hasta que se logré localizar al titular
+    'Validada por Fuera', # Signfica que hubó una validación y/o Pago por Fuera para las Deudas
+    'Sin Tocar', # Estado Transitorio: # La Solicitud no ha sido tocada por un ejecutivo
+]
+ESTADOS_RESPONDIBLES_SOLICITUD = [
     'Exitosa',
-    'Vencida',
     'No Exitosa',
     'Erronea',
-    'Bajo Comité', # Estado Transitorio
+    'Vencida',
     'No esta con Aliado',
-    'Pago por Fuera',
-    'Titular Ilocalizable', # Estado Transitorio
     'Validada por Fuera',
-    'Sin Tocar', # Estado Transitorio
+]
+ESTADOS_PREFINALIZAR_SOLICITUD = [
+    'Bajo Comité',
+    'Titular Ilocalizable',
+    'Vencida',
+    'No esta con Aliado',
+    'Validada por Fuera',
+    'No Exitosa',
 ]
 
 PAGOS_POSIBLES_SOLICITUD = [
@@ -90,6 +105,7 @@ SELECT
     bcr.document_number AS Cedula,
     bcr.full_name AS Nombre_Cliente,
     bcrd.financial_entity_name AS Banco,
+    bcrd.credit_number AS Numero_Credito,
     bcrd.amount AS PaB_Origen,
     pl.PB_PL AS PaB_PL,
     vsp.success_commission_percentage AS Pricing

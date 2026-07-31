@@ -1,8 +1,10 @@
 # Estándar usando Pep8
 # Librerías de Python
+import threading
 # Librerías de Terceros
 import pandas as pd
 from pandera.typing import DataFrame
+import streamlit as st
 # Librerías Locales
 from data.data_models import AliadosSchema
 
@@ -78,3 +80,21 @@ def crear_diccionario_aliados(df: DataFrame[AliadosSchema]) -> dict:
 
     # Paso 3: Devolver el Diccionario de Aliados
     return aliados_dict
+
+# Manejo de IDs Bloqueados porque ya se respondió la solicitud
+@st.cache_resource
+def get_banned_manager():
+    class BannedManager:
+        def __init__(self):
+            self.banned = set()
+            self.lock = threading.Lock()
+
+        def ban(self, item_id):
+            with self.lock:
+                self.banned.add(item_id)
+
+        def is_banned(self, item_id):
+            with self.lock:
+                return item_id in self.banned
+
+    return BannedManager()

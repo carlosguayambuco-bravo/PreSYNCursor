@@ -11,6 +11,7 @@ from data.data_loader import load_aliados_dataframe, load_app_config, load_clien
 from data.data_models import DeudasActivasSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
+from modules.bank_normalizer import normalizar_banco
 from modules.constants import IVA, HOUR_WAIT, DEFAULT_DISCOUNT_PL, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_LAST_UPDATE
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
@@ -203,6 +204,11 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     deudas_df.loc[maskPLNaN, 'PaB_PL'] = deudas_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
     # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
     deudas_df['Pricing'] = deudas_df['Pricing'].apply(parsePercentage)
+    # Volvemos Numero_Credito a String usando astype
+    deudas_df['Numero_Credito'] = deudas_df['Numero_Credito'].astype(str)
+
+    # Importante: Normalizamos los Bancos
+    deudas_df['Banco'] = deudas_df['Banco'].apply(normalizar_banco)
 
     # Validamos el DF con el esquema
     deudas_df = DeudasActivasSchema.validate(deudas_df)
