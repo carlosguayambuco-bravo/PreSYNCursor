@@ -134,7 +134,7 @@ def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float]) -> tupl
     return True, "La deuda cumple con la restriccion de ofertas menores a base."
 
 # Función para Obtener el Nombre del Negociador dado el Email
-def obtener_nombre_negociador(*, email: str) -> str:
+def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
     # Paso 1: Obtener los Datos del Headcount
     headcount_df = load_headcount_negociacion()
     # Paso 2: Filtrar el DataFrame por el Email
@@ -143,6 +143,10 @@ def obtener_nombre_negociador(*, email: str) -> str:
     # Paso 3: Devolver el Nombre del Negociador si Existe, de lo Contrario Devolver 'No Encontrado'
     if not negociador_row.empty:
         nombre_completo = negociador_row['Nombre'].values[0] # type: ignore
+
+        if full_name:
+            return nombre_completo # type: ignore
+
         # Ahora Vamos a dejar solo el Primer Nombre y el Primer Apellido
         nombre_partes = nombre_completo.split() # type: ignore
         if len(nombre_partes) >= 4:
