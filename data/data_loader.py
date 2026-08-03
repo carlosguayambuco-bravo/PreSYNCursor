@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
 from services.google_sheets import GoogleSheetsService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
@@ -523,7 +523,7 @@ def load_special_user_permissions() -> dict:
 # Función Auxiliar para Cargar la Cartera Activa (Para Modelo de Búsqueda)
 @st.cache_data(show_spinner="Cargando Cartera Activa desde Google Sheets...", ttl=WEEK_WAIT)
 def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
-    # Primero Obtenemos la Spreadsheet de Cartera Activa desde Google Sheets
+    # Primero Obtenemos el Servicio de Google Sheets desde el Session State
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
     # Obtenemos el DF de la Hoja "Cartera"
@@ -568,3 +568,32 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
 
     # Devolvemos el DataFrame de Cartera Activa
     return cartera_activa_df
+
+# Función Auxiliar para Cargar los Logs
+@st.cache_data(show_spinner="Cargando Logs de la Aplicación desde Google Sheets...", ttl=HOUR_WAIT)
+def load_logs() -> DataFrame[LogsSchema]:
+    # Primero obtenemos el Servicio de Google Sheets desde el Session State
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Logs"
+    logs_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Logs')
+
+    # Renombramos las Columnas
+    logs_df = logs_df.rename(columns={
+        'Timestamp': 'Timestamp',
+        'Usuario': 'Usuario',
+        'Motivo': 'Motivo',
+        'Detalle': 'Detalle'
+    })
+
+    # Volvemos Timestamp a Datetime
+    logs_df['Timestamp'] = pd.to_datetime(logs_df['Timestamp'], errors='coerce', dayfirst=False)
+
+    # Validamos el DF con el esquema (Si no esta vacío)
+    if logs_df.empty:
+        logs_df = LogsSchema.empty()
+    else:
+        logs_df = LogsSchema.validate(logs_df)
+
+    # Devolvemos el DataFrame de Logs
+    return logs_df

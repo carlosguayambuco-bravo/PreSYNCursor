@@ -210,3 +210,16 @@ class DeudasActivasSchema(pa.DataFrameModel):
     class Config:
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
+
+class LogsSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de logs.
+    """
+    Timestamp: pa.dtypes.Timestamp
+    Usuario: str = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")  # Validación de correo electrónico
+    Motivo: str
+    Detalle: str
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
