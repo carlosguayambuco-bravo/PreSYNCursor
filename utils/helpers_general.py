@@ -138,7 +138,7 @@ def getBDDaysDiffFloat(firstDate: pd.Timestamp, secondDate: pd.Timestamp, change
 
     return round(float_diff, 4)
 
-def getBDDaysDiffFloat_vectorized(start_series: pd.Series, end_series: pd.Series) -> pd.Series[float]:
+def getBDDaysDiffFloat_vectorized(start_series: pd.Series, end_series: pd.Series) -> pd.Series:
     global co_holidays_new
     # 1. FORZAR PARSEO: Convierte strings/objetos a datetime64[ns] real.
     # Los valores corruptos o no parseables se transformarán en NaT de forma segura.

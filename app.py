@@ -7,7 +7,6 @@ from core.auth import authenticate_user
 from core.permissions import get_permit_pages
 from utils.initializer import initialize_services, initialize_test_states, initialize_data
 from ui.login_components import show_user_info
-from views.rellenar_forms import rellenar_formulario_view
 from views.login_page import show_login_page
 
 # Definimos si estamos en Modo Debugging

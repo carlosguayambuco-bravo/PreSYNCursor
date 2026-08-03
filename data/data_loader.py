@@ -36,8 +36,6 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
-    st.info("Intentando cargar solicitudes...")
-
     # Obtenemos el DF de la Hoja "Solicitudes_MEC"
     solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
 
@@ -52,18 +50,18 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     for col in ['Referencia', 'Cedula']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
-    # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
-    for col in ['Datos_Solicitud', 'Metadata_Solicitud']:
-        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
-
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
-
+    
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
         solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
     else:
         solicitudes_df = SolicitudesSchema.empty()
+
+    # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
+    for col in ['Datos_Solicitud', 'Metadata_Solicitud']:
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
 
     # Devolvemos el DataFrame
     return solicitudes_df
@@ -533,7 +531,7 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
 
     # Renombramos las Columnas
     cartera_activa_df = cartera_activa_df.rename(columns={
-        'id_deuda': 'Id_Deuda',
+        'Id deuda': 'Id_Deuda',
         'Referencia': 'Referencia',
         'cedula': 'Cedula',
         'deuda bravo': 'PaB_Origen',

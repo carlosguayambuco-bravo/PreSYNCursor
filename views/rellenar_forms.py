@@ -9,388 +9,381 @@ from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 
-def rellenar_formulario_view():
+# Carga de Información Necesaria para el Formulario
+# Se Necesita:
+# Aliados Actuales
+aliadosDict = st.session_state['aliados_dict']
+# Saldos y Por Cobrar
+saldosDict = st.session_state['saldos_dict']
+# Addendums
+addsDF = st.session_state['addendums_df']
+# Deudas ya Liquidadas
+debtsLiq = st.session_state['liquidations_set']
+# Actualizaciones Masivas
+masivasDF = st.session_state['masivas_df']
+# Configuración del App
+appConfig = st.session_state['app_config_dict']
 
-    # Cambiamos Configuración de Streamlit
-    st.set_page_config(
-        page_title="Formulario de Alianzas",
+
+# Inicializamos las Deudas Seleccionadas en el Session State si no Existe
+if 'deudas_seleccionadas' not in st.session_state:
+    st.session_state['deudas_seleccionadas'] = []
+
+
+st.title("🗒️ Nuevo Formulario de Alianzas")
+st.divider()
+
+st.subheader("Referencia del Cliente")
+# -- Campos del Formulario
+
+# Referencia y Id_Deuda
+cols = st.columns([1, 1])
+
+# Referencia del Cliente
+with cols[0]:
+    referencia_cliente = st.number_input("Referencia del Cliente", help="Ingrese la referencia del cliente, Ejemplo: 3007083770", format="%d", step=1, min_value=0)
+
+# Deuda Representante del Cliente
+with cols[1]:
+    id_deuda = st.number_input("Id_Deuda del Cliente, Ejemplo: 123456789",
+    help="Ingrese el Id de alguna deuda del cliente (Solo válido cuando la Referencia no se encuentra)",
+    format="%d", step=1, min_value=0,
+    disabled = (not st.session_state.get('id_rep_needed',False)),
     )
 
-    # Carga de Información Necesaria para el Formulario
-    # Se Necesita:
-    # Aliados Actuales
-    aliadosDict = st.session_state['aliados_dict']
-    # Saldos y Por Cobrar
-    saldosDict = st.session_state['saldos_dict']
-    # Addendums
-    addsDF = st.session_state['addendums_df']
-    # Deudas ya Liquidadas
-    debtsLiq = st.session_state['liquidations_set']
-    # Actualizaciones Masivas
-    masivasDF = st.session_state['masivas_df']
-    # Configuración del App
-    appConfig = st.session_state['app_config_dict']
+# Validamos la Referencia
+if not referencia_cliente:
+    st.error("La referencia del cliente es obligatoria")
+    st.stop()
 
+# Limpiamos la Referencia y el id_deuda
+referencia_cliente = str(referencia_cliente).strip() if referencia_cliente else ''
+id_deuda = str(id_deuda).strip().replace('.0','') if id_deuda else ''
 
-    # Inicializamos las Deudas Seleccionadas en el Session State si no Existe
-    if 'deudas_seleccionadas' not in st.session_state:
-        st.session_state['deudas_seleccionadas'] = []
+# Paso Siguiente: Obtener las Deudas Activas y la Última Actualización
+# --- Deudas Activas ---
+deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
 
-
-    st.title("🗒️ Nuevo Formulario de Alianzas")
-    st.divider()
-
-    st.subheader("Referencia del Cliente")
-    # -- Campos del Formulario
-
-    # Referencia y Id_Deuda
-    cols = st.columns([1, 1])
-
-    # Referencia del Cliente
-    with cols[0]:
-        referencia_cliente = st.number_input("Referencia del Cliente", help="Ingrese la referencia del cliente, Ejemplo: 3007083770", format="%d", step=1, min_value=0)
-
-    # Deuda Representante del Cliente
-    with cols[1]:
-        id_deuda = st.number_input("Id_Deuda del Cliente, Ejemplo: 123456789",
-        help="Ingrese el Id de alguna deuda del cliente (Solo válido cuando la Referencia no se encuentra)",
-        format="%d", step=1, min_value=0,
-        disabled = (not st.session_state.get('id_rep_needed',False)),
-        )
-
-    # Validamos la Referencia
-    if not referencia_cliente:
-        st.error("La referencia del cliente es obligatoria")
+# Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
+if deudas_activas_df.empty:
+    # Si el Id_Deuda es Vácio entonces no podemos hacer nada
+    if not id_deuda:
+        st.session_state['id_rep_needed'] = True
+        st.info("No se encontraron deudas activas para la referencia proporcionada. Por favor, ingrese algún Id Deuda de la Referencia para continuar.")
         st.stop()
 
-    # Limpiamos la Referencia y el id_deuda
-    referencia_cliente = str(referencia_cliente).strip() if referencia_cliente else ''
-    id_deuda = str(id_deuda).strip().replace('.0','') if id_deuda else ''
+    # Obtenemos la Referencia por Id_Deuda
+    ref_antigua = referencia_cliente
+    referencia_cliente = obtener_referencia_por_deuda(deuda=id_deuda)
 
-    # Paso Siguiente: Obtener las Deudas Activas y la Última Actualización
-    # --- Deudas Activas ---
+    # Si la Referencia sigue siendo Vació entonces no podemos hacer nada
+    if not referencia_cliente and not st.session_state.get('id_rep_needed', False):
+        st.session_state['id_rep_needed'] = True
+        st.error("No se encontró una referencia asociada al Id_Deuda proporcionado.")
+        st.rerun()
+        st.stop()
+
+    # Obtenemos las Deudas Activas con la Referencia Obtenida
     deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
+else:
+    ref_antigua = referencia_cliente
 
-    # Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
-    if deudas_activas_df.empty:
-        # Si el Id_Deuda es Vácio entonces no podemos hacer nada
-        if not id_deuda:
-            st.session_state['id_rep_needed'] = True
-            st.info("No se encontraron deudas activas para la referencia proporcionada. Por favor, ingrese algún Id Deuda de la Referencia para continuar.")
-            st.stop()
+# Quitamos de las Deudas Activas las que ya han sido Liquidadas
+deudas_activas_df = deudas_activas_df[~deudas_activas_df['Id_Deuda'].isin(debtsLiq)]
 
-        # Obtenemos la Referencia por Id_Deuda
-        ref_antigua = referencia_cliente
-        referencia_cliente = obtener_referencia_por_deuda(deuda=id_deuda)
-
-        # Si la Referencia sigue siendo Vació entonces no podemos hacer nada
-        if not referencia_cliente and not st.session_state.get('id_rep_needed', False):
-            st.session_state['id_rep_needed'] = True
-            st.error("No se encontró una referencia asociada al Id_Deuda proporcionado.")
-            st.rerun()
-            st.stop()
-
-        # Obtenemos las Deudas Activas con la Referencia Obtenida
-        deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
-    else:
-        ref_antigua = referencia_cliente
-
-    # Quitamos de las Deudas Activas las que ya han sido Liquidadas
-    deudas_activas_df = deudas_activas_df[~deudas_activas_df['Id_Deuda'].isin(debtsLiq)]
-
-    # Si el DF sigue siendo vacío entonces no podemos hacer nada
-    if deudas_activas_df.empty:
-        st.error("No se encontraron deudas activas para la referencia proporcionada.")
-        st.stop()
+# Si el DF sigue siendo vacío entonces no podemos hacer nada
+if deudas_activas_df.empty:
+    st.error("No se encontraron deudas activas para la referencia proporcionada.")
+    st.stop()
 
 
-    # Verificamos que exista una Última Actualización para las Deudas Activas
-    ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))
-    # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
-    cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
-    if not cumple_condicion:
-        st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
-            dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
-        ))
-        st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
-        st.stop()
+# Verificamos que exista una Última Actualización para las Deudas Activas
+ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))
+# Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
+cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
+if not cumple_condicion:
+    st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
+        dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+    ))
+    st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
+    st.stop()
 
-    # Verificamos si tiene algún Addendum Activo
-    addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente)]
-    if not addendum_activo.empty:
-        # Añadimos los Addendums a las Deudas Activas
-        deudas_activas_df = pd.concat([deudas_activas_df, addendum_activo[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen','PaB_PL']]], ignore_index=True)
+# Verificamos si tiene algún Addendum Activo
+addendum_activo = addsDF[(addsDF['Referencia'] == referencia_cliente)]
+if not addendum_activo.empty:
+    # Añadimos los Addendums a las Deudas Activas
+    deudas_activas_df = pd.concat([deudas_activas_df, addendum_activo[['Id_Deuda', 'Cedula', 'Banco', 'PaB_Origen','PaB_PL']]], ignore_index=True)
 
-    # Mostramos las Características del Cliente (Saldos, Por Cobrar y Pricing)
-    with st.expander("Características del Cliente"):
-        colSaldos, colPorCobrar, colPricing = st.columns(3)
+# Mostramos las Características del Cliente (Saldos, Por Cobrar y Pricing)
+with st.expander("Características del Cliente"):
+    colSaldos, colPorCobrar, colPricing = st.columns(3)
 
-        # Definimos el Saldo, Por Cobrar y Pricing
-        saldoAntiguo = saldosDict['Saldos'][ref_antigua]
-        saldoNuevo = saldosDict['Saldos'][referencia_cliente]
-        saldoReal = max(saldoAntiguo, saldoNuevo)
-        porCobrarAntiguo = saldosDict['PorCobrar'][ref_antigua]
-        porCobrarNuevo = saldosDict['PorCobrar'][referencia_cliente]
-        porCobrarReal = max(porCobrarAntiguo, porCobrarNuevo)
+    # Definimos el Saldo, Por Cobrar y Pricing
+    saldoAntiguo = saldosDict['Saldos'][ref_antigua]
+    saldoNuevo = saldosDict['Saldos'][referencia_cliente]
+    saldoReal = max(saldoAntiguo, saldoNuevo)
+    porCobrarAntiguo = saldosDict['PorCobrar'][ref_antigua]
+    porCobrarNuevo = saldosDict['PorCobrar'][referencia_cliente]
+    porCobrarReal = max(porCobrarAntiguo, porCobrarNuevo)
 
-        pricing = deudas_activas_df['Pricing'].max()
+    pricing = deudas_activas_df['Pricing'].max()
 
-        # Guardamos esta Información en los Session_State si es Necesario
-        if referencia_cliente != st.session_state.get('ultima_referencia', ''):
-            st.session_state['saldo_real'] = saldoReal
-            st.session_state['por_cobrar_real'] = porCobrarReal
-            st.session_state['pricing'] = '{:.2f}%'.format(pricing * 100)
+    # Guardamos esta Información en los Session_State si es Necesario
+    if referencia_cliente != st.session_state.get('ultima_referencia', ''):
+        st.session_state['saldo_real'] = saldoReal
+        st.session_state['por_cobrar_real'] = porCobrarReal
+        st.session_state['pricing'] = '{:.2f}%'.format(pricing * 100)
 
-            # Reiniciamos las Deudas Seleccionadas si la Referencia Cambia
-            st.session_state['deudas_seleccionadas'] = []
-            deudas_seleccionadas = []
+        # Reiniciamos las Deudas Seleccionadas si la Referencia Cambia
+        st.session_state['deudas_seleccionadas'] = []
+        deudas_seleccionadas = []
 
-        # Ahora los Vamos Poniendo como Inputs en el Formulario
-        with colSaldos:
-            st.number_input("**Saldo del Cliente**",
-                disabled=False, 
-                format="%0.0f",
-                help="Saldo del Cliente según lo que se reporta en SALDOS",
-                key = "saldo_real",
-                icon="💰",
-            )
-        with colPorCobrar:
-            st.number_input("**Por Cobrar del Cliente**",
-                disabled=False, 
-                format="%0.0f",
-                help="Por Cobrar del Cliente según lo que se reporta en SALDOS",
-                key = "por_cobrar_real",
-                icon="💸",
-            )
-        with colPricing:
-            st.text_input("**Pricing del Cliente**",
-                disabled=True,
-                help="Pricing del Cliente según lo que se reporta en la Base de Datos",
-                key = "pricing",
-                icon="📈",
-            )
-
-    # Añadimos un Subheader para la Selección de Deudas
-    st.divider()
-    st.subheader("Selección de Deudas Activas")
-
-    # Mostramos la Selección de Deudas
-    deudas_seleccionadas = mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
-
-    # Guardamos la Referencia como Ultima en el Session_State
-    st.session_state['ultima_referencia'] = referencia_cliente
-
-    # Filtramos el DF para dejar solo las Deudas Seleccionadas
-    deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(deudas_seleccionadas)]
-
-    # Dado que añadimos info de los Addendums reescribimos la Columna Pricing con el valor máximo de Pricing entre las Deudas Seleccionadas
-    deudas_seleccionadas_df['Pricing'] = deudas_activas_df['Pricing'].max()
-
-    # Verificamos que al menos una Deuda esté Seleccionada
-    if not deudas_seleccionadas:
-        st.warning("Debe seleccionar al menos una deuda activa para poder continuar con el llenado del formulario.")
-        st.stop()
-
-    # Siguiente Paso: Seleccionar Tipo de Solicitud y el Aliado
-    st.divider()
-    st.subheader("🫡Selección de Tipo de Solicitud y Aliado")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        tipo_solicitud = st.radio(
-            "**Tipo de Solicitud**",
-            ["**Validación**","**Acuerdo de Pago**","**Oferta de Acuerdo**"],
-            captions=[
-                '**Validación**: Averiguar descuento y/o Casa de Cobro',
-                '**Acuerdo de Pago**: Negociar un acuerdo de pago con el cliente',
-                '**Oferta de Acuerdo**: Ofertar un valor de pago, si se acepta, se genera un acuerdo de pago',
-            ],
-            index=None,
-            help="Seleccione el tipo de solicitud que desea realizar",
+    # Ahora los Vamos Poniendo como Inputs en el Formulario
+    with colSaldos:
+        st.number_input("**Saldo del Cliente**",
+            disabled=False, 
+            format="%0.0f",
+            help="Saldo del Cliente según lo que se reporta en SALDOS",
+            key = "saldo_real",
+            icon="💰",
         )
-    with col2:
-        aliado_seleccionado = st.selectbox(
-            "**Aliado - Casa de Cobro**",
-            options=list(aliadosDict.keys())+['Directo Base'],
-            help="Seleccione el aliado con el que desea realizar la solicitud",
+    with colPorCobrar:
+        st.number_input("**Por Cobrar del Cliente**",
+            disabled=False, 
+            format="%0.0f",
+            help="Por Cobrar del Cliente según lo que se reporta en SALDOS",
+            key = "por_cobrar_real",
+            icon="💸",
+        )
+    with colPricing:
+        st.text_input("**Pricing del Cliente**",
+            disabled=True,
+            help="Pricing del Cliente según lo que se reporta en la Base de Datos",
+            key = "pricing",
+            icon="📈",
+        )
+
+# Añadimos un Subheader para la Selección de Deudas
+st.divider()
+st.subheader("Selección de Deudas Activas")
+
+# Mostramos la Selección de Deudas
+deudas_seleccionadas = mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
+
+# Guardamos la Referencia como Ultima en el Session_State
+st.session_state['ultima_referencia'] = referencia_cliente
+
+# Filtramos el DF para dejar solo las Deudas Seleccionadas
+deudas_seleccionadas_df = deudas_activas_df[deudas_activas_df['Id_Deuda'].isin(deudas_seleccionadas)]
+
+# Dado que añadimos info de los Addendums reescribimos la Columna Pricing con el valor máximo de Pricing entre las Deudas Seleccionadas
+deudas_seleccionadas_df['Pricing'] = deudas_activas_df['Pricing'].max()
+
+# Verificamos que al menos una Deuda esté Seleccionada
+if not deudas_seleccionadas:
+    st.warning("Debe seleccionar al menos una deuda activa para poder continuar con el llenado del formulario.")
+    st.stop()
+
+# Siguiente Paso: Seleccionar Tipo de Solicitud y el Aliado
+st.divider()
+st.subheader("🫡Selección de Tipo de Solicitud y Aliado")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    tipo_solicitud = st.radio(
+        "**Tipo de Solicitud**",
+        ["**Validación**","**Acuerdo de Pago**","**Oferta de Acuerdo**"],
+        captions=[
+            '**Validación**: Averiguar descuento y/o Casa de Cobro',
+            '**Acuerdo de Pago**: Negociar un acuerdo de pago con el cliente',
+            '**Oferta de Acuerdo**: Ofertar un valor de pago, si se acepta, se genera un acuerdo de pago',
+        ],
+        index=None,
+        help="Seleccione el tipo de solicitud que desea realizar",
+    )
+with col2:
+    aliado_seleccionado = st.selectbox(
+        "**Aliado - Casa de Cobro**",
+        options=list(aliadosDict.keys())+['Directo Base'],
+        help="Seleccione el aliado con el que desea realizar la solicitud",
+        index=None,
+    )
+
+# Verificamos que ambos tengan una selección válida
+if not tipo_solicitud or not aliado_seleccionado:
+    st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
+    st.stop()
+
+# Limpiamos el Tipo de Solicitud Quitando los Asteriscos
+tipo_solicitud = tipo_solicitud.replace('*','').strip()
+
+st.divider()
+
+# Mostramos la Selección de los Montos Propuestos por Deuda
+info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+
+# Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
+if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
+    mostrar_monto_recomendado(
+        referencia=referencia_cliente,
+        deudas=deudas_seleccionadas,
+        pricing=deudas_seleccionadas_df['Pricing'].max(),
+        deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
+    )
+
+deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in deudas_seleccionadas}
+
+# --- Siguiente: Alertas y Verificaciones ---
+
+# Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
+masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
+if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
+    aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado].brinda_maximo_descuento()
+    if aliado_brinda_descuento_maximo:
+        st.warning("El aliado seleccionado brinda descuento máximo, por lo que una oferta de mejora de descuento puede no ser aceptada. Se recomienda revisar las condiciones de la solicitud antes de continuar.")
+
+# Alerta 2: Pago Obligatorio de Solicitud (Para Validación)
+if tipo_solicitud == 'Validación' and aliado_seleccionado != 'Directo Base':
+    aliado_brinda_pago_obligatorio = aliadosDict[aliado_seleccionado].pagar_co_obligatorio()
+    if aliado_brinda_pago_obligatorio:
+        st.warning("Dadas las Características del Aliado seleccionado, se requiere el pago obligatorio en caso de realizarse la validación.")
+
+# Alerta 3: Verificar si el Aliado da Posibilidades de Cuotas
+if aliado_seleccionado != 'Directo Base':
+    # Verificamos si Permite Cuotas
+    aliado_brinda_cuotas = aliadosDict[aliado_seleccionado].permite_cuotas()
+    # Verificamos si en la Solciitud se realiza una opción a cuotas
+    solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
+    if not aliado_brinda_cuotas and solicitud_a_cuotas:
+        st.warning("El aliado seleccionado no brinda la posibilidad de cuotas, por lo que se recomienda revisar las condiciones de la solicitud antes de continuar.")
+
+# Alerta 4: Verificacion de Descuentos en Base
+if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
+    #  Verificamos por cada Deuda si se cumple
+    avanzar_proceso = mostrar_alertas_masivas_deudas(deudas_info=deudas_info)
+else:
+    avanzar_proceso = True
+
+if not avanzar_proceso:
+    st.error("La(s) Deuda(s) seleccionada(s) ya tienen una oferta de pago menor a la Solicitada")
+    st.stop()
+
+# --- Siguiente: Si es Acuerdo o Oferta de Pago dar Especificaciones
+if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
+    st.divider()
+
+    st.subheader("💰 Especificaciones del Acuerdo de Pago")
+
+    # Creamos 2 Columnas: Fecha Esperada de Pago y Tipo de Pago
+    colFechaPago, colTipoPago = st.columns(2)
+
+    with colFechaPago:
+        fecha_esperada_pago = st.date_input(
+            "**Fecha Esperada de Pago**",
+            value="today",
+            help="Seleccione la fecha esperada de pago del acuerdo",
+        )
+        # Volvemos la Fecha a Timestamp
+        fecha_esperada_pago = pd.Timestamp(fecha_esperada_pago)
+
+    with colTipoPago:
+        # Verificamos los Pagos Posibles según la Cantidad de Cuotas
+        solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
+        if solicitud_a_cuotas:
+            posibles_pagos = ['Estructuraado','Refi']
+        else:
+            posibles_pagos = ['Tradicional','Crédito']
+
+        tipo_pago = st.selectbox(
+            "**Tipo de Pago**",
+            options=posibles_pagos,
+            help="Seleccione el tipo de pago que se realizará en el acuerdo",
             index=None,
         )
 
     # Verificamos que ambos tengan una selección válida
-    if not tipo_solicitud or not aliado_seleccionado:
+    if not fecha_esperada_pago or not tipo_pago:
         st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
         st.stop()
+else:
+    fecha_esperada_pago = None
+    tipo_pago = None
 
-    # Limpiamos el Tipo de Solicitud Quitando los Asteriscos
-    tipo_solicitud = tipo_solicitud.replace('*','').strip()
+# Mostramos un Campo para añadir Comentarios Adicionales sobre la Solicitud
+comentario_adicional = st.text_area(
+    "**Comentarios Adicionales sobre la Solicitud**",
+    value="",
+    help="Ingrese cualquier comentario adicional sobre la solicitud (Ejemplo: Válidar Máximo Descuento)",
+)
 
-    st.divider()
-
-    # Mostramos la Selección de los Montos Propuestos por Deuda
-    info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
-
-    # Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
-    if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
-        mostrar_monto_recomendado(
-            referencia=referencia_cliente,
-            deudas=deudas_seleccionadas,
-            pricing=deudas_seleccionadas_df['Pricing'].max(),
-            deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
-        )
-
-    deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in deudas_seleccionadas}
-
-    # --- Siguiente: Alertas y Verificaciones ---
-
-    # Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
-    masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
-    if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
-        aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado].brinda_maximo_descuento()
-        if aliado_brinda_descuento_maximo:
-            st.warning("El aliado seleccionado brinda descuento máximo, por lo que una oferta de mejora de descuento puede no ser aceptada. Se recomienda revisar las condiciones de la solicitud antes de continuar.")
-
-    # Alerta 2: Pago Obligatorio de Solicitud (Para Validación)
-    if tipo_solicitud == 'Validación' and aliado_seleccionado != 'Directo Base':
-        aliado_brinda_pago_obligatorio = aliadosDict[aliado_seleccionado].pagar_co_obligatorio()
-        if aliado_brinda_pago_obligatorio:
-            st.warning("Dadas las Características del Aliado seleccionado, se requiere el pago obligatorio en caso de realizarse la validación.")
-
-    # Alerta 3: Verificar si el Aliado da Posibilidades de Cuotas
-    if aliado_seleccionado != 'Directo Base':
-        # Verificamos si Permite Cuotas
-        aliado_brinda_cuotas = aliadosDict[aliado_seleccionado].permite_cuotas()
-        # Verificamos si en la Solciitud se realiza una opción a cuotas
-        solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
-        if not aliado_brinda_cuotas and solicitud_a_cuotas:
-            st.warning("El aliado seleccionado no brinda la posibilidad de cuotas, por lo que se recomienda revisar las condiciones de la solicitud antes de continuar.")
-
-    # Alerta 4: Verificacion de Descuentos en Base
-    if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
-        #  Verificamos por cada Deuda si se cumple
-        avanzar_proceso = mostrar_alertas_masivas_deudas(deudas_info=deudas_info)
-    else:
-        avanzar_proceso = True
-
-    if not avanzar_proceso:
-        st.error("La(s) Deuda(s) seleccionada(s) ya tienen una oferta de pago menor a la Solicitada")
-        st.stop()
-
-    # --- Siguiente: Si es Acuerdo o Oferta de Pago dar Especificaciones
-    if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
-        st.divider()
-
-        st.subheader("💰 Especificaciones del Acuerdo de Pago")
-
-        # Creamos 2 Columnas: Fecha Esperada de Pago y Tipo de Pago
-        colFechaPago, colTipoPago = st.columns(2)
-
-        with colFechaPago:
-            fecha_esperada_pago = st.date_input(
-                "**Fecha Esperada de Pago**",
-                value="today",
-                help="Seleccione la fecha esperada de pago del acuerdo",
-            )
-            # Volvemos la Fecha a Timestamp
-            fecha_esperada_pago = pd.Timestamp(fecha_esperada_pago)
-
-        with colTipoPago:
-            # Verificamos los Pagos Posibles según la Cantidad de Cuotas
-            solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
-            if solicitud_a_cuotas:
-                posibles_pagos = ['Estructuraado','Refi']
-            else:
-                posibles_pagos = ['Tradicional','Crédito']
-
-            tipo_pago = st.selectbox(
-                "**Tipo de Pago**",
-                options=posibles_pagos,
-                help="Seleccione el tipo de pago que se realizará en el acuerdo",
-                index=None,
-            )
-
-        # Verificamos que ambos tengan una selección válida
-        if not fecha_esperada_pago or not tipo_pago:
-            st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
-            st.stop()
-    else:
-        fecha_esperada_pago = None
-        tipo_pago = None
-
-    # Mostramos un Campo para añadir Comentarios Adicionales sobre la Solicitud
-    comentario_adicional = st.text_area(
-        "**Comentarios Adicionales sobre la Solicitud**",
-        value="",
-        help="Ingrese cualquier comentario adicional sobre la solicitud (Ejemplo: Válidar Máximo Descuento)",
+# Mostramos el Resumen de la Solicitud dentro de un expander
+with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
+    mostrar_resumen_solicitud(
+        referencia=referencia_cliente,
+        deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
+        info_completa_deudas=info_completa_deudas,
+        tipo_solicitud=tipo_solicitud,
+        nombre_aliado=aliado_seleccionado,
+        fecha_esperada_pago=fecha_esperada_pago,
+        tipo_pago=tipo_pago,
     )
 
-    # Mostramos el Resumen de la Solicitud dentro de un expander
-    with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
-        mostrar_resumen_solicitud(
-            referencia=referencia_cliente,
-            deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
-            info_completa_deudas=info_completa_deudas,
-            tipo_solicitud=tipo_solicitud,
-            nombre_aliado=aliado_seleccionado,
-            fecha_esperada_pago=fecha_esperada_pago,
-            tipo_pago=tipo_pago,
-        )
+# --- Siguiente: Botón de Envío del Formulario ---
+st.divider()
+st.subheader("✅ Envío del Formulario")
 
-    # --- Siguiente: Botón de Envío del Formulario ---
-    st.divider()
-    st.subheader("✅ Envío del Formulario")
+# Vamos a Construir la Respuesta como un Diccionario
+response_info = {
+    "Referencia": referencia_cliente,
+    'Cedula': deudas_seleccionadas_df['Cedula'].iloc[0],
+    'Ids_Deuda': '.'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
+    'Casa_Cobro': aliado_seleccionado,
+    'Tipo_Solicitud': tipo_solicitud,
+    'Datos_Solicitud': json.dumps(info_completa_deudas),
+    'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
+    'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
+    'Tipo_Pago': tipo_pago if tipo_pago else '',
+    'Metadata_Solicitud': json.dumps({
+        'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0],
+        'Comentario_Adicional': comentario_adicional,
+    }),
+    'Estado_Solicitud': 'Sin Tocar',
+}
 
-    # Vamos a Construir la Respuesta como un Diccionario
-    response_info = {
-        "Referencia": referencia_cliente,
-        'Cedula': deudas_seleccionadas_df['Cedula'].iloc[0],
-        'Ids_Deuda': '.'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
-        'Casa_Cobro': aliado_seleccionado,
-        'Tipo_Solicitud': tipo_solicitud,
-        'Datos_Solicitud': json.dumps(info_completa_deudas),
-        'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
-        'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
-        'Tipo_Pago': tipo_pago if tipo_pago else '',
-        'Metadata_Solicitud': json.dumps({
-            'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0],
-            'Comentario_Adicional': comentario_adicional,
-        }),
-        'Estado_Solicitud': 'Sin Tocar',
-    }
+# Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
+colBoton, colMensaje = st.columns([1, 2])
 
-    # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
-    colBoton, colMensaje = st.columns([1, 2])
+ya_enviado = (referencia_cliente != '') and (referencia_cliente == st.session_state.get('ultima_referencia_enviada'))
 
-    ya_enviado = (referencia_cliente != '') and (referencia_cliente == st.session_state.get('ultima_referencia_enviada'))
+with colBoton:
+    enviar_formulario = st.button(
+        "Enviar Formulario",
+        help="Presione este botón para enviar el formulario (Solo se envía una vez)",
+        type="primary",
+        key="enviar_formulario",
+        disabled=ya_enviado,
+    )
 
-    with colBoton:
-        enviar_formulario = st.button(
-            "Enviar Formulario",
-            help="Presione este botón para enviar el formulario (Solo se envía una vez)",
-            type="primary",
-            key="enviar_formulario",
-            disabled=ya_enviado,
-        )
+with colMensaje:
+    if enviar_formulario and not ya_enviado:
+        # 1. Bloqueamos inmediatamente para evitar dobles clics en cola
+        st.session_state['ultima_referencia_enviada'] = referencia_cliente
 
-    with colMensaje:
-        if enviar_formulario and not ya_enviado:
-            # 1. Bloqueamos inmediatamente para evitar dobles clics en cola
-            st.session_state['ultima_referencia_enviada'] = referencia_cliente
+        # 2. Ejecutamos el proceso a Google Sheets
+        with st.spinner("Enviando formulario..."):
+            success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
 
-            # 2. Ejecutamos el proceso a Google Sheets
-            with st.spinner("Enviando formulario..."):
-                success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
-
-            if success_response:
-                st.success(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}")
-                # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
-                st.rerun()
-            else:
-                # Si hubo error, liberamos el candado para que el usuario pueda reintentar
-                st.session_state['ultima_referencia_enviada'] = None
-                st.toast("Error al enviar el formulario. Por favor, intente nuevamente.")
-
-        elif ya_enviado:
-            st.info("Esta referencia ya fue enviada previamente.")
+        if success_response:
+            st.success(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}")
+            # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
+            st.rerun()
         else:
-            st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")
+            # Si hubo error, liberamos el candado para que el usuario pueda reintentar
+            st.session_state['ultima_referencia_enviada'] = None
+            st.toast("Error al enviar el formulario. Por favor, intente nuevamente.")
+
+    elif ya_enviado:
+        st.info("Esta referencia ya fue enviada previamente.")
+    else:
+        st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")

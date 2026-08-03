@@ -18,11 +18,11 @@ class SolicitudesSchema(pa.DataFrameModel):
     Ids_Deuda: str  # Lista de Ids de Deuda como cadena separada por -
     Casa_Cobro: str
     Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
-    Datos_Solicitud: list[dict] # Es un JSON que contiene el Monto por Deuda y los Plazos
-    Fecha_Esperada_Pago: pa.dtypes.Timestamp
-    Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD)
-    Ejecutivo: str
-    Metadata_Solicitud: dict  # Es un JSON que contiene:
+    Datos_Solicitud: str # Es un JSON que contiene el Monto por Deuda y los Plazos
+    Fecha_Esperada_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha esperada de pago
+    Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
+    Ejecutivo: str = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
+    Metadata_Solicitud: str  # Es un JSON que contiene:
     # - Estado de Comité: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
     # - Estado de Ilocalizable: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
     # - Pago Total Obligatorio: bool
@@ -30,10 +30,10 @@ class SolicitudesSchema(pa.DataFrameModel):
     # - Comentario Ejecutivo: str
     # - Comentario Negociador: str
     # - Fecha Llamada: str (YYYY-MM-DD HH:MM:SS)
-    Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD)
-    Fecha_Respuesta: pa.dtypes.Timestamp
-    Fecha_Limite_Pago: pa.dtypes.Timestamp
-    JSON_Respuesta: str  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
+    Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
+    Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
+    Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
+    JSON_Respuesta: str = pa.Field(nullable=True)  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
 
     class Config:
         strict = True  # Validación estricta de columnas
