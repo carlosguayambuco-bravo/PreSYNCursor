@@ -18,6 +18,7 @@ mesesDict = {
 # Agregamos el offset para que tenga en cuenta solo business days
 co_holidays = holidays.country_holidays('CO', years=pd.Timestamp.now().year)
 co_bday = pd.offsets.CustomBusinessDay(holidays=co_holidays) # type: ignore
+co_holidays_new = np.array(list(co_holidays.keys()), dtype='datetime64[D]')
 
 # Función Auxiliar para imputar NaNs
 def imputeNans(df: pd.DataFrame, col: str, value):
@@ -33,7 +34,7 @@ def cleanText(txt) -> str:
     return txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
 
 # Función Auxiliar para Limpiar Números
-def cleanNumber(value) -> float:
+def cleanNumber(value, default_nan: float = np.nan) -> float:
     if not isinstance(value, str):
         return value
     # Reemplazamos X por ''
@@ -75,7 +76,8 @@ def cleanNumber(value) -> float:
 
         return float(clean_val)
     except ValueError:
-        return pd.to_numeric(value, errors='coerce') # Not a number? Return original text
+        clean_val = pd.to_numeric(clean_val, errors='coerce')
+        return clean_val if pd.notna(clean_val) else default_nan  # Not a number? Return original text
 
 # Función Auxiliar para Obtener el Mes Operativo
 def getMesOperativo() -> pd.Timestamp:
@@ -135,3 +137,61 @@ def getBDDaysDiffFloat(firstDate: pd.Timestamp, secondDate: pd.Timestamp, change
     float_diff = full_bus_days - start_fraction + end_fraction
 
     return round(float_diff, 4)
+
+def getBDDaysDiffFloat_vectorized(start_series: pd.Series, end_series: pd.Series) -> pd.Series[float]:
+    global co_holidays_new
+    # 1. FORZAR PARSEO: Convierte strings/objetos a datetime64[ns] real.
+    # Los valores corruptos o no parseables se transformarán en NaT de forma segura.
+    s_dt = pd.to_datetime(start_series, errors='coerce')
+    e_dt = pd.to_datetime(end_series, errors='coerce')
+
+    # 2. Identificar NaNs/NaTs (Tanto los originales como los que fallaron al parsear)
+    nan_mask = pd.isna(s_dt) | pd.isna(e_dt)
+
+    # 3. Asegurar el orden (start debe ser menor o igual que end)
+    s = s_dt.copy()
+    e = e_dt.copy()
+
+    # Si hay casos donde start > end, los invertimos vectorialmente
+    mask_inverse = s > e
+    if mask_inverse.any():
+        s[mask_inverse], e[mask_inverse] = end_series[mask_inverse], start_series[mask_inverse]
+
+    # --- SOLUCIÓN REAL AL ERROR ---
+    # Rellenamos los NaT manteniendo el tipo nativo datetime64 de Pandas
+    s_clean = s.fillna(pd.Timestamp('1970-01-01'))
+    e_clean = e.fillna(pd.Timestamp('1970-01-01'))
+
+    # Convertimos al formato nativo de NumPy (.values) y de ahí
+    # transformamos a precisión de día ('datetime64[D]') directamente.
+    # Ahora que garantizamos un tipo datetime64[ns], pasamos a NumPy 'datetime64[D]' con total seguridad
+    s_date = s_clean.to_numpy(dtype='datetime64[D]')
+    e_date = e_clean.to_numpy(dtype='datetime64[D]')
+    # --------------------------------------
+
+    # 2. Identificar NaNs originales para el final
+    nan_mask = pd.isna(start_series) | pd.isna(end_series)
+
+    if co_holidays_new is not None:
+        if isinstance(co_holidays_new, holidays.HolidayBase):
+            co_holidays_new = np.array(list(co_holidays_new.keys()), dtype='datetime64[D]')
+        else:
+            co_holidays_new = np.array(co_holidays_new, dtype='datetime64[D]')
+    else:
+        co_holidays_new = np.array([], dtype='datetime64[D]')
+
+    # 3. Calcular días hábiles completos
+    full_bus_days = np.busday_count(s_date, e_date,holidays=co_holidays_new)
+
+    # 4. Calcular fracciones de tiempo usando componentes .dt (Vectorizado)
+    start_fraction = (s.dt.hour + s.dt.minute / 60 + s.dt.second / 3600) / 24
+    end_fraction = (e.dt.hour + e.dt.minute / 60 + e.dt.second / 3600) / 24
+
+    # 5. Operación matemática vectorial
+    float_diff = full_bus_days - start_fraction + end_fraction
+
+    # Redondear y reasignar NaNs originales
+    result = np.round(float_diff, 4)
+    result = np.where(nan_mask, np.nan, result)
+
+    return pd.Series(result, index=start_series.index)

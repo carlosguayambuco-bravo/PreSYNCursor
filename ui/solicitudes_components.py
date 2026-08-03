@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from typing import Optional, Literal
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -10,48 +11,109 @@ from data.data_models import SolicitudesSchema
 from data.data_uploader import update_solicitud_in_google_sheets
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
+from modules.gest_sols import generate_acuerdo_pago_pdf, subir_acuerdo_pago_a_google_drive
 from modules.classes import get_banned_manager
+from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
+
+# Función para Reiniciar los Filtros de Solicitudes en el Session State
+def reiniciar_filtros_solicitudes(method: Literal['reset','basic']) -> None:
+    """
+    Reinicia los filtros de solicitudes en el estado de la sesión.
+    Esta función elimina las claves relacionadas con los filtros de solicitudes del estado de la sesión.
+    """
+    # Lista de claves a reiniciar del Session State
+    keys_to_remove = [
+        "tipo_solicitud_gestion_input",
+        "aliado_solicitud_gestion_input",
+        "estado_solicitud_gestion_input",
+        "ejecutivo_solicitud_gestion_input",
+        "persona_solicitud_gestion_input",
+        "banco_solicitud_gestion_input",
+        "id_solicitud_gestion_input",
+        "cedula_solicitud_gestion_input",
+        "id_deuda_solicitud_gestion_input",
+    ]
+    for key in keys_to_remove:
+        st.session_state[key] = None
+    # Ahora Cambiamos a False el Expander de Filtros Auxiliares si es que se reinicia todo
+    if method == 'reset':
+        st.session_state['expander_filtros_solicitudes_gestiones'] = False
+    # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
+    if method == 'basic':
+        st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
+
+    # Cambiam el Session_State de 
 
 # Función para Mostrar los Filtros Generales de una Solicitud
-def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[SolicitudesSchema], quitar_respondidas: bool = True) -> DataFrame[SolicitudesSchema]:
+def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+
+    solicitudes_copy = solicitudes_df.copy()  # Creamos una copia del DataFrame para no modificar el original
+
+    # Vamos a Crear 3 Columnas: Boton de Reinicio Total, Boton de Reinicio Basico y Boton de Recomendado
+    colResetTotal, colResetBasico, colRecomendado = st.columns(3)
+
+    with colResetTotal:
+        st.button(
+            label="Reiniciar Filtros (Total)",
+            key="reiniciar_filtros_solicitudes_total",
+            on_click=reiniciar_filtros_solicitudes,
+            args=('reset',),
+            help="Haga clic para reiniciar todos los filtros de solicitudes.",
+        )
+
+    with colResetBasico:
+        usar_basico = st.button(
+            label="Reiniciar Filtros (Básico)",
+            key="reiniciar_filtros_solicitudes_basico",
+            on_click=reiniciar_filtros_solicitudes,
+            args=('basic',),
+            help="Haga clic para reiniciar los filtros de solicitudes de forma básica.",
+        )
+
+    with colRecomendado:
+        usar_recomendado = st.checkbox(
+            label="Filtros Recomendados",
+            key="filtros_recomendados_solicitudes",
+            help="Haga clic para aplicar los filtros recomendados.",
+        )
 
     # Paso 1: Crear 4 Columnas (Tipo de Solicitud, Aliado , Estado de Solicitud, Ejecutivo)
     colTipo, colAliado, colEstado, colEjecutivo = st.columns(4)
 
     with colTipo:
-        tipo_solicitud = st.selectbox(
+        tipo_solicitud = st.multiselect(
             label="**Tipo de Solicitud**",
-            options=["Todos"] + list(solicitudes_df["Tipo_Solicitud"].unique()),
-            index=0,
+            options=list(solicitudes_df["Tipo_Solicitud"].unique()),
             key="tipo_solicitud_gestion_input",
             help="Seleccione el tipo de solicitud que desea filtrar",
+            disabled = usar_recomendado,
         )
 
     with colAliado:
-        aliado_solicitud = st.selectbox(
+        aliado_solicitud = st.multiselect(
             label="**Aliado - Casa de Cobro**",
-            options=["Todos"] + list(solicitudes_df["Casa_Cobro"].unique()),
-            index=0,
+            options=list(solicitudes_df["Casa_Cobro"].unique()),
             key="aliado_solicitud_gestion_input",
             help="Seleccione el aliado que desea filtrar",
+            disabled = usar_recomendado,
         )
 
     with colEstado:
-        estado_solicitud = st.selectbox(
+        estado_solicitud = st.multiselect(
             label="**Estado de Solicitud**",
-            options=["Todos"] + list(solicitudes_df["Estado_Solicitud"].unique()),
-            index=0,
+            options=list(solicitudes_df["Estado_Solicitud"].unique()),
             key="estado_solicitud_gestion_input",
             help="Seleccione el estado de la solicitud que desea filtrar",
+            disabled = usar_recomendado,
         )
 
     with colEjecutivo:
-        ejecutivo_solicitud = st.selectbox(
+        ejecutivo_solicitud = st.multiselect(
             label="**Ejecutivo**",
-            options=["Todos"] + list(solicitudes_df["Ejecutivo"].unique()),
-            index=0,
+            options=list(solicitudes_df["Ejecutivo"].unique()),
             key="ejecutivo_solicitud_gestion_input",
             help="Seleccione el ejecutivo que desea filtrar",
+            disabled = usar_recomendado,
         )
 
     # Paso 2: Crear un Expander para Filtros Auxiliares (Persona que Solicita, Banco, ID, Cedula, Id_Deuda)
@@ -65,15 +127,16 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
                 index=0,
                 key="persona_solicitud_gestion_input",
                 help="Seleccione el correo de la persona que solicita",
+                disabled = usar_recomendado,
             )
 
         with colBanco:
-            banco_solicitud = st.selectbox(
+            banco_solicitud = st.multiselect(
                 label="**Banco**",
-                options=["Todos"] + list(np.unique([d['Banco'] for d in solicitudes_df['Datos_Solicitud']])),
-                index=0,
+                options= ["Todos"] + list(np.unique([d['Banco'] for d in solicitudes_df['Datos_Solicitud']])),
                 key="banco_solicitud_gestion_input",
                 help="Seleccione el banco que desea filtrar",
+                disabled = usar_recomendado,
             )
 
         with colID:
@@ -83,6 +146,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
                 index=0,
                 key="id_solicitud_gestion_input",
                 help="Seleccione el ID de la solicitud que desea filtrar",
+                disabled = usar_recomendado,
             )
 
         with colCedula:
@@ -92,6 +156,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
                 index=0,
                 key="cedula_solicitud_gestion_input",
                 help="Seleccione la cédula que desea filtrar",
+                disabled = usar_recomendado,
             )
 
         with colIdDeuda:
@@ -101,46 +166,76 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
                 index=0,
                 key="id_deuda_solicitud_gestion_input",
                 help="Seleccione el ID de deuda que desea filtrar",
+                disabled = usar_recomendado,
             )
 
     # Paso 3: Aplicar ls filtros seleccionados al DataFrame de Solicitudes
-    if tipo_solicitud != "Todos":
-        solicitudes_df = solicitudes_df[solicitudes_df["Tipo_Solicitud"] == tipo_solicitud]
+    if tipo_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Tipo_Solicitud"].isin(tipo_solicitud)]
 
-    if aliado_solicitud != "Todos":
-        solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"] == aliado_solicitud]
+    if aliado_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"].isin(aliado_solicitud)]
 
-    if estado_solicitud != "Todos":
-        solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"] == estado_solicitud]
+    if estado_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"].isin(estado_solicitud)]
 
-    if ejecutivo_solicitud != "Todos":
-        solicitudes_df = solicitudes_df[solicitudes_df["Ejecutivo"] == ejecutivo_solicitud]
+    if ejecutivo_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Ejecutivo"].isin(ejecutivo_solicitud)]
 
-    if persona_solicitud != "Todos" and st.session_state['expander_filtros_solicitudes_gestiones']:
+    modo_expandido = st.session_state.get('expander_filtros_solicitudes_gestiones', False)
+
+    if persona_solicitud != "Todos" and modo_expandido:
         solicitudes_df = solicitudes_df[solicitudes_df["Correo"] == persona_solicitud]
 
-    if banco_solicitud != "Todos" and st.session_state['expander_filtros_solicitudes_gestiones']:
-        solicitudes_df = solicitudes_df[solicitudes_df["Datos_Solicitud"].apply(lambda x: any(d['Banco'] == banco_solicitud for d in x))]
+    if banco_solicitud != "Todos" and modo_expandido:
+        solicitudes_df = solicitudes_df[solicitudes_df["Datos_Solicitud"].apply(lambda x: any((d['Banco'] in banco_solicitud) for d in x))]
 
-    if id_solicitud != "Todos" and st.session_state['expander_filtros_solicitudes_gestiones']:
+    if id_solicitud != "Todos" and modo_expandido:
         solicitudes_df = solicitudes_df[solicitudes_df["ID_Solicitud"] == id_solicitud]
 
-    if cedula_solicitud != "Todos" and st.session_state['expander_filtros_solicitudes_gestiones']:
+    if cedula_solicitud != "Todos" and modo_expandido:
         solicitudes_df = solicitudes_df[solicitudes_df["Cedula"] == cedula_solicitud]
 
-    if id_deuda_solicitud != "Todos" and st.session_state['expander_filtros_solicitudes_gestiones']:
+    if id_deuda_solicitud != "Todos" and modo_expandido:
         solicitudes_df = solicitudes_df[solicitudes_df["Ids_Deuda"].str.contains(id_deuda_solicitud)]
 
     # Paso 4: Quitar los IDs de Solicitudes que ya fueron respondidas y están en el BannedManager
-    if quitar_respondidas:
+    if usar_recomendado or usar_basico:
         banned_manager = get_banned_manager()
         solicitudes_df = solicitudes_df[~(solicitudes_df["ID_Solicitud"].apply(banned_manager.is_banned))]
+        solicitudes_copy = solicitudes_copy[~(solicitudes_copy["ID_Solicitud"].apply(banned_manager.is_banned))]
+
+    # Si es Recomendado se realizan filtros aparte
+    if usar_recomendado:
+        # Ahora Aplicamos un reset de los filtros para que se vean reflejados los cambios
+        st.session_state['expander_filtros_solicitudes_gestiones'] = False
+        # Siguiente: Dejar en Solicitudes:
+        # Estados: Sin Tocar, Bajo Comité (Con estado comite 1), Titular Ilocalizable (Con estado ilocalizable 1)
+        maskSinTocar = solicitudes_copy["Estado_Solicitud"] == "Sin Tocar"
+        maskBajoComite = solicitudes_copy["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0)  == 1) & (solicitudes_copy["Estado_Solicitud"] == "Bajo Comité")
+        maskTitularIlocalizable = solicitudes_copy["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_copy["Estado_Solicitud"] == "Titular Ilocalizable")
+        solicitudes_df = solicitudes_copy[maskSinTocar | maskBajoComite | maskTitularIlocalizable].copy()
+
+        # Siguiente: Crear Copia con Columna Prioridad
+        # Paso 1: Crear Columna Fecha_Hoy
+        calc_df = solicitudes_df.assign(Fecha_Hoy=pd.Timestamp.now('America/Bogota').tz_localize(None))
+        # Paso 2: Crear Columna de Diferencia de Días Vectorizada
+        calc_df["Diferencia_Dias"] = getBDDaysDiffFloat_vectorized(calc_df["Fecha_Solicitud"], calc_df["Fecha_Hoy"])
+        # Paso 3: X2 a la Diferencia_Dias si Tipo_Pago == 'Crédito'
+        calc_df["Diferencia_Dias"] *= np.where(calc_df["Tipo_Pago"] == "Crédito", 2, 1)
+        # Paso 4: Usar np.argsort para obtener los índices ordenados por Diferencia_Dias de mayor a menor
+        sorted_indices = np.argsort((calc_df["Diferencia_Dias"]* -1).to_numpy())
+        # Paso 5: Aplicar este orden a solicitudes_df para obtener el DataFrame final ordenado
+        solicitudes_df = solicitudes_df.iloc[sorted_indices]
+    else:
+        # Ordenamos los más antiguos primero
+        solicitudes_df = solicitudes_df.sort_values(by="Fecha_Solicitud", ascending=True)
 
     # Por Último devolvemos el DataFrame de Solicitudes filtrado
     return solicitudes_df
 
 # Función Auxiliar para mostrar el Botón que va a Finalizar la Solicitud y mantener toda la Lógica de forma Interna
-def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series) -> None:
+def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> None:
     # Primero: Mostrar el Boton de la Solicitud y el Botón de Cancelar
     colCancelar, colBoton = st.columns([1, 1])
 
@@ -161,14 +256,18 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series) -> None:
         with st.spinner("Subiendo Solicitud a Google Sheets..."):
             # Actualizamos la Solicitud en Google Sheets
             success = update_solicitud_in_google_sheets(solicitud)
-            if success:
-                st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
-                # Agregamos el ID de la Solicitud al BannedManager para que no se pueda volver a responder
-                banned_manager = get_banned_manager()
-                banned_manager.ban(solicitud["ID_Solicitud"])
-                st.rerun()
-            else:
-                st.error("Error al Subir la Solicitud a Google Sheets. Por favor, intente nuevamente.")
+            # Subimos el Acuerdo de Pago si es necesario
+            if pdf_bytes is not None:
+                file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
+                success = success and bool(file_id)
+        if success:
+            st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
+            # Agregamos el ID de la Solicitud al BannedManager para que no se pueda volver a responder
+            banned_manager = get_banned_manager()
+            banned_manager.ban(solicitud["ID_Solicitud"])
+            st.rerun()
+        else:
+            st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
 
 # Función para Abrir el Dialogo de Respuesta de una Solicitud
 @st.dialog("🗒️ Respuesta a Solicitud",dismissible=False,width="large")
@@ -243,7 +342,6 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns(4)
 
     # Paso 2: Inicializar Valores en el Session_State por Primera Vez
-
     monto_propuesto_total = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
     key_monto_total = 'monto_total_{}_respuesta'.format(solicitud['ID_Solicitud'])
     key_usar_monto_total = 'usar_monto_total_{}'.format(solicitud['ID_Solicitud'])
@@ -251,31 +349,35 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     if not (key_usar_monto_total in st.session_state):
         st.session_state[key_usar_monto_total] = True
     if not (key_monto_total in st.session_state):
-        st.session_state[key_monto_total] = monto_propuesto_total
+        st.session_state[key_monto_total] = '{:,.2f}'.format(monto_propuesto_total) 
     for d in solicitud["Datos_Solicitud"]:
         key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         if not (key_monto in st.session_state):
-            st.session_state[key_monto] = d['Monto_Propuesto']
+            st.session_state[key_monto] = '{:,.2f}'.format(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
-            st.session_state[key_cuotas] = d['Num_Cuotas']
+            st.session_state[key_cuotas] = '{}'.format(d['Num_Cuotas'])
 
     # Paso 3: Aplicar Lógica de Recálculo basado en los Session States
     if st.session_state[key_usar_monto_total]:
         # Actualizamos el Session State de Monto Propuesto por Deuda basado en el Monto Total
-        monto_total = st.session_state[key_monto_total]
+        monto_total = cleanNumber(st.session_state[key_monto_total], default_nan=0.0)
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            # Limpiamos el Monto Propuesto a float
+            monto_total_float = cleanNumber(monto_total, default_nan=0.0)
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            porcentaje_propuesto_original = d['Monto_Propuesto'] / monto_propuesto_total if monto_propuesto_total > 0 else 0
+            porcentaje_propuesto_original = monto_total_float / monto_propuesto_total if monto_propuesto_total > 0 else 0
             monto_propuesto_nuevo = monto_total * porcentaje_propuesto_original
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            st.session_state[key_monto] = monto_propuesto_nuevo
+            st.session_state[key_monto] = '{:,.2f}'.format(monto_propuesto_nuevo)
     else:
         # La Actualización del Monto Total se hace basado en la Suma de los Montos Propuestos por Deuda
-        monto_total = sum(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])] for d in solicitud["Datos_Solicitud"])
-        st.session_state[key_monto_total] = monto_total
+        monto_total = sum(
+            cleanNumber(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
+            )
+        st.session_state[key_monto_total] = '{:,.2f}'.format(monto_total)
 
     with colFechaLimite:
         fecha_limite_pago = st.date_input(
@@ -289,10 +391,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             fecha_limite_pago = pd.Timestamp(fecha_limite_pago)
 
     with colMontoTotal:
-        monto_total = st.number_input(
+        monto_total = st.text_input(
             label="**Monto Total**",
-            min_value=0.0,
-            step=100.0,
             key=key_monto_total,
             help="Ingrese el monto total propuesto para la solicitud. Este monto se distribuirá proporcionalmente entre las deudas.",
         )
@@ -354,10 +454,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             st.code(d['Num_Credito'], language="text")
         with colMontoPropuesto:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-            st.number_input(
+            st.text_input(
                 "",
-                min_value=0.0,
-                step=100.0,
                 key=key_monto,
                 help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
                 label_visibility="collapsed",
@@ -365,16 +463,93 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         if cuotas_input == "Por Deuda":
             with colCuotasDeuda: # type: ignore
                 key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-                st.number_input(
+                st.text_input(
                     "",
-                    min_value=0,
-                    step=1,
                     key=key_cuotas,
                     help="Ingrese el número de cuotas para la deuda {}.".format(d['Id_Deuda']),
                     label_visibility="collapsed",
                 )
 
     # Siguiente: Generamos el JSON_Respuesta con: Monto Propuesto por Deuda, Cuotas por Deuda
+    json_respuesta = []
+    for d in solicitud["Datos_Solicitud"]:
+        key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+        key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+        monto_propuesto = cleanNumber(st.session_state[key_monto], default_nan=0.0)
+        if cuotas_input == "Por Deuda":
+            num_cuotas = int(st.session_state[key_cuotas])
+        else:
+            num_cuotas = num_coutas_global
+        json_respuesta.append({
+            "Id_Deuda": d['Id_Deuda'],
+            "Monto_Propuesto": monto_propuesto,
+            "Num_Cuotas": num_cuotas,
+        })
+
+    # Agreagamos el JSON_Respuesta a la solicitud_respuesta
+    solicitud_respuesta["JSON_Respuesta"] = json_respuesta
+
+    # Añadimos Fecha_Limite_Pago a la solicitud_respuesta si existe, de lo contrario mostrar alerta
+    if fecha_limite_pago:
+        solicitud_respuesta["Fecha_Limite_Pago"] = fecha_limite_pago
+    else:
+        st.warning("Debe ingresar una Fecha Límite de Pago para poder finalizar la solicitud.")
+        st.stop()
+
+    # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
+    if solicitud["Tipo_Solicitud"] == "Validación":
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
+        st.stop()
+
+    # Creamos 2 Columnas: Una para Tipo de Pago y la Otra para Formato de Pago
+    colTipoPago, colFormatoPago = st.columns(2)
+
+    # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Tipo de Pago (Efectivo-Cheque, PSE, Transferencia)
+    with colTipoPago:
+        tipo_pago = st.radio(
+            label="**Tipo de Pago**",
+            options=["Efectivo-Cheque", "PSE", "Transferencia"],
+            index=0,
+            key="tipo_pago_{}".format(solicitud['ID_Solicitud']),
+            help="Seleccione el tipo de pago para la solicitud.",
+        )
+
+        # Guardamos el Tipo de Pago en la solicitud_respuesta
+        solicitud_respuesta["Tipo_Pago"] = tipo_pago
+
+    with colFormatoPago:
+        formato_pago = st.radio(
+            label="**Formato de Acuerdo de Pago**",
+            options=["Subir Archivo", "Generar PDF"],
+            index=0,
+            key="formato_pago_{}".format(solicitud['ID_Solicitud']),
+            help="Seleccione el formato de pago para la solicitud.",
+        )
+
+    # Siguiente: Definir el formato_pago
+    if formato_pago == "Subir Archivo":
+        bytes_acuerdo = st.file_uploader(
+            label="**Subir Acuerdo de Pago**",
+            type=["pdf"],
+            key="subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+            help="Suba el archivo PDF del acuerdo de pago.",
+        )
+        if bytes_acuerdo is None:
+            st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
+            st.stop()
+        # Obtenemos los bytes del archivo subido
+        bytes_acuerdo = bytes_acuerdo.getvalue()
+        
+    elif formato_pago == "Generar PDF":
+        bytes_acuerdo = generate_acuerdo_pago_pdf(solicitud_info=solicitud_respuesta)
+        # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
+        if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
+            st.error("Error al generar el PDF del acuerdo de pago. Por favor, intente nuevamente creelo manualmente.")
+            st.stop()
+
+    # Siguiente: Mostramos el Botón de Finalizar Solicitud
+    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
+
 
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
