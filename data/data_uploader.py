@@ -4,7 +4,7 @@
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import SOLICITUDES_SHEET_ID
+from data.data_loader import SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID
 from modules.constants import SOLICITUDES_ID_DELAY
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter
 from services.google_sheets import GoogleSheetsService
@@ -72,3 +72,21 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
     except Exception as e:
         st.error(f"Error al actualizar la solicitud en Google Sheets: {e}")
         return False
+
+def upload_log_to_sheets(*,info: str, detail: str):
+    # Paso 1: Crear la Lista de Datos del Log
+    # Timestamp, Correo del Usuario, Información, Detalle
+    log_data = [pd.Timestamp.now(tz='America/Bogota').tz_localize(None), st.session_state['user_email'], info, detail]
+
+    # Paso 2: Obtener el Servicio de Google Sheets desde el Session State
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+
+    # Paso 3 Abrir la Hoja "Logs" en la Worksheet de Configs
+    logs_ws = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Logs')
+
+    # Paso 4: Agregar la Fila del Log al Final de la Hoja
+    _retry(lambda: logs_ws.append_row(log_data), label="Append Log Row")
+
+    # Paso 5: Mostrar un Toast y re-ejecutar el App
+    st.toast(f"{info}: {detail}", icon="✅")
+    st.rerun()

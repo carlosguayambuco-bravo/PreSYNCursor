@@ -5,6 +5,7 @@ from io import BytesIO
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
+from data.data_uploader import upload_log_to_sheets
 from modules.gest_sols import generar_descarga_masiva_solicitudes
 from ui.solicitudes_components import mostrar_filtros_generales_solicitud, mostrar_datos_solicitud_ejecutivo
 
@@ -50,7 +51,9 @@ def gestionar_solicitudes():
                     file_name="solicitudes.csv",
                     mime="text/csv",
                     key="descargar_solicitudes_button",
-                    help="Haz clic para descargar las solicitudes filtradas completas"
+                    help="Haz clic para descargar las solicitudes filtradas completas",
+                    on_click=upload_log_to_sheets,
+                    kwargs={"info": "Descarga de Solicitudes", "detail": f"Se descargaron {len(solicitudes_df)} solicitudes filtradas."},
                     )
 
     if mas_solicitudes:

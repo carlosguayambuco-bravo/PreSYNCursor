@@ -458,8 +458,8 @@ def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
     hc_negociacion_df['ID_Empleado'] = hc_negociacion_df['ID_Empleado'].apply(lambda s: str(s).replace('.0','').strip())
     hc_negociacion_df['Cedula'] = hc_negociacion_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notnull(s) else '')
 
-    # Creamos Columna Es_Negociador como True si el Nombre Empleo contiene negociador (ignorando mayúsculas/minúsculas), de lo contrario False
-    hc_negociacion_df['Es_Negociador'] = hc_negociacion_df['Nombre_Empleo'].str.contains('negociador', case=False, na=False, regex=False)
+    # Creamos Columna Es_Negociador como True si el Nombre Empleo contiene negociador o sena o back (ignorando mayúsculas/minúsculas), de lo contrario False
+    hc_negociacion_df['Es_Negociador'] = hc_negociacion_df['Nombre_Empleo'].str.contains('negociador|sena|back', case=False, na=False, regex=True)
 
     # Quitamos Datos donde Cedula sea NaN o vacía
     hc_negociacion_df = hc_negociacion_df[hc_negociacion_df['Cedula'].notna() & (hc_negociacion_df['Cedula'] != '')]

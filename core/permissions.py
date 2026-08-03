@@ -2,6 +2,7 @@
 # Librerías de Python
 from typing import Literal
 # Librerías de Terceros
+import streamlit as st
 # Librerías Locales
 
 class Permit:
@@ -73,3 +74,20 @@ DEFAULT_PERMISSIONS = {
     'nego': [p for p in PERMISSIONS_DICT.values() if p.is_allowed('nego')],  # Permisos específicos para nego
     'executive': [p for p in PERMISSIONS_DICT.values() if p.is_allowed('executive')],  # Permisos específicos para executive
 }
+
+PAGES_ROUTE_MAPPING = {
+    "subida_formulario": st.Page("views/rellenar_forms.py",title="Formulario Alianzas",icon="📝"),
+    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="📊"),
+    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="📋"),
+    "ver_cartera_equipo": st.Page("views/ver_cartera_equipo.py",title="Ver Cartera del Equipo",icon="👥"),
+    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="📈"),
+    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="📝"),
+}
+
+def get_permit_pages(user_role: Literal['admin', 'leader','nego', 'executive']) -> list[st.Page]: # type: ignore
+    """
+    Función para obtener las páginas permitidas para un rol de usuario específico.
+    """
+    allowed_permits = DEFAULT_PERMISSIONS.get(user_role, [])
+    allowed_pages = [PAGES_ROUTE_MAPPING[permit.name] for permit in allowed_permits if permit.name in PAGES_ROUTE_MAPPING]
+    return allowed_pages

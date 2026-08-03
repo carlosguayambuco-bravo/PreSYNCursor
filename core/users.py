@@ -7,25 +7,23 @@ from googleapiclient.discovery import build
 # Librerías Locales
 from core.permissions import Permit, DEFAULT_PERMISSIONS
 from data.data_loader import load_special_user_permissions
+from services import GoogleDriveService, GoogleSheetsService
 
 # Clase para manejar la información de los usuarios
 class User:
-    def __init__(self, email: str, creds, role: Literal['admin', 'leader','nego', 'executive']):
+    def __init__(self, name: str, email: str, creds: dict, role: Literal['admin', 'leader','nego', 'executive']):
+        self.name = name
         self.email = email
         self.creds = creds
         self.role = role
         self.permits: list[Permit] = []  # Lista de permisos del usuario, se puede llenar según el rol
 
         self.build_credentials()
-        self.build_services()
         self.build_permits()
 
     def build_credentials(self):
         # Construimos las credenciales de Google a partir del diccionario de credenciales
         self.credentials = Credentials.from_authorized_user_info(self.creds)
-
-    def build_services(self): # Por el momento solo necesitamos el servicio de Google Drive, pero se pueden agregar más servicios según sea necesario
-        self.drive_service = build('drive', 'v3', credentials=self.credentials)
 
     def build_permits(self):
         # Cargamos los permisos especiales desde Google Sheets

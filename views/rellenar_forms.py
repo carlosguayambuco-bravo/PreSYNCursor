@@ -10,6 +10,12 @@ from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 
 def rellenar_formulario_view():
+
+    # Cambiamos Configuración de Streamlit
+    st.set_page_config(
+        page_title="Formulario de Alianzas",
+    )
+
     # Carga de Información Necesaria para el Formulario
     # Se Necesita:
     # Aliados Actuales
