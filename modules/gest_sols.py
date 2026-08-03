@@ -64,3 +64,57 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     )
     # Paso 5: Retornar el ID del Archivo Subido
     return file_id
+
+def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes:
+    """
+    Genera un archivo CSV para la descarga masiva de solicitudes.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes a descargar.
+
+    Returns:
+        bytes: Contenido del archivo CSV en formato binario.
+    """
+    # Paso 1: Definir los Campos que se necesitan
+    data_dict = {
+        'Id_Solicitud': [],
+        'Tipo_Solicitud': [],
+        'Cedula': [],
+        'Nombre_Cliente': [],
+        'Id_Deuda': [],
+        'Numero_Credito': [],
+        'Banco': [],
+        'Monto_Propuesto': [],
+        'Numero_Cuotas': [],
+        'Es_Portafolio': [],
+    }
+
+    # Paso 2: Iterar sobre cada solicitud y sus deudas para llenar el diccionario
+    for _, solicitud in solicitudes_df.iterrows():
+        for deuda in solicitud['Datos_Solicitud']:
+            data_dict['Id_Solicitud'].append(solicitud['ID_Solicitud'])
+            data_dict['Tipo_Solicitud'].append(solicitud['Tipo_Solicitud'])
+            data_dict['Cedula'].append(solicitud['Cedula'])
+            data_dict['Nombre_Cliente'].append(solicitud['Metadata_Solicitud']['Nombre_Cliente'])
+            data_dict['Id_Deuda'].append(deuda['Id_Deuda'])
+            data_dict['Numero_Credito'].append(deuda['Numero_Credito'])
+            data_dict['Banco'].append(deuda['Banco'])
+            data_dict['Monto_Propuesto'].append(deuda.get('Monto_Propuesto', ''))
+            data_dict['Numero_Cuotas'].append(deuda.get('Num_Cuotas', ''))
+            data_dict['Es_Portafolio'].append('1' if len(solicitud['Datos_Solicitud']) > 1 else '')
+
+    # Paso 3: Crear un DataFrame a partir del diccionario
+    download_df = pd.DataFrame(data_dict)
+
+    # Paso 4: Verificaciones
+    # Si Numero_Cuotas siempre es 1, se quita la columna
+    if download_df['Numero_Cuotas'].nunique() == 1 and download_df['Numero_Cuotas'].iloc[0] == 1:
+        download_df.drop(columns=['Numero_Cuotas'], inplace=True)
+    # Si Es_Portafolio siempre esta vacio, se quita la columna
+    if download_df['Es_Portafolio'].nunique() == 1 and download_df['Es_Portafolio'].iloc[0] == '':
+        download_df.drop(columns=['Es_Portafolio'], inplace=True)
+
+    # Paso 5: Convertir el DataFrame a CSV en formato binario
+    csv_bytes = download_df.to_csv(index=False).encode('utf-8')
+
+    return csv_bytes

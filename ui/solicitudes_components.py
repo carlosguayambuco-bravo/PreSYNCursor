@@ -428,30 +428,30 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         )
 
     if cuotas_input == "Por Deuda":
-        colIdDeuda, colBanco, colNumCredito, colMontoPropuesto, colCuotasDeuda = st.columns(5)
+        colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5)
     else:
-        colIdDeuda, colBanco, colNumCredito, colMontoPropuesto = st.columns(4)
+        colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto = st.columns(4)
 
     with colIdDeuda:
-        st.markdown("**ID de Deuda:**")
-    with colBanco:
-        st.markdown("**Banco:**")
+        st.markdown("**ID de Deuda**")
     with colNumCredito:
-        st.markdown("**Número de Crédito:**")
+        st.markdown("**Número de Crédito**")
+    with colSolicitado:
+        st.markdown("**$Solicitado**")
     with colMontoPropuesto:
-        st.markdown("**Monto Propuesto:**")
+        st.markdown("**Monto Propuesto**")
     if cuotas_input == "Por Deuda":
         with colCuotasDeuda: # type: ignore
-            st.markdown("**Número de Cuotas:**")
+            st.markdown("**Número de Cuotas**")
 
     # Iteramos por las Deudas de la Solicitud y Mostramos los Inputs correspondientes
     for d in solicitud["Datos_Solicitud"]:
         with colIdDeuda:
             st.code(d['Id_Deuda'], language="text")
-        with colBanco:
-            st.code(d['Banco'], language="text")
         with colNumCredito:
             st.code(d['Num_Credito'], language="text")
+        with colSolicitado:
+            st.code(d['Monto_Propuesto'], language="text")
         with colMontoPropuesto:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             st.text_input(
@@ -495,6 +495,21 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     else:
         st.warning("Debe ingresar una Fecha Límite de Pago para poder finalizar la solicitud.")
         st.stop()
+
+    # Siguiente: Añadir el Input de Pago Total Obligatorio (Checkbox), solo si existe más de una deuda
+    if len(json_respuesta) > 1:
+        colCheckbox, colInfo = st.columns([1, 4])
+        with colCheckbox:
+            pago_total_obligatorio = st.checkbox(
+                label="**Pago Total Obligatorio**",
+                value=False,
+                key="pago_total_obligatorio_{}".format(solicitud['ID_Solicitud']),
+                help="Seleccione esta opción si el pago total es obligatorio para la solicitud.",
+            )
+            # Guardamos el Pago Total Obligatorio en la solicitud_respuesta
+            solicitud_respuesta['Metadata_Solicitud']["Pago_Total_Obligatorio"] = pago_total_obligatorio
+        with colInfo:
+            st.info("El Pago Obligatorio significa que se debe aplicar el pago para todas la deudas")
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
