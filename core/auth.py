@@ -3,6 +3,7 @@
 # Librerías de Terceros
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 import streamlit as st
 # Librerías Locales
 from core.users import User
@@ -41,10 +42,10 @@ def get_auth_url():
     )
     return auth_url
 
-def get_user_info_from_credentials(creds):
-    """Fetches user info (email, name) from Google using the provided credentials."""
+def get_user_info_from_credentials():
+    """Fetches user info (email, name) from Google using the credentials stored in session state."""
 
-    service = build("oauth2", "v2", credentials=creds)
+    service = build("oauth2", "v2", credentials=st.session_state["creds_google"])
     user_info = service.userinfo().get().execute()
     return user_info
 
@@ -87,7 +88,7 @@ def create_user_from_session():
     """Creates a User object from session state credentials."""
     if "credentials" in st.session_state:
         creds = st.session_state["credentials"]
-        user_info = get_user_info_from_credentials(creds)
+        user_info = get_user_info_from_credentials()
         # Guardamos el Email en el Session_State
         st.session_state["user_email"] = user_info.get("email", "Unknown")
 
@@ -120,6 +121,9 @@ def authenticate_user():
             "client_secret": creds.client_secret,
             "scopes": creds.scopes
         }
+
+        # Guardamos el Session State de las Credenciales
+        st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"])
         
         # Clear URL parameters to keep address bar clean
         st.query_params.clear()

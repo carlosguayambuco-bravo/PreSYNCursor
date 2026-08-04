@@ -35,9 +35,6 @@ def reiniciar_filtros_solicitudes(method: Literal['reset','basic']) -> None:
     ]
     for key in keys_to_remove:
         st.session_state[key] = None
-    # Ahora Cambiamos a False el Expander de Filtros Auxiliares si es que se reinicia todo
-    if method == 'reset':
-        st.session_state['expander_filtros_solicitudes_gestiones'] = False
     # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
     if method == 'basic':
         st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
@@ -117,7 +114,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
         )
 
     # Paso 2: Crear un Expander para Filtros Auxiliares (Persona que Solicita, Banco, ID, Cedula, Id_Deuda)
-    with st.expander("Filtros Auxiliares", expanded=False, key="expander_filtros_solicitudes_gestiones"):
+    with st.expander("Filtros Auxiliares", expanded=False):
         colPersona, colBanco, colID, colCedula, colIdDeuda = st.columns(5)
 
         with colPersona:
@@ -182,21 +179,19 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     if ejecutivo_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Ejecutivo"].isin(ejecutivo_solicitud)]
 
-    modo_expandido = st.session_state.get('expander_filtros_solicitudes_gestiones', False)
-
-    if persona_solicitud != "Todos" and modo_expandido:
+    if persona_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["Correo"] == persona_solicitud]
 
-    if banco_solicitud != "Todos" and modo_expandido:
+    if banco_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["Datos_Solicitud"].apply(lambda x: any((d['Banco'] in banco_solicitud) for d in x))]
 
-    if id_solicitud != "Todos" and modo_expandido:
+    if id_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["ID_Solicitud"] == id_solicitud]
 
-    if cedula_solicitud != "Todos" and modo_expandido:
+    if cedula_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["Cedula"] == cedula_solicitud]
 
-    if id_deuda_solicitud != "Todos" and modo_expandido:
+    if id_deuda_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["Ids_Deuda"].str.contains(id_deuda_solicitud)]
 
     # Paso 4: Quitar los IDs de Solicitudes que ya fueron respondidas y están en el BannedManager
@@ -207,8 +202,6 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
 
     # Si es Recomendado se realizan filtros aparte
     if usar_recomendado:
-        # Ahora Aplicamos un reset de los filtros para que se vean reflejados los cambios
-        st.session_state['expander_filtros_solicitudes_gestiones'] = False
         # Siguiente: Dejar en Solicitudes:
         # Estados: Sin Tocar, Bajo Comité (Con estado comite 1), Titular Ilocalizable (Con estado ilocalizable 1)
         maskSinTocar = solicitudes_copy["Estado_Solicitud"] == "Sin Tocar"
@@ -578,7 +571,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     )
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
-    with st.expander(expander_name, expanded=is_main, key="expander_solicitud_{}".format(solicitud['ID_Solicitud'])):
+    with st.expander(expander_name, expanded=is_main):
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("xxsmall")
 
