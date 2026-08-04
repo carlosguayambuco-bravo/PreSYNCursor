@@ -4,6 +4,7 @@
 import streamlit as st
 # Librerías Locales
 from core.users import User
+from data.data_loader import load_current_month_solicitudes
 
 def show_user_info():
     # Primero Cargamos la Información del Usuario desde el estado de sesión
@@ -40,8 +41,20 @@ def show_user_info():
 
     if user.role == 'admin':
 
+        st.sidebar.subheader("**Modo Administrador**")
+
         # Añadimos un campo para poner el Email de Contacto del Usuario en el Sidebar
         email_simulado = st.sidebar.text_input("**Email de Prueba**", value=user.get_email(), disabled=False, help="Email para simular un negociador", key="email_input")
         if (email_simulado != user.email) and email_simulado != "" and email_simulado != st.session_state.get("user_email"):
             # Actualizamos el user_email en el estado de sesión
             st.session_state["user_email"] = email_simulado.strip()
+
+        st.sidebar.divider()
+
+    # Botón de Recarga de Solicitudes
+    if st.sidebar.button("Recargar Solicitudes", icon="🔄", use_container_width=True):
+        # Limpiamos el cache de la función load_current_month_solicitudes
+        load_current_month_solicitudes.clear()
+
+        # Recargamos la Información
+        st.rerun()

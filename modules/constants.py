@@ -6,6 +6,7 @@
 IVA = 1.19
 
 # --- Configuraciones de Streamlit ---
+MIN_10_WAIT = 600 # En Segundos
 HOUR_WAIT = 3600 # En Segundos
 DAY_WAIT = 86400 # En Segundos
 WEEK_WAIT = 604800 # En Segundos

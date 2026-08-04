@@ -55,8 +55,8 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
     solicitudes_ws = sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
 
     # Buscamos la fila correspondiente a la solicitud por su ID
-    solicitud_id = solicitud['ID_Solicitud']
-    solicitud_sheets_row = solicitud_id - SOLICITUDES_ID_DELAY + 2  # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
+    solicitud_id = float(solicitud['ID_Solicitud'])
+    solicitud_sheets_row = int(solicitud_id - SOLICITUDES_ID_DELAY + 2) # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
     try:
         # Obtenemos los Headers de la Worksheet guardados en el Session State
         headers = st.session_state.get("solicitudes_headers", [])

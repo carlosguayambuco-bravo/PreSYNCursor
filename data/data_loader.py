@@ -12,7 +12,7 @@ import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
-from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT
+from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT, MIN_10_WAIT
 from services.google_sheets import GoogleSheetsService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
 from utils.helpers_sheets import _retry
@@ -30,7 +30,7 @@ CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
 
 #--> Carga de Solicitudes del Mes en Curso
-@st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=HOUR_WAIT)
+@st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=MIN_10_WAIT)
 def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
 
     # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets

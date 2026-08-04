@@ -229,7 +229,7 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
     ultima_actualizacion_df = metabase_service.execute_query(query)
 
     if ultima_actualizacion_df.empty:
-        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=30) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
 
     # Paso 4: -- Limpieza de Datos --
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
@@ -241,4 +241,4 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
     # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
     if not ultima_actualizacion_df.empty:
         return ultima_actualizacion_df['Ultima_Actualizacion'].max()
-    return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=30) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+    return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones

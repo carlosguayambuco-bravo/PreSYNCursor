@@ -13,8 +13,21 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     st.subheader("Deudas Activas del Cliente")
     st.info("Seleccione las deudas que desea incluir en el formulario de alianzas")
 
+    # Vamos a Añadir 2 Checbox: Seleccionar Todas y Deseleccionar Todas
+    colDeselectAll, colSelectAll  = st.columns(2, vertical_alignment="center")
+
+    with colDeselectAll:
+        if st.button("Deseleccionar Todas", key="deselect_all_deudas", type="primary", width="stretch"):
+            for _, row in deudas_activas_df.iterrows():
+                st.session_state[f"select_deuda_{row['Id_Deuda']}"] = False
+
+    with colSelectAll:
+            if st.button("Seleccionar Todas", key="select_all_deudas", type="secondary", width="stretch"):
+                for _, row in deudas_activas_df.iterrows():
+                    st.session_state[f"select_deuda_{row['Id_Deuda']}"] = True
+
     # Van a ser 4 Columns: Checkbox de Seleccion, Id_Deuda, Banco, PaB_Origen
-    colCH, colIdDeuda, colBanco, colPaBOrigen = st.columns([1, 2, 2, 2])
+    colCH, colIdDeuda, colBanco, colPaBOrigen = st.columns([1, 2, 2, 2], vertical_alignment="center")
 
     # Añadimos los Headers
     with colCH:
@@ -26,9 +39,11 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     with colPaBOrigen:
         st.markdown("**Deuda Bravo**")
 
+    st.divider()
+
     for _, row in deudas_activas_df.iterrows():
         with colCH:
-            selected = st.checkbox("", key=f"deuda_{row['Id_Deuda']}", value=True)
+            selected = st.checkbox("", key=f"select_deuda_{row['Id_Deuda']}", value=True)
             if selected:
                 st.session_state['deudas_seleccionadas'].append(row['Id_Deuda'])
             else:
@@ -45,7 +60,7 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
             st.text('${:,.0f}'.format(row['PaB_Origen']))
 
     # Definimos los Ids elegidos de las Deudas Seleccionadas
-    deudas_seleccionadas = [deuda for deuda in deudas_activas_df['Id_Deuda'] if st.session_state.get(f"deuda_{deuda}", False)]
+    deudas_seleccionadas = [deuda for deuda in deudas_activas_df['Id_Deuda'] if st.session_state.get(f"select_deuda_{deuda}", False)]
 
     return deudas_seleccionadas
 
@@ -81,13 +96,13 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         st.session_state['usar_para_todos'] = True
 
     if 'pago_total' not in st.session_state:
-        st.session_state['pago_total'] = float(suma_pab * 0.6)
+        st.session_state['pago_total'] = float(round(suma_pab * 0.7, 2))
 
     for _, row in deudas_activas_df_copy.iterrows():
         key_monto = f"monto_propuesto_{row['Id_Deuda']}"
         key_cuotas = f"num_cuotas_{row['Id_Deuda']}"
         if key_monto not in st.session_state:
-            st.session_state[key_monto] = float(st.session_state['pago_total'] * row['%Total'])
+            st.session_state[key_monto] = float(round(st.session_state['pago_total'] * row['%Total'],2))
         if key_cuotas not in st.session_state:
             st.session_state[key_cuotas] = 1
 
@@ -96,16 +111,16 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         # Si la opción "Distribuir" está activa, actualizamos el estado de cada deuda
         for _, row in deudas_activas_df_copy.iterrows():
             st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = float(
-                st.session_state['pago_total'] * row['%Total']
+                round(st.session_state['pago_total'] * row['%Total'],2)
             )
     else:
         # Si se edita individualmente, recalculamos el total como la suma de las deudas
-        st.session_state['pago_total'] = float(sum(
+        st.session_state['pago_total'] = float(round(sum(
             st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
-        ))
+        ),2))
 
     # 4. Renderizado de Controles Principales
-    colPagoTotal, colUsarParaTodos, colCuotas = st.columns([2, 1, 1])
+    colPagoTotal, colUsarParaTodos, colCuotas = st.columns([2, 1, 1], vertical_alignment="center")
 
     with colPagoTotal:
         st.number_input(
@@ -167,6 +182,11 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
     # 6. Renderizado de Filas de la Tabla
     for _, row in deudas_activas_df_copy.iterrows():
         id_deuda = row['Id_Deuda']
+
+        if tipo_cuotas == 'Por Deuda':
+            colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotasCol = st.columns([2, 2, 2, 1, 3, 2], gap="small", vertical_alignment="center")
+        else:
+            colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 3], gap="small", vertical_alignment="center")
 
         with colIdDeuda:
             st.text(id_deuda)

@@ -113,6 +113,10 @@ def getBDDaysDiffFloat(firstDate: pd.Timestamp, secondDate: pd.Timestamp, change
     if pd.isna(firstDate) or pd.isna(secondDate):
         return np.nan
 
+    # Quitamos Zonas Horarias
+    firstDate = firstDate.tz_localize(None) if firstDate.tzinfo else firstDate
+    secondDate = secondDate.tz_localize(None) if secondDate.tzinfo else secondDate
+
     # Verificamos el Orden Correcto de Fechas
     if change_order:
         start, end = sorted([firstDate, secondDate])
@@ -195,3 +199,21 @@ def getBDDaysDiffFloat_vectorized(start_series: pd.Series, end_series: pd.Series
     result = np.where(nan_mask, np.nan, result)
 
     return pd.Series(result, index=start_series.index)
+
+# Función Auxiliar para limpiar las tildes de un texto
+def clean_tildes(text: str) -> str:
+    replacements = {
+        'á': 'a',
+        'é': 'e',
+        'í': 'i',
+        'ó': 'o',
+        'ú': 'u',
+        'Á': 'A',
+        'É': 'E',
+        'Í': 'I',
+        'Ó': 'O',
+        'Ú': 'U'
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text

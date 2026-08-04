@@ -22,6 +22,9 @@ solicitudes_df = load_current_month_solicitudes()
 # Paso 3: Mostrar los Filtros Generales de Solicitud
 solicitudes_df = mostrar_filtros_generales_solicitud(solicitudes_df=solicitudes_df)
 
+st.divider()
+st.space("small")
+
 if solicitudes_df.empty:
     st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
     st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
