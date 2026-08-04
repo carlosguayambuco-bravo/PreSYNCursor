@@ -38,7 +38,8 @@ colMas, colDescargar = st.columns([1, 1], gap = "large")
 with colMas:
     mas_solicitudes =  st.button("Cargar Más Solicitudes",
                 key="cargar_mas_solicitudes_button",
-                help="Haz clic para cargar más solicitudes"
+                help="Haz clic para cargar más solicitudes",
+                disabled = len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver']
                 )
 with colDescargar:
     st.download_button("Descargar Solicitudes",
