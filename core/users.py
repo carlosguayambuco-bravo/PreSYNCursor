@@ -53,3 +53,6 @@ class User:
         Método para verificar si el usuario tiene un permiso específico.
         """
         return permit.is_allowed(self.role) # type: ignore
+
+    def get_email(self) -> str:
+        return self.email

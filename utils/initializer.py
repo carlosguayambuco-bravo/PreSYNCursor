@@ -100,8 +100,8 @@ def initialize_data(debugging_mode: bool = False):
         if debugging_mode:
             st.success("Aliados Loaded")
 
-    st.toast("✅Datos Inicializados con Éxito", icon="⏳")
     if anyChange:
+        st.toast("✅Datos Inicializados con Éxito", icon="⏳")
         st.rerun()
 
 # Función Auxiliar para Inicializar Estados de prueba

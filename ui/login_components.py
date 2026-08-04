@@ -29,7 +29,7 @@ def show_user_info():
     )
 
     # Ahora añadimos Botón de Cerrar Sesión en el Sidebar
-    if st.sidebar.button("Cerrar Sesión", icon="🚪"):
+    if st.sidebar.button("Cerrar Sesión", icon="🚪",use_container_width=True):
         # Limpiamos el estado de sesión
         st.session_state.clear()
         # Redirigimos al usuario a la página de login
@@ -37,3 +37,12 @@ def show_user_info():
 
     # Añadimos un Divisor al Sidebar para que no interfiera con las páginas de la aplicación
     st.sidebar.divider()
+
+    if user.role == 'admin':
+        st.sidebar.info("🔑 Eres un Administrador. Tienes acceso a todas las funcionalidades.")
+
+        # Añadimos un campo para poner el Email de Contacto del Usuario en el Sidebar
+        email_simulado = st.sidebar.text_input("**Email de Prueba**", value=user.get_email(), disabled=False, help="Email para simular un negociador", key="email_input")
+        if (email_simulado != user.email) and email_simulado != "" and email_simulado != st.session_state.get("user_email"):
+            # Actualizamos el user_email en el estado de sesión
+            st.session_state["user_email"] = email_simulado.strip()

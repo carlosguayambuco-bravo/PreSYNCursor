@@ -1,5 +1,8 @@
 # Estándar usando Pep8
 # Librerías de Python
+import secrets
+import jwt
+import time
 # Librerías de Terceros
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -16,6 +19,18 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/drive.file"  # Grants access to files created/opened by this app
 ]
+
+def generate_jwt_token(cv: str) -> str:
+    """Generates a JWT token with a short expiration time."""
+    payload = {
+        "cv": cv,
+        "iat": time.time(),
+        "exp": time.time() + 600,  # Token expires in 10 minutes
+        "nonce": secrets.token_urlsafe(16)  # Random nonce for added security
+    }
+
+    state = jwt.encode(payload, st.secrets["google_oauth"]["jwt_auth"], algorithm="HS256")
+    return state
 
 def create_flow():
     """Initializes the OAuth 2.0 Flow using secrets."""
@@ -35,11 +50,19 @@ def create_flow():
 def get_auth_url():
     """Generates Google login URL with access_type=offline to get refresh tokens."""
     flow = create_flow()
+    # Create a code_verifier and generate a state token
+    code_verifier = secrets.token_urlsafe(64)
+    # Save it into the flow
+    flow.code_verifier = code_verifier
+
+    state = generate_jwt_token(code_verifier)
     auth_url, _ = flow.authorization_url(
+        access_type="offline",  
         prompt="consent",
-        access_type="offline",
-        include_granted_scopes="true"
+        include_granted_scopes="true",
+        state=state,
     )
+
     return auth_url
 
 def get_user_info_from_credentials():
@@ -109,6 +132,14 @@ def authenticate_user():
     if "code" in params and "credentials" not in st.session_state:
         code = params["code"]
         flow = create_flow()
+
+        # Obtain the cv from the state parameter and decode it
+        state = params.get("state",'')
+        payload = jwt.decode(state, st.secrets["google_oauth"]["jwt_auth"], algorithms=["HS256"])
+        code_verifier = payload.get("cv")
+
+        flow.code_verifier = code_verifier  # Set the code_verifier for PKCE
+
         flow.fetch_token(code=code)
         
         # Save OAuth credentials (Access token, Refresh token, Scopes) into Session State
