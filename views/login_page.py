@@ -52,7 +52,4 @@ def show_login_page():
         """,
         unsafe_allow_html=True,
     )
-    if st.button("🔄 Refrescar URL"):
-        st.session_state["auth_url"] = get_auth_url()
-        st.success("URL de autenticación actualizada. Por favor, haz clic en el botón de inicio de sesión nuevamente.")
     st.stop()  # Detenemos la ejecución del script hasta que el usuario se autentique

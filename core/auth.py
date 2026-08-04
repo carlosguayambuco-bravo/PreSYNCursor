@@ -138,6 +138,11 @@ def authenticate_user():
         payload = jwt.decode(state, st.secrets["google_oauth"]["jwt_auth"], algorithms=["HS256"])
         code_verifier = payload.get("cv")
 
+        # Validamos la Expiración del Token
+        current_time = time.time()
+        if current_time > payload.get("exp", 0):
+            error_page_view("El token de autenticación ha expirado. Por favor, intenta iniciar sesión nuevamente.")
+
         flow.code_verifier = code_verifier  # Set the code_verifier for PKCE
 
         flow.fetch_token(code=code)

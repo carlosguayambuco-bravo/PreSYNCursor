@@ -39,7 +39,6 @@ def show_user_info():
     st.sidebar.divider()
 
     if user.role == 'admin':
-        st.sidebar.info("🔑 Eres un Administrador. Tienes acceso a todas las funcionalidades.")
 
         # Añadimos un campo para poner el Email de Contacto del Usuario en el Sidebar
         email_simulado = st.sidebar.text_input("**Email de Prueba**", value=user.get_email(), disabled=False, help="Email para simular un negociador", key="email_input")

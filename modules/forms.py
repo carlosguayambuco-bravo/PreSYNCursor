@@ -22,13 +22,13 @@ def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago
     por_cobrar = saldosDict['PorCobrar'][referencia]
 
     # Paso 2: Calcular el Descuento Óptimo
-    descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA) - 1)
+    descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA - 1) )
 
     # Paso 3: Devolver el Descuento Óptimo con Piso descuento_pl y techo 1
     return min(max(descuento_optimo, descuento_pl), 1)
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por Pago Crédito
-def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float):
+def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], pago_total_original: float):
     # Paso 1: Obtener el Ahorro y el Por Cobrar de la Referencia
     saldosDict = load_client_balances()
     ahorro = saldosDict['Saldos'][referencia]
@@ -44,7 +44,7 @@ def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], prici
             return 1 # Si no está alguna no se puede realizar el cálculo
 
     # Paso 3: Calcular el Descuento Óptimo
-    descuento_optimo = (ahorro - por_cobrar - pago_total_original) / (pago_total_original * (pricing * IVA) - 1)
+    descuento_optimo = (pago_total_original - montoIdeal - (ahorro - por_cobrar)) / (pago_total_original )
 
     # Paso 4: Devolver el Descuento Óptimo con Techo 1
     return max(min(descuento_optimo, 1),0.15)
@@ -52,7 +52,7 @@ def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], prici
 # Función para Obtener el Descuento Óptimo General para una Referencia, según el Tipo de Liquidación
 def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float) -> tuple[float, str]:
     descuento_trad = obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
-    descuento_cred = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pricing=pricing, pago_total_original=pago_total_original)
+    descuento_cred = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pago_total_original=pago_total_original)
     return min(descuento_trad, descuento_cred), "Tradicional" if descuento_trad <= descuento_cred else "Crédito"
 
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
