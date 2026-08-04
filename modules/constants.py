@@ -38,6 +38,7 @@ ESTADOS_PREFINALIZAR_SOLICITUD = [
     'No esta con Aliado',
     'Validada por Fuera',
     'No Exitosa',
+    'Erronea',
 ]
 
 PAGOS_POSIBLES_SOLICITUD = [

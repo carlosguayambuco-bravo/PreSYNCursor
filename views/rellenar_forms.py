@@ -8,7 +8,6 @@ import pandas as pd
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
-from utils.helpers_general import clean_tildes
 
 # Carga de Información Necesaria para el Formulario
 # Se Necesita:
@@ -341,14 +340,14 @@ response_info = {
     'Ids_Deuda': '-'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
     'Casa_Cobro': aliado_seleccionado,
     'Tipo_Solicitud': tipo_solicitud,
-    'Datos_Solicitud': json.dumps(info_completa_deudas),
+    'Datos_Solicitud': json.dumps(info_completa_deudas, ensure_ascii=False),
     'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
     'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
     'Tipo_Pago': tipo_pago if tipo_pago else '',
     'Metadata_Solicitud': json.dumps({
-        'Nombre_Cliente': clean_tildes(deudas_activas_df['Nombre_Cliente'].iloc[0]).title(),
-        'Comentario_Adicional': clean_tildes(comentario_adicional),
-    }),
+        'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0].title(),
+        'Comentario_Adicional': comentario_adicional,
+    }, ensure_ascii=False),
     'Estado_Solicitud': 'Sin Tocar',
 }
 

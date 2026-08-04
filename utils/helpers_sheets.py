@@ -157,6 +157,6 @@ def convert_data_to_string(obj: Any) -> str:
         return str(obj)
     # For other types (like lists, dicts), we can use json.dumps for a readable format
     try:
-        return json.dumps(obj)
+        return json.dumps(obj, ensure_ascii=False)
     except TypeError:
         return str(obj)

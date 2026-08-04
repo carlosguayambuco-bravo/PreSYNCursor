@@ -69,7 +69,7 @@ class MetabaseService:
         try:
             # Se pasa la consulta serializada dentro del campo 'query' en data=
             response = requests.post(
-            endpointURL, data={'query': json.dumps(payload)}, headers=headers
+            endpointURL, data={'query': json.dumps(payload, ensure_ascii=False)}, headers=headers
             )
             response.raise_for_status()
 

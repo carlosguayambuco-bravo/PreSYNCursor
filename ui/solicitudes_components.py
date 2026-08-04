@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
+from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_models import SolicitudesSchema
 from data.data_uploader import update_solicitud_in_google_sheets
@@ -13,7 +14,7 @@ from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_S
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import generate_acuerdo_pago_pdf, subir_acuerdo_pago_a_google_drive
 from modules.classes import get_banned_manager
-from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, clean_tildes
+from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
 
 def salir_de_dialogo() -> None:
     """
@@ -21,7 +22,7 @@ def salir_de_dialogo() -> None:
     Esta función reinicia los filtros de solicitudes y vuelve a ejecutar la aplicación.
     """
     # Volvemos a ejecutar la aplicación
-    st.rerun(scope="app")
+    st.rerun()
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
 def reiniciar_filtros_solicitudes(method: Literal['reset','basic']) -> None:
@@ -287,13 +288,13 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Ahora Agregamos la Fecha_Respuesta a hoy en estos momentos
     solicitud_respuesta["Fecha_Respuesta"] = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
 
-    st.markdown("### **Información de la Solicitud 🥸**")
+    st.markdown("### **ℹ️ Información de la Solicitud**")
     # Paso 1: Escogencia de Aliado, Estado de Solicitud y si Fue llamada
-    colAliado, colEstado, colLlamada = st.columns(3, vertical_alignment="center")
+    colAliado, colEstado, colLlamada = st.columns([2,2,1], vertical_alignment="center")
 
     with colAliado:
         aliado_final = st.selectbox(
-            label="**Aliado - Casa de Cobro**",
+            label="**🥸 Aliado - Casa de Cobro**",
             options=list(st.session_state["aliados_dict"].keys()),
             index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]),
             key="aliado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
@@ -301,7 +302,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     with colEstado:
         estado_final = st.selectbox(
-            label="**Estado de Solicitud**",
+            label="**📊 Estado de Solicitud**",
             options=[e for e in ESTADOS_POSIBLES_SOLICITUD if e not in ["Sin Tocar","Vencida"]],
             index=None,
             key="estado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
@@ -309,18 +310,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     with colLlamada:
         llamada_final = st.checkbox(
-            label="**¿Fue Llamada?**",
+            label="**📞 ¿Fue Llamada?**",
             value=False,
             key="llamada_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
         )
-
-    # Añadimos campo para poner comentarios de la Solicitud
-    comentario_final = st.text_area(
-        label="**Comentarios de la Solicitud**",
-        value="",
-        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
-        help="Ingrese cualquier comentario adicional sobre la solicitud.",
-    )
 
     # Verificamos que ambos esten seleccionados para habilitar el botón de enviar respuesta
     if not (aliado_final and estado_final):
@@ -331,9 +324,6 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     solicitud_respuesta["Casa_Cobro"] = aliado_final
     solicitud_respuesta["Estado_Solicitud"] = estado_final
     solicitud_respuesta["Metadata_Solicitud"]["Fue_Llamada"] = llamada_final
-    # Si hay Comentario lo Actualizamos
-    if comentario_final:
-        solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = clean_tildes(comentario_final)
 
     # Siguiente: Verificaciones antes de Seguir con Solicitud
     # Actualizamos Bajo Comité y Titular Ilocalizable
@@ -344,6 +334,17 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Ahora: Mostramos Botón de Finalizar que el Estado este en ESTADOS_PREFINALIZAR_SOLICITUD
     if estado_final in ESTADOS_PREFINALIZAR_SOLICITUD:
+
+        # Añadimos la Posibilidad de Comentario
+        cm_final = st.text_area(
+            label="**Comentarios de la Solicitud**",
+            value="",
+            key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            help="Ingrese cualquier comentario adicional sobre la solicitud.",
+        )
+        # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
+        solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
+
         st.success("La solicitud está en un estado que permite finalizarla.")
         # Mostramos el Botón para Finalizar la Solicitud
         mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
@@ -351,7 +352,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # En caso que no (es Exitosa), se requiere poner el Monto por Deuda, Cuotas y Fecha Límite de Pago
     # Paso 1: Escoger-> Fecha Limite de Pago, Monto Total, Checkbox de usar Monto Total y SelectBox para cuotas
-    colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns(4, vertical_alignment="center")
+    colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([2, 2, 1, 1], vertical_alignment="center")
 
     # Paso 2: Inicializar Valores en el Session_State por Primera Vez
     monto_propuesto_total = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
@@ -361,12 +362,12 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     if not (key_usar_monto_total in st.session_state):
         st.session_state[key_usar_monto_total] = True
     if not (key_monto_total in st.session_state):
-        st.session_state[key_monto_total] = '{:,.2f}'.format(monto_propuesto_total) 
+        st.session_state[key_monto_total] = '{:,.0f}'.format(monto_propuesto_total) 
     for d in solicitud["Datos_Solicitud"]:
         key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         if not (key_monto in st.session_state):
-            st.session_state[key_monto] = '{:,.2f}'.format(d['Monto_Propuesto'])
+            st.session_state[key_monto] = '{:,.0f}'.format(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
             st.session_state[key_cuotas] = '{}'.format(d['Num_Cuotas'])
 
@@ -383,13 +384,13 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             porcentaje_propuesto_original = monto_total_float / monto_propuesto_total if monto_propuesto_total > 0 else 0
             monto_propuesto_nuevo = monto_total * porcentaje_propuesto_original
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            st.session_state[key_monto] = '{:,.2f}'.format(monto_propuesto_nuevo)
+            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo)
     else:
         # La Actualización del Monto Total se hace basado en la Suma de los Montos Propuestos por Deuda
         monto_total = sum(
             cleanNumber(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
             )
-        st.session_state[key_monto_total] = '{:,.2f}'.format(monto_total)
+        st.session_state[key_monto_total] = '{:,.0f}'.format(monto_total)
 
     with colFechaLimite:
         fecha_limite_pago = st.date_input(
@@ -404,14 +405,15 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     with colMontoTotal:
         monto_total = st.text_input(
-            label="**Monto Total**",
+            label="**Monto de Portafolio**",
             key=key_monto_total,
             help="Ingrese el monto total propuesto para la solicitud. Este monto se distribuirá proporcionalmente entre las deudas.",
+            disabled= not st.session_state[key_usar_monto_total],
         )
 
     with colUsarMontoTotal:
         usar_monto_total = st.checkbox(
-            label="**Distribuir el Monto Total**",
+            label="**Usar el Monto de Portafolio**",
             key=key_usar_monto_total,
             help="Seleccione esta opción para distribuir el monto total propuesto entre las deudas.",
         )
@@ -434,53 +436,60 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         num_coutas_global = st.number_input(
             label="**Número de Cuotas para Todas las Deudas**",
             min_value=1,
+            max_value=60,
             step=1,
             key="num_cuotas_global_{}".format(solicitud['ID_Solicitud']),
             help="Ingrese el número de cuotas para todas las deudas.",
+            width="stretch",
         )
 
-    if cuotas_input == "Por Deuda":
-        colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5)
-    else:
-        colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto = st.columns(4)
+    # Siguiente: Expander para mostrar los Inputs por Deuda
+    with st.expander("**Respuesta por Deuda**", expanded=False):
+        if cuotas_input == "Por Deuda":
+            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5, vertical_alignment="center")
+        else:
+            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto = st.columns(4, vertical_alignment="center")
 
-    with colIdDeuda:
-        st.markdown("**ID de Deuda**")
-    with colNumCredito:
-        st.markdown("**Número de Crédito**")
-    with colSolicitado:
-        st.markdown("**$Solicitado**")
-    with colMontoPropuesto:
-        st.markdown("**Monto Propuesto**")
-    if cuotas_input == "Por Deuda":
-        with colCuotasDeuda: # type: ignore
-            st.markdown("**Número de Cuotas**")
-
-    # Iteramos por las Deudas de la Solicitud y Mostramos los Inputs correspondientes
-    for d in solicitud["Datos_Solicitud"]:
         with colIdDeuda:
-            st.code(d['Id_Deuda'], language="text")
+            st.markdown("**ID de Deuda**")
         with colNumCredito:
-            st.code(d['Numero_Credito'], language="text")
+            st.markdown("**Número de Crédito**")
         with colSolicitado:
-            st.code(d['Monto_Propuesto'], language="text")
+            st.markdown("**$Solicitado**")
         with colMontoPropuesto:
-            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-            st.text_input(
-                "",
-                key=key_monto,
-                help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
-                label_visibility="collapsed",
-            )
+            st.markdown("**Monto Propuesto**")
         if cuotas_input == "Por Deuda":
             with colCuotasDeuda: # type: ignore
-                key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                st.markdown("**Número de Cuotas**")
+
+        # Iteramos por las Deudas de la Solicitud y Mostramos los Inputs correspondientes
+        for d in solicitud["Datos_Solicitud"]:
+            with colIdDeuda:
+                st.code(d['Id_Deuda'], language="text")
+            with colNumCredito:
+                st.code(d['Numero_Credito'], language="text")
+            with colSolicitado:
+                st.code(d['Monto_Propuesto'], language="text")
+            with colMontoPropuesto:
+                key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
                 st.text_input(
                     "",
-                    key=key_cuotas,
-                    help="Ingrese el número de cuotas para la deuda {}.".format(d['Id_Deuda']),
+                    key=key_monto,
+                    help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
                     label_visibility="collapsed",
+                    disabled = usar_monto_total
                 )
+            if cuotas_input == "Por Deuda":
+                with colCuotasDeuda: # type: ignore
+                    key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                    st.text_input(
+                        "",
+                        key=key_cuotas,
+                        help="Ingrese el número de cuotas para la deuda {}.".format(d['Id_Deuda']),
+                        label_visibility="collapsed",
+                    )
+
+        # Siguiente: Mostramos el Monto Total Propuesto y el Número de Cuotas Finales
 
     # Siguiente: Generamos el JSON_Respuesta con: Monto Propuesto por Deuda, Cuotas por Deuda
     json_respuesta = []
@@ -525,58 +534,89 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
+
+        # Añadimos la Posibilidad de Comentario
+        cm_final = st.text_area(
+            label="**Comentarios de la Solicitud**",
+            value="",
+            key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            help="Ingrese cualquier comentario adicional sobre la solicitud.",
+        )
+        # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
+        solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
+
         mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
         st.stop()
 
-    # Creamos 2 Columnas: Una para Tipo de Pago y la Otra para Formato de Pago
-    colTipoPago, colFormatoPago = st.columns(2)
+    # Especificaciones de Acuerdo de Pago u Oferta de Pago
+    with st.expander("**💸 Especificaciones de Acuerdo de Pago u Oferta de Pago**", expanded=True):
 
-    # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Tipo de Pago (Efectivo-Cheque, PSE, Transferencia)
-    with colTipoPago:
-        tipo_pago = st.radio(
-            label="**Tipo de Pago**",
-            options=["Efectivo-Cheque", "PSE", "Transferencia"],
-            index=0,
-            key="tipo_pago_{}".format(solicitud['ID_Solicitud']),
-            help="Seleccione el tipo de pago para la solicitud.",
-        )
+        # Creamos 2 Columnas: Una para Tipo de Pago y la Otra para Formato de Pago
+        colTipoPago, colFormatoPago = st.columns(2, vertical_alignment="top")
 
-        # Guardamos el Tipo de Pago en la solicitud_respuesta
-        solicitud_respuesta["Tipo_Pago"] = tipo_pago
+        # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Tipo de Pago (Efectivo-Cheque, PSE, Transferencia)
+        with colTipoPago:
+            tipo_pago = st.radio(
+                label="**Tipo de Pago**",
+                options=["Efectivo-Cheque", "PSE", "Transferencia"],
+                index=0,
+                key="tipo_pago_{}".format(solicitud['ID_Solicitud']),
+                help="Seleccione el tipo de pago para la solicitud.",
+            )
 
-    with colFormatoPago:
-        formato_pago = st.radio(
-            label="**Formato de Acuerdo de Pago**",
-            options=["Subir Archivo", "Generar PDF"],
-            index=0,
-            key="formato_pago_{}".format(solicitud['ID_Solicitud']),
-            help="Seleccione el formato de pago para la solicitud.",
-        )
+            # Guardamos el Tipo de Pago en la solicitud_respuesta
+            solicitud_respuesta["Tipo_Pago"] = tipo_pago
 
-    # Siguiente: Definir el formato_pago
-    if formato_pago == "Subir Archivo":
-        bytes_acuerdo = st.file_uploader(
-            label="**Subir Acuerdo de Pago**",
-            type=["pdf"],
-            key="subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
-            help="Suba el archivo PDF del acuerdo de pago.",
-        )
-        if bytes_acuerdo is None:
-            st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
-            st.stop()
-        # Obtenemos los bytes del archivo subido
-        bytes_acuerdo = bytes_acuerdo.getvalue()
-        
-    elif formato_pago == "Generar PDF":
-        bytes_acuerdo = generate_acuerdo_pago_pdf(solicitud_info=solicitud_respuesta)
-        # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
-        if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
-            st.error("Error al generar el PDF del acuerdo de pago. Por favor, intente nuevamente creelo manualmente.")
-            st.stop()
+        with colFormatoPago:
+            formato_pago = st.radio(
+                label="**Formato de Acuerdo de Pago**",
+                options=["Subir Archivo", "Generar PDF"],
+                index=0,
+                key="formato_pago_{}".format(solicitud['ID_Solicitud']),
+                help="Seleccione el formato de pago para la solicitud.",
+            )
+
+        # Siguiente: Definir el formato_pago
+        if formato_pago == "Subir Archivo":
+            bytes_acuerdo = st.file_uploader(
+                label="**Subir Acuerdo de Pago**",
+                type=["pdf"],
+                key="subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+                help="Suba el archivo PDF del acuerdo de pago.",
+            )
+            if bytes_acuerdo is None:
+                st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
+                st.stop()
+            # Obtenemos los bytes del archivo subido
+            bytes_acuerdo = bytes_acuerdo.getvalue()
+            
+        elif formato_pago == "Generar PDF":
+            bytes_acuerdo = generate_acuerdo_pago_pdf(solicitud_info=solicitud_respuesta)
+            # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
+            if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
+                st.error("Error al generar el PDF del acuerdo de pago. Por favor, intente nuevamente creelo manualmente.")
+                st.stop()
+
+        # Creamos un popover para mostrar el PDF generado o subido
+        with st.expander("**📄 Vista Previa del Acuerdo de Pago**", expanded=False):
+            if bytes_acuerdo is not None and len(bytes_acuerdo) > 0:
+                st.markdown("**Vista Previa del Acuerdo de Pago:**")
+                st.pdf(bytes_acuerdo)
+            else:
+                st.warning("No hay un acuerdo de pago disponible para mostrar.")
+
+    # Añadimos la Posibilidad de Comentario
+    cm_final = st.text_area(
+        label="**Comentarios de la Solicitud**",
+        value="",
+        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+        help="Ingrese cualquier comentario adicional sobre la solicitud.",
+    )
+    # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
+    solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
-
 
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
@@ -654,14 +694,16 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         st.space("xxsmall")
         st.divider()
 
-        # Vamos a Crear 4 o 5 Columnas: Id_Deuda, Banco, Numero_Credito, Monto Propuesto , Cuotas(Si Hay)
+        # Vamos a Crear 5 o 6 Columnas: Boton de Copiar, Id_Deuda, Banco, Numero_Credito, Monto Propuesto , Cuotas(Si Hay)
         hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
         if hay_cuotas:
-            colIdDeuda, colBanco, colNumCredito, colMontoPropuesto, colCuotas = st.columns([1,1,2,2,1], vertical_alignment="center")
+            colBtCopy, colIdDeuda, colBanco, colNumCredito, colMontoPropuesto, colCuotas = st.columns([1,3,3,6,6,3], vertical_alignment="center")
         else:
-            colIdDeuda, colBanco, colNumCredito, colMontoPropuesto = st.columns([1,1,2,2], vertical_alignment="center")
+            colBtCopy, colIdDeuda, colBanco, colNumCredito, colMontoPropuesto = st.columns([1,3,3,6,6], vertical_alignment="center")
 
+        with colBtCopy:
+            st.markdown("**Copiar**")
         with colIdDeuda:
             st.markdown("**ID de Deuda:**")
         with colBanco:
@@ -675,6 +717,15 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 st.markdown("**Número de Cuotas:**")
 
         for d in solicitud["Datos_Solicitud"]:
+
+
+            txt_debt = "ID Deuda: {}\nBanco: {}\nNúmero de Crédito: {}\nMonto Propuesto: ${:,.2f}".format(
+                d['Id_Deuda'], d['Banco'], d['Numero_Credito'], d['Monto_Propuesto']
+            )
+
+            with colBtCopy:
+                if st_copy_to_clipboard(txt_debt, key="copy_debt_{}".format(d['Id_Deuda'])):
+                    st.toast("Datos de la deuda {} copiados al portapapeles.".format(d['Id_Deuda']), icon=":material/content_copy:")
 
             with colIdDeuda:
                 st.code(d['Id_Deuda'], language="text")
@@ -708,17 +759,16 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
         with colInfo:
             if solicitud_ya_gestionada:
-                st.success("Esta solicitud ya ha sido respondida o está en espera de comité/ilocalizable, por lo que no se puede responder nuevamente.")
+                st.success("Esta solicitud ya ha sido respondida o está en espera de comité/ilocalizable.", icon="✅")
             else:
-                st.info("Haz click para responder la solicitud.")
+                st.info("Haz click para responder la solicitud.", icon="ℹ️")
 
         with colBoton:
-            st.button(
+            if st.button(
                 label="Responder Solicitud",
                 key="responder_solicitud_{}".format(solicitud['ID_Solicitud']),
-                on_click=dialog_respuesta_solicitud,
-                kwargs={"solicitud": solicitud},
                 disabled=solicitud_ya_gestionada,
                 type = "primary",
                 help="Haga clic para responder la solicitud. Esta acción abrirá un diálogo donde podrá ingresar su respuesta.",
-        )
+            ):
+                dialog_respuesta_solicitud(solicitud=solicitud)

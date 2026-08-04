@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
+import numpy as np
 import pandas as pd
 # Librerías Locales
 
@@ -96,6 +97,11 @@ DICCIONARIO_BUSQUEDA_PATRONES_BANCOS = {
     'Tuya': 'Tuya',
     'Itaú': 'Itau',
 }
+
+# Lista de Bancos Únicos
+BANCOS_UNICOS = list(PATRONES_UNICOS_BANCOS.values()) + list(DICCIONARIO_BANCOS.keys())
+BANCOS_UNICOS = list(set(BANCOS_UNICOS))  # Eliminamos duplicados
+
 
 # Función Normalizadora de Bancos
 def normalizar_banco(banco: str) -> str:
