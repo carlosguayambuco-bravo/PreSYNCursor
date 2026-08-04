@@ -41,15 +41,15 @@ GESTIONAR_SOLICITUDES = Permit(
     description="Permite gestionar solicitudes de Alianzas dando Respuestas.",
     user_roles_allowed=['admin', 'executive'],
 )
-VER_CARTERA_EQUIPO = Permit(
-    name="ver_cartera_equipo",
-    description="Permite ver la cartera de todo el equipo.",
-    user_roles_allowed=['admin', 'leader'],
+VER_MIS_SOLICITUDES = Permit(
+    name="ver_mis_solicitudes",
+    description="Permite ver las solicitudes del usuario y del equipo si es necesario.",
+    user_roles_allowed=['admin', 'leader','nego', 'executive'],
 )
 VER_CARTERA_TOTAL = Permit(
     name="ver_cartera_total",
-    description="Permite ver la cartera total de todos los equipos.",
-    user_roles_allowed=['admin','executive'],
+    description="Permite ver la cartera total bien sea individual o por equipos",
+    user_roles_allowed=['admin', 'leader','nego', 'executive'],
 )
 VER_LOGS = Permit(
     name="ver_logs",
@@ -62,7 +62,7 @@ PERMISSIONS_DICT = {
     "subida_formulario": SUBIDA_FORMULARIO,
     "agregar_cartera": AGREGAR_CARTERA,
     "gestionar_solicitudes": GESTIONAR_SOLICITUDES,
-    "ver_cartera_equipo": VER_CARTERA_EQUIPO,
+    "ver_mis_solicitudes": VER_MIS_SOLICITUDES,
     "ver_cartera_total": VER_CARTERA_TOTAL,
     "ver_logs": VER_LOGS,
 }
@@ -77,11 +77,11 @@ DEFAULT_PERMISSIONS = {
 
 PAGES_ROUTE_MAPPING = {
     "subida_formulario": st.Page("views/rellenar_forms.py",title="Formulario Alianzas",icon="📝"),
-    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="📊"),
-    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="📋"),
-    "ver_cartera_equipo": st.Page("views/ver_cartera_equipo.py",title="Ver Cartera del Equipo",icon="👥"),
-    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="📈"),
-    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="📝"),
+    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="💼"),
+    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="🛠️"),
+    "ver_mis_solicitudes": st.Page("views/ver_solicitudes.py",title="Ver Mis Solicitudes",icon="📋"),
+    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="💸"),
+    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="🤔"),
 }
 
 def get_permit_pages(user_role: Literal['admin', 'leader','nego', 'executive']) -> list[st.Page]: # type: ignore

@@ -4,4 +4,5 @@
 import streamlit as st
 # Librerías Locales
 
-st.write("Vista sin Implementar: Ver Cartera del Equipo")
+st.title('✅ Mis Solicitudes a Alianzas')
+st.info('🥸No está implementado aún')
