@@ -2,21 +2,77 @@
 # Librerías de Python
 # Librerías de Terceros
 import pandas as pd
+from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
+from data.data_loader import load_current_month_solicitudes
+from data.data_uploader import update_solicitud_in_google_sheets
+from data.data_models import SolicitudesSchema
+from modules.classes import get_banned_manager
 from services.google_drive import GoogleDriveService
 
-def generate_acuerdo_pago_pdf(solicitud_info: pd.Series) -> bytes:
+def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
     """
-    Genera un PDF de Acuerdo de Pago a partir de los datos proporcionados en formato JSON.
+    Filtra las solicitudes que no han sido respondidas.
 
     Args:
-        solicitud_info (pd.Series): Información de la solicitud.
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
 
     Returns:
-        bytes: Contenido del PDF generado en formato binario.
+        pd.Series: Serie con las solicitudes sin responder.
     """
-    return bytes()
+    maskSinTocar = solicitudes_df["Estado_Solicitud"] == "Sin Tocar"
+    maskBajoComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0)  == 1) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
+    maskTitularIlocalizable = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
+    return (maskSinTocar | maskBajoComite | maskTitularIlocalizable)
+
+def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
+    """
+    Distribuye el resultado de la solicitud a las diferentes solicitudes disponibles
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        bool: True si la distribución fue exitosa, False en caso contrario.
+    """
+    # Paso 1: Verificar que se puede Distribuir el Resultado de la Solicitud
+    if solicitud['Estado_Solicitud'] != "Exitoso":
+        # Solo actualizamos la Solicitud y ya
+        return update_solicitud_in_google_sheets(solicitud)
+
+    # Paso 2: Actualizar Solicitudes con mismas deudas, misma Casa_Cobro y mismo Tipo_Solicitud
+    solicitudes_df: DataFrame[SolicitudesSchema] = load_current_month_solicitudes()
+    idsFinal = ''.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
+    maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
+    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
+    maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
+    maskFinal = maskIds & maskCasa & maskTipo
+
+    curr_state = True # Inicializamos el True o False
+    for _, solicitud_to_update in solicitudes_df[maskFinal].iterrows():
+        solicitud_to_update['Estado_Solicitud'] = solicitud['Estado_Solicitud']
+        solicitud_to_update['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
+        solicitud_to_update['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+        solicitud_to_update['JSON_Respuesta'] = solicitud['JSON_Respuesta']
+        solicitud_to_update['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
+        solicitud_to_update['Ejecutivo'] = solicitud['Ejecutivo']
+        solicitud_to_update['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+
+        # Actualizamos la Solicitud en Google Sheets
+        curr_state = update_solicitud_in_google_sheets(solicitud_to_update) and curr_state
+
+        # Verificamos que no haya habido algún error en la actualización
+        if not curr_state:
+            st.error(f"Error al actualizar la solicitud con ID: {solicitud_to_update['ID_Solicitud']}")
+            return False
+
+        # Agregamos el ID de la Solicitud a los Ids Banneados
+        banned_manager = get_banned_manager()
+        banned_manager.ban(solicitud_to_update['ID_Solicitud'])
+
+    return curr_state
+
 
 def generar_nombre_acuerdo_pago(solicitud_info: pd.Series) -> str:
     """

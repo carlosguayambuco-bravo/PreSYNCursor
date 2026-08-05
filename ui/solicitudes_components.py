@@ -9,10 +9,9 @@ import streamlit as st
 from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_models import SolicitudesSchema
-from data.data_uploader import update_solicitud_in_google_sheets
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import generate_acuerdo_pago_pdf, subir_acuerdo_pago_a_google_drive
+from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
 
@@ -56,7 +55,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     solicitudes_copy = solicitudes_df.copy()  # Creamos una copia del DataFrame para no modificar el original
 
     # Vamos a Crear 3 Columnas: Boton de Reinicio Total, Boton de Reinicio Basico y Boton de Recomendado
-    colResetTotal, colResetBasico, colRecomendado = st.columns(3)
+    colResetTotal, colResetBasico, colRecomendado = st.columns(3, vertical_alignment="center")
 
     with colResetTotal:
         st.button(
@@ -77,8 +76,8 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
         )
 
     with colRecomendado:
-        usar_recomendado = st.checkbox(
-            label="Filtros Recomendados",
+        usar_recomendado = st.toggle(
+            label="**Filtros Recomendados**",
             key="filtros_recomendados_solicitudes",
             help="Haga clic para aplicar los filtros recomendados.",
         )
@@ -213,10 +212,8 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     if usar_recomendado:
         # Siguiente: Dejar en Solicitudes:
         # Estados: Sin Tocar, Bajo Comité (Con estado comite 1), Titular Ilocalizable (Con estado ilocalizable 1)
-        maskSinTocar = solicitudes_copy["Estado_Solicitud"] == "Sin Tocar"
-        maskBajoComite = solicitudes_copy["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0)  == 1) & (solicitudes_copy["Estado_Solicitud"] == "Bajo Comité")
-        maskTitularIlocalizable = solicitudes_copy["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_copy["Estado_Solicitud"] == "Titular Ilocalizable")
-        solicitudes_df = solicitudes_copy[maskSinTocar | maskBajoComite | maskTitularIlocalizable].copy()
+        maskNotAnswered = obtener_mascara_sin_responder(solicitudes_copy)
+        solicitudes_df = solicitudes_copy[maskNotAnswered].copy()
 
         # Siguiente: Crear Copia con Columna Prioridad
         # Paso 1: Crear Columna Fecha_Hoy
@@ -261,7 +258,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
     if actualizar_solicitud:
         with st.spinner("Subiendo Solicitud a Google Sheets..."):
             # Actualizamos la Solicitud en Google Sheets
-            success = update_solicitud_in_google_sheets(solicitud)
+            success = distribuir_resultado_solicitud(solicitud)
             # Subimos el Acuerdo de Pago si es necesario
             if (pdf_bytes is not None) and len(pdf_bytes) > 0:
                 file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
@@ -274,6 +271,10 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             st.rerun()
         else:
             st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
+
+# Función Auxiliar para mostrar las Especificaciones del Acuerdo de Pago Generado
+def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
+    return bytes()
 
 # Función para Abrir el Dialogo de Respuesta de una Solicitud
 @st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large")
@@ -309,7 +310,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         )
 
     with colLlamada:
-        llamada_final = st.checkbox(
+        llamada_final = st.toggle(
             label="**📞 ¿Fue Llamada?**",
             value=False,
             key="llamada_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
@@ -519,9 +520,9 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Añadir el Input de Pago Total Obligatorio (Checkbox), solo si existe más de una deuda
     if len(json_respuesta) > 1:
-        colCheckbox, colInfo = st.columns([1, 4])
-        with colCheckbox:
-            pago_total_obligatorio = st.checkbox(
+        colToggle, colInfo = st.columns([1, 4])
+        with colToggle:
+            pago_total_obligatorio = st.toggle(
                 label="**Pago Total Obligatorio**",
                 value=False,
                 key="pago_total_obligatorio_{}".format(solicitud['ID_Solicitud']),
@@ -557,15 +558,15 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Tipo de Pago (Efectivo-Cheque, PSE, Transferencia)
         with colTipoPago:
             tipo_pago = st.radio(
-                label="**Tipo de Pago**",
+                label="**Método de Pago**",
                 options=["Efectivo-Cheque", "PSE", "Transferencia"],
                 index=0,
-                key="tipo_pago_{}".format(solicitud['ID_Solicitud']),
-                help="Seleccione el tipo de pago para la solicitud.",
+                key="metodo_pago_{}".format(solicitud['ID_Solicitud']),
+                help="Seleccione el método de pago para la solicitud.",
             )
 
-            # Guardamos el Tipo de Pago en la solicitud_respuesta
-            solicitud_respuesta["Tipo_Pago"] = tipo_pago
+            # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
+            solicitud_respuesta["Metadata_Solicitud"]["Metodo_Pago"] = tipo_pago
 
         with colFormatoPago:
             formato_pago = st.radio(
@@ -591,7 +592,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             bytes_acuerdo = bytes_acuerdo.getvalue()
             
         elif formato_pago == "Generar PDF":
-            bytes_acuerdo = generate_acuerdo_pago_pdf(solicitud_info=solicitud_respuesta)
+            bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
             # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
             if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
                 st.error("Error al generar el PDF del acuerdo de pago. Por favor, intente nuevamente creelo manualmente.")

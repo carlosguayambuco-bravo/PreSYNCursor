@@ -134,8 +134,8 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         )
 
     with colUsarParaTodos:
-        st.checkbox(
-            "Distribuir el Monto entre Deudas",
+        st.toggle(
+            "**Distribuir el Monto entre Deudas**",
             key="usar_para_todos",
             help="Si se selecciona, el Monto Total se distribuirá según el %Total."
         )
