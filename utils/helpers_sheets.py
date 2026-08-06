@@ -119,13 +119,13 @@ def appendDataFrameToEnd(ws: gspread.Worksheet, df: pd.DataFrame, retry_label="A
     return True
 
 # Función Auxiliar para subir los datos a una hoja
-def uploadToSheets(ws: gspread.Worksheet, df: pd.DataFrame, rezising: bool = False, retry_label="Upload Data"):
+def uploadToSheets(ws: gspread.Worksheet, df: pd.DataFrame, resizing: bool = False, retry_label="Upload Data"):
     """
     Uploads a DataFrame to a Google Sheet, ensuring column alignment
     and cleaning up unnecessary columns.
     """
     _retry(lambda: ws.clear(), label="clear sheet")
-    _retry(lambda: set_with_dataframe(ws, df, resize=rezising), label=f"{retry_label} ({len(df)} rows)")
+    _retry(lambda: set_with_dataframe(ws, df, resize=resizing), label=f"{retry_label} ({len(df)} rows)")
 
 # Función para Obtener el Nombre de la Columna de Google Sheets a partir del Índice (1-based)
 def get_column_letter(col_idx: int) -> str:

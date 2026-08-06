@@ -2,12 +2,13 @@
 # Librerías de Python
 from typing import Optional
 # Librerías de Terceros
+from pandera.typing import DataFrame
 import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_loader import SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from modules.constants import SOLICITUDES_ID_DELAY
-from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter
+from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets
 from services.google_sheets import GoogleSheetsService
 
 # Función para subir una respuesta de Formulario a Google Sheets
@@ -74,6 +75,28 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
         st.error(f"Error al actualizar la solicitud en Google Sheets: {e}")
         return False
 
+# Función Auxiliar para Subir una plantilla masiva de Solicitudes a Sheets
+def upload_massive_solicitudes_to_google_sheets(plantilla_df: pd.DataFrame) -> bool:
+    # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+
+    # Definimos el Nombre de la Hoja segun el user_email
+    user_email = st.session_state['user_email']
+    sheet_name = f"Plantilla_{user_email.split('@')[0]}"
+
+    # Abrimos Primero la Spreadsheet
+    spreadsheet = sheets_service.get_spreadsheet(SOLICITUDES_SHEET_ID)
+    # Ahora Obtenemos la Hoja de la Plantilla masiva (si no existe, la creamos)
+    _, plantilla_ws = getWorksheet(spreadsheet, sheet_name, plantilla_df)
+
+    try:
+        # Subimos la plantilla masiva a Google Sheets
+        uploadToSheets(plantilla_ws, plantilla_df, resizing=True, retry_label="Upload Plantilla Masiva")
+        return True
+    except Exception as e:
+        st.error(f"Error al subir la plantilla masiva a Google Sheets: {e}")
+        return False
+
 def upload_log_to_sheets(*,info: str, detail: str):
     # Paso 1: Crear la Lista de Datos del Log
     # Timestamp, Correo del Usuario, Información, Detalle
@@ -123,8 +146,8 @@ def upload_addendum_debt(*,
     # 5.3 Verificar si ya existe
     tuplas_existentes = list(zip(exisiting_cedulas_cleaned, existing_numbers_cleaned))
     if (cedula_cleaned, number_credit_cleaned) in tuplas_existentes:
-        st.error(f"El Addendum con Cédula {cedula_cleaned} y Número de Crédito {number_credit_cleaned} ya existe en la hoja de Masivas. No se puede subir duplicado.")
-        return False
+        st.warning(f"El Addendum con Cédula {cedula_cleaned} y Número de Crédito {number_credit_cleaned} ya existe en la hoja de Masivas. No se puede subir duplicado.")
+        return True  # Retornamos True porque no es un error, simplemente no se sube duplicado
 
     # Paso 6: Agregar la Fila del Addendum al Final de la Hoja 
     # 6.1 Definir el Rango de Celdas a Actualizar

@@ -20,11 +20,13 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
         if st.button("Deseleccionar Todas", key="deselect_all_deudas", type="primary", width="stretch"):
             for _, row in deudas_activas_df.iterrows():
                 st.session_state[f"select_deuda_{row['Id_Deuda']}"] = False
+                st.session_state['deudas_seleccionadas'] = []
 
     with colSelectAll:
             if st.button("Seleccionar Todas", key="select_all_deudas", type="secondary", width="stretch"):
                 for _, row in deudas_activas_df.iterrows():
                     st.session_state[f"select_deuda_{row['Id_Deuda']}"] = True
+                    st.session_state['deudas_seleccionadas'] = deudas_activas_df['Id_Deuda'].tolist()
 
     # Van a ser 4 Columns: Checkbox de Seleccion, Id_Deuda, Banco, PaB_Origen
     colCH, colIdDeuda, colBanco, colPaBOrigen = st.columns([1, 2, 2, 2], vertical_alignment="center")
@@ -150,13 +152,13 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
     num_cuotas_global = 1
     if tipo_cuotas == 'Para Todas las Deudas':
-        num_cuotas_global = st.slider(
+        num_cuotas_global = st.number_input(
             "Número de Cuotas",
             min_value=1,
             max_value=60,
-            value=12,
+            value=3,
             step=1,
-            key="num_cuotas_global"
+            key="num_cuotas_global_forms"
         )
 
     # 5. Encabezados de la Tabla

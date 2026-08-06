@@ -9,19 +9,12 @@ import streamlit as st
 from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_models import SolicitudesSchema
+from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder
+from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
-
-def salir_de_dialogo() -> None:
-    """
-    Función para salir del diálogo de respuesta a solicitud.
-    Esta función reinicia los filtros de solicitudes y vuelve a ejecutar la aplicación.
-    """
-    # Volvemos a ejecutar la aplicación
-    st.rerun()
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
 def reiniciar_filtros_solicitudes(method: Literal['reset','basic']) -> None:
@@ -242,7 +235,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
         st.button(
             label="Cancelar",
             key="cancelar_solicitud_{}".format(solicitud['ID_Solicitud']),
-            on_click=salir_de_dialogo,
+            on_click=st.rerun,
             help="Haga clic para cancelar la actualización de la solicitud.",
             width="stretch",
             type="secondary",
@@ -263,6 +256,8 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             if (pdf_bytes is not None) and len(pdf_bytes) > 0:
                 file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
                 success = success and bool(file_id)
+            # Actualizamos los Datos de Addendums
+            upload_massive_addendums(solicitud=solicitud)
         if success:
             st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
             # Agregamos el ID de la Solicitud al BannedManager para que no se pueda volver a responder
@@ -290,8 +285,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     solicitud_respuesta["Fecha_Respuesta"] = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
 
     st.markdown("### **ℹ️ Información de la Solicitud**")
-    # Paso 1: Escogencia de Aliado, Estado de Solicitud y si Fue llamada
-    colAliado, colEstado, colLlamada = st.columns([2,2,1], vertical_alignment="center")
+    # Paso 1: Escogencia de Aliado, Estado de Solicitud y (Llamada )
+    colAliado, colEstado, colLlamada = st.columns([2,2,1], vertical_alignment="center", border=True)
 
     with colAliado:
         aliado_final = st.selectbox(
@@ -483,14 +478,111 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             if cuotas_input == "Por Deuda":
                 with colCuotasDeuda: # type: ignore
                     key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-                    st.text_input(
+                    st.number_input(
                         "",
+                        value=1,
+                        min_value=1,
+                        max_value=60,
+                        step=1,
                         key=key_cuotas,
                         help="Ingrese el número de cuotas para la deuda {}.".format(d['Id_Deuda']),
                         label_visibility="collapsed",
                     )
 
-        # Siguiente: Mostramos el Monto Total Propuesto y el Número de Cuotas Finales
+        # Siguiente: Mostramos Posibilidad de Agregar Addendums
+        with st.expander("**Agregar Addendums a la Solicitud**", expanded=False, icon = "📝"):
+
+            # Inicializamos la Cantidad de Addendums con 0 en el Session State si no existe
+            key_addendums_count = 'addendums_count_{}'.format(solicitud['ID_Solicitud'])
+            if not (key_addendums_count in st.session_state):
+                st.session_state[key_addendums_count] = 0
+
+            # Creamos las mismas columnas que antes sin Monto_Solicitado (Quitando Id Deuda y añadiendo Banco y Monto Actual)
+            if cuotas_input == "Por Deuda":
+                colBancoAdd, colNumCreditoAdd, colMontoActualAdd, colMontoPropuestoAdd, colCuotasDeudaAdd = st.columns(5, vertical_alignment="center")
+            else:
+                colBancoAdd, colNumCreditoAdd, colMontoActualAdd, colMontoPropuestoAdd = st.columns(4, vertical_alignment="center")
+
+            with colBancoAdd:
+                st.markdown("**Banco**")
+            with colNumCreditoAdd:
+                st.markdown("**Número de Crédito**")
+            with colMontoActualAdd:
+                st.markdown("**Monto Actual**")
+            with colMontoPropuestoAdd:
+                st.markdown("**Monto Propuesto**")
+            if cuotas_input == "Por Deuda":
+                with colCuotasDeudaAdd: # type: ignore
+                    st.markdown("**Número de Cuotas**")
+
+            # Ahora Iteramos por la Cantidad de Addendums y Mostramos los Inputs correspondientes
+            for i in range(st.session_state[key_addendums_count]):
+                with colBancoAdd:
+                    st.selectbox(
+                        "",
+                        options=BANCOS_UNICOS,
+                        key='addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        help="Ingrese el banco para el addendum {}.".format(i+1),
+                        label_visibility="collapsed",
+                        accept_new_options = True, # Permitimos agregar bancos por si no están
+                    )
+                with colNumCreditoAdd:
+                    st.text_input(
+                        "",
+                        key='addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        help="Ingrese el número de crédito para el addendum {}.".format(i+1),
+                        label_visibility="collapsed",
+                    )
+                with colMontoActualAdd:
+                    st.text_input(
+                        "",
+                        key='addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        help="Ingrese el monto actual para el addendum {}.".format(i+1),
+                        label_visibility="collapsed",
+                    )
+                with colMontoPropuestoAdd:
+                    st.text_input(
+                        "",
+                        key='addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        help="Ingrese el monto propuesto para el addendum {}.".format(i+1),
+                        label_visibility="collapsed",
+                    )
+                if cuotas_input == "Por Deuda":
+                    with colCuotasDeudaAdd: # type: ignore
+                        st.number_input(
+                            "",
+                            key='addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                            help="Ingrese el número de cuotas para el addendum {}.".format(i+1),
+                            label_visibility="collapsed",
+                            value=1,
+                            min_value=1,
+                            max_value=60,
+                            step=1,
+                        )
+
+            # Añadimos dos Botones: Uno para Agregar Addendum y Otro para Quitar Addendum
+            colAddendumQuitar, colAddendumAgregar  = st.columns(2, vertical_alignment="center", gap="large")
+
+            with colAddendumQuitar:
+                if st.button(
+                    label="Quitar Addendum",
+                    key="quitar_addendum_{}".format(solicitud['ID_Solicitud']),
+                    help="Haga clic para quitar un addendum de la solicitud.",
+                    type="secondary",
+                ):
+                    if st.session_state[key_addendums_count] > 0:
+                        st.session_state[key_addendums_count] -= 1
+
+            with colAddendumAgregar:
+                if st.button(
+                    label="Agregar Addendum",
+                    key="agregar_addendum_{}".format(solicitud['ID_Solicitud']),
+                    help="Haga clic para agregar un addendum a la solicitud.",
+                    type="primary",
+                ):
+                    st.session_state[key_addendums_count] += 1
+
+    st.divider()
 
     # Siguiente: Generamos el JSON_Respuesta con: Monto Propuesto por Deuda, Cuotas por Deuda
     json_respuesta = []
@@ -504,6 +596,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             num_cuotas = num_coutas_global
         json_respuesta.append({
             "Id_Deuda": d['Id_Deuda'],
+            "Banco": d['Banco'],
+            "Numero_Credito": d['Numero_Credito'],
             "Monto_Propuesto": monto_propuesto,
             "Num_Cuotas": num_cuotas,
         })
@@ -511,12 +605,40 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Agreagamos el JSON_Respuesta a la solicitud_respuesta
     solicitud_respuesta["JSON_Respuesta"] = json_respuesta
 
+    # Siguiente: Agregamos los Addendums a la solicitud_respuesta si existen
+    addendums = []
+    for i in range(st.session_state[key_addendums_count]):
+        addendum_banco = st.session_state['addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i)]
+        addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i)]
+        addendum_monto_actual = cleanNumber(st.session_state['addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i)], default_nan=0.0)
+        addendum_monto_propuesto = cleanNumber(st.session_state['addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i)], default_nan=0.0)
+        if cuotas_input == "Por Deuda":
+            addendum_num_cuotas = int(st.session_state['addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i)])
+        else:
+            addendum_num_cuotas = num_coutas_global
+        addendums.append({
+            "Id_Counter": i,
+            "Banco": addendum_banco,
+            "Numero_Credito": addendum_numero_credito,
+            "Monto_Actual": addendum_monto_actual,
+            "Monto_Propuesto": addendum_monto_propuesto,
+            "Num_Cuotas": addendum_num_cuotas,
+        })
+
+    # Añadimos los Addendums a la solicitud_respuesta
+    if len(addendums) > 0:
+        solicitud_respuesta["Metadata_Solicitud"]["Addendums"] = addendums
+
     # Añadimos Fecha_Limite_Pago a la solicitud_respuesta si existe, de lo contrario mostrar alerta
     if fecha_limite_pago:
         solicitud_respuesta["Fecha_Limite_Pago"] = fecha_limite_pago
     else:
         st.warning("Debe ingresar una Fecha Límite de Pago para poder finalizar la solicitud.")
         st.stop()
+
+    st.space("small")
+
+    st.divider()
 
     # Siguiente: Añadir el Input de Pago Total Obligatorio (Checkbox), solo si existe más de una deuda
     if len(json_respuesta) > 1:
@@ -533,18 +655,18 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         with colInfo:
             st.info("El Pago Obligatorio significa que se debe aplicar el pago para todas la deudas")
 
+    # Añadimos la Posibilidad de Comentario
+    cm_final = st.text_area(
+        label="**Comentarios de la Solicitud**",
+        value="",
+        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+        help="Ingrese cualquier comentario adicional sobre la solicitud.",
+    )
+    # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
+    solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
+
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
-
-        # Añadimos la Posibilidad de Comentario
-        cm_final = st.text_area(
-            label="**Comentarios de la Solicitud**",
-            value="",
-            key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
-            help="Ingrese cualquier comentario adicional sobre la solicitud.",
-        )
-        # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
-        solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
 
         mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
         st.stop()
@@ -605,16 +727,6 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 st.pdf(bytes_acuerdo)
             else:
                 st.warning("No hay un acuerdo de pago disponible para mostrar.")
-
-    # Añadimos la Posibilidad de Comentario
-    cm_final = st.text_area(
-        label="**Comentarios de la Solicitud**",
-        value="",
-        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
-        help="Ingrese cualquier comentario adicional sobre la solicitud.",
-    )
-    # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
-    solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
@@ -692,53 +804,75 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 st.code(tipo_pago, language="text")
 
         # Paso Siguiente: Mostrar las Caracteristicas por Deuda de la Solicitud
-        st.space("xxsmall")
+        st.space("xsmall")
         st.divider()
 
-        # Vamos a Crear 5 o 6 Columnas: Boton de Copiar, Id_Deuda, Banco, Numero_Credito, Monto Propuesto , Cuotas(Si Hay)
+        # Creamos un Botón para Copiar los Datos de la Solicitud
+        colBotonCopy, colInfoCopy = st.columns([1, 5], vertical_alignment="center")
+        solicitud_txt = get_solicitud_txt(solicitud=solicitud)
+        with colBotonCopy:
+            if st_copy_to_clipboard(solicitud_txt, key="copy_solicitud_{}_info".format(solicitud['ID_Solicitud'])):
+                st.toast("Datos de la solicitud {} copiados al portapapeles.".format(solicitud['ID_Solicitud']), icon=":material/content_copy:")
+        
+        with colInfoCopy:
+            st.markdown("**Copiar Datos de la Solicitud**")
+            st.info("Haga clic en el botón para copiar todos los datos de la solicitud al portapapeles.", icon="ℹ️")
+
+        # Vamos a Crear 6 o 7 Columnas: Boton de Copiar, Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
         hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
-        if hay_cuotas:
-            colBtCopy, colIdDeuda, colBanco, colNumCredito, colMontoPropuesto, colCuotas = st.columns([1,3,3,6,6,3], vertical_alignment="center")
-        else:
-            colBtCopy, colIdDeuda, colBanco, colNumCredito, colMontoPropuesto = st.columns([1,3,3,6,6], vertical_alignment="center")
+        with st.expander("**Detalles de la Solicitud por Deuda**", expanded=False, icon="💰"):
 
-        with colBtCopy:
-            st.markdown("**Copiar**")
-        with colIdDeuda:
-            st.markdown("**ID de Deuda:**")
-        with colBanco:
-            st.markdown("**Banco:**")
-        with colNumCredito:
-            st.markdown("**Número de Crédito:**")
-        with colMontoPropuesto:
-            st.markdown("**Monto Propuesto:**")
-        if hay_cuotas:
-            with colCuotas: # type: ignore
-                st.markdown("**Número de Cuotas:**")
-
-        for d in solicitud["Datos_Solicitud"]:
-
-
-            txt_debt = "ID Deuda: {}\nBanco: {}\nNúmero de Crédito: {}\nMonto Propuesto: ${:,.2f}".format(
-                d['Id_Deuda'], d['Banco'], d['Numero_Credito'], d['Monto_Propuesto']
-            )
+            if hay_cuotas:
+                colBtCopy, colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([1,3,3,3,6,6,3], vertical_alignment="center")
+            else:
+                colBtCopy, colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([1,3,3,3,6,6], vertical_alignment="center")
 
             with colBtCopy:
-                if st_copy_to_clipboard(txt_debt, key="copy_debt_{}".format(d['Id_Deuda'])):
-                    st.toast("Datos de la deuda {} copiados al portapapeles.".format(d['Id_Deuda']), icon=":material/content_copy:")
-
+                st.markdown("**Copiar**")
             with colIdDeuda:
-                st.code(d['Id_Deuda'], language="text")
+                st.markdown("**ID de Deuda:**")
             with colBanco:
-                st.code(d['Banco'], language="text")
+                st.markdown("**Banco:**")
             with colNumCredito:
-                st.code(d['Numero_Credito'], language="text")
+                st.markdown("**Número de Crédito:**")
+            with colActualizaciones:
+                st.markdown("**Descuentos en Base:**")
             with colMontoPropuesto:
-                st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
+                st.markdown("**Monto Propuesto:**")
             if hay_cuotas:
                 with colCuotas: # type: ignore
-                    st.code(d['Cuotas'], language="text")
+                    st.markdown("**Cuotas:**")
+
+            for d in solicitud["Datos_Solicitud"]:
+
+                txt_debt = "ID Deuda: {}\nBanco: {}\nNúmero de Crédito: {}\nMonto Propuesto: ${:,.2f}".format(
+                    d['Id_Deuda'], d['Banco'], d['Numero_Credito'], d['Monto_Propuesto']
+                )
+
+                with colBtCopy:
+                    if st_copy_to_clipboard(txt_debt, key="copy_debt_{}".format(d['Id_Deuda'])):
+                        st.toast("Datos de la deuda {} copiados al portapapeles.".format(d['Id_Deuda']), icon=":material/content_copy:")
+
+                with colIdDeuda:
+                    st.code(d['Id_Deuda'], language="text")
+                with colBanco:
+                    st.code(d['Banco'], language="text")
+                with colNumCredito:
+                    st.code(d['Numero_Credito'], language="text")
+                with colActualizaciones:
+                    datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
+                    with st.popover("**Descuentos en Base {}**".format(d['Id_Deuda']), icon="👌"):
+                        if datos_act:
+                            for descuento in datos_act:
+                                st.markdown(descuento)
+                        else:
+                            st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
+                with colMontoPropuesto:
+                    st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
+                if hay_cuotas:
+                    with colCuotas: # type: ignore
+                        st.code(d['Cuotas'], language="text")
 
         st.divider()
 
@@ -753,7 +887,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         if (solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1) or (solicitud["Metadata_Solicitud"].get("Estado_Ilocalizable", 0) == 1):
             solicitud_ya_gestionada = True
 
-        st.space("xxsmall")
+        st.space("xsmall")
 
         # Creamos Dos Columnas: Una para Informacion y otra para el Boton
         colInfo, colBoton = st.columns([4, 2], vertical_alignment="top")

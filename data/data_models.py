@@ -223,3 +223,20 @@ class LogsSchema(pa.DataFrameModel):
     class Config:
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
+
+class PlantillaSolicitudesSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de la plantilla de solicitudes.
+    """
+    Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
+    Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,12}$")  # Validación de cédula
+    Nombre_Cliente: str
+    Banco: str
+    Numero_Obligacion: str
+    Propuesta: float
+    Portafolio: float|int = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Plazos: int|float
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos

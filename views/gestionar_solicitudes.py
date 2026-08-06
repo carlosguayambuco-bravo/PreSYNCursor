@@ -3,16 +3,12 @@
 from io import BytesIO
 # Librerías de Terceros
 import streamlit as st
+from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
-from modules.gest_sols import generar_descarga_masiva_solicitudes
+from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, subir_masivo_plantilla_solicitudes
 from ui.solicitudes_components import mostrar_filtros_generales_solicitud, mostrar_datos_solicitud_ejecutivo
-
-# Aquí consta de 3 vistas:
-# Solicitudes Pendientes por Gestionar
-# Solicitudes ya Gestionadas
-# Descarga de Solicitudes
 
 # Paso 1: Inicializar el State Session de Cantidad_Solicitudes_Ver
 if not ('Cantidad_Solicitudes_Ver' in st.session_state):
@@ -35,25 +31,47 @@ for _, solicitud in solicitudes_df.head(st.session_state['Cantidad_Solicitudes_V
     mostrar_datos_solicitud_ejecutivo(solicitud=solicitud, is_main = principal_sol)
     principal_sol = False  # Solo la primera solicitud es la principal, las demás son secundarias
 
-# Creamos 2 Botonos: 1 Añadir Más Solicitudes y el otro para Descargar las Solicitudes Dados dichos Filtros
-colMas, colDescargar = st.columns([1, 1], gap = "large")
+# Creamos 4 Botones: Cargar Más Solicitudes, Descargar Solicitudes, Subir Solicitudes a Sheets y Copiar Datos de Solicitudes
+colMas, colDescargar, colSubir, colCopiar = st.columns([2, 2, 2, 1], gap = "large")
 
 with colMas:
     mas_solicitudes =  st.button("Cargar Más Solicitudes",
-                key="cargar_mas_solicitudes_button",
-                help="Haz clic para cargar más solicitudes",
-                disabled = len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver']
-                )
+        key="cargar_mas_solicitudes_button",
+        help="Haz clic para cargar más solicitudes",
+        disabled = len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver'],
+        type="secondary"
+    )
 with colDescargar:
     st.download_button("Descargar Solicitudes",
-                generar_descarga_masiva_solicitudes(solicitudes_df=solicitudes_df),
-                file_name="solicitudes.csv",
-                mime="text/csv",
-                key="descargar_solicitudes_button",
-                help="Haz clic para descargar las solicitudes filtradas completas",
-                on_click=upload_log_to_sheets,
-                kwargs={"info": "Descarga de Solicitudes", "detail": f"Se descargaron {len(solicitudes_df)} solicitudes filtradas."},
-                )
+        generar_descarga_masiva_solicitudes(solicitudes_df=solicitudes_df),
+        file_name="solicitudes.csv",
+        mime="text/csv",
+        type="primary",
+        key="descargar_solicitudes_button",
+        help="Haz clic para descargar las solicitudes filtradas completas",
+        on_click=upload_log_to_sheets,
+        kwargs={"info": "Descarga de Solicitudes", "detail": f"{st.session_state['user_email']} descargó {len(solicitudes_df)} solicitudes filtradas."},
+    )
+
+with colSubir:
+    subido_sheets = st.button("Subir Solicitudes a Sheets",
+        key="subir_solicitudes_button",
+        help="Haz clic para subir las solicitudes filtradas a Google Sheets",
+        type="primary",
+        disabled = len(solicitudes_df) == 0,
+        )
+
+with colCopiar:
+    if st_copy_to_clipboard(
+        get_massive_solicitudes_txt(solicitudes_df=solicitudes_df),
+        key="copiar_solicitudes_masivas_button",
+    ):
+        st.toast("Datos de solicitudes copiados al portapapeles", icon="✅")
+
+if subido_sheets:
+    success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_df)
+    if success:
+        st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
 
 if mas_solicitudes:
     st.session_state['Cantidad_Solicitudes_Ver'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar
