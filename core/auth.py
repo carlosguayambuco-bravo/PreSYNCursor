@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+import base64
 import secrets
 import jwt
 import time
@@ -17,7 +18,8 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/drive.file"  # Grants access to files created/opened by this app
+    "https://www.googleapis.com/auth/drive.file",  # Grants access to files created/opened by this app
+    "https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
 ]
 
 def generate_jwt_token(cv: str) -> str:

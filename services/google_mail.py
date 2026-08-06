@@ -1,0 +1,60 @@
+# Usando Pep8
+# Librerías de Python
+import base64
+# Librerías de Terceros
+from email.message import EmailMessage
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+import streamlit as st
+
+# Clase de GoogleMailService para interactuar con la API de Google Mail (usando googleapiclient)
+class GoogleMailService:
+    def __init__(self, credentials_json: dict):
+        """
+        Inicializa la instancia de GoogleMailService con las credenciales proporcionadas.
+
+        Args:
+            credentials_json (dict): Diccionario con las credenciales de Google Service Account.
+        """
+        self.credentials = Credentials.from_service_account_info(credentials_json, scopes=['https://www.googleapis.com/auth/gmail.send'])
+        self.service = build('gmail', 'v1', credentials=self.credentials)
+
+    def send_email(self, to: str, subject: str, body: str) -> bool:
+        """
+        Envía un correo electrónico utilizando la API de Gmail.
+
+        Args:
+            to (str): Dirección de correo electrónico del destinatario.
+            subject (str): Asunto del correo electrónico.
+            body (str): Cuerpo del correo electrónico.
+
+        Returns:
+            bool: True si el correo se envió correctamente, False en caso contrario.
+        """
+        try:
+            message = {
+                'raw': self._create_message(to, subject, body)
+            }
+            self.service.users().messages().send(userId='me', body=message).execute()
+            return True
+        except Exception as e:
+            st.error(f"Error al enviar el correo: {e}")
+            return False
+
+    def _create_message(self, to: str, subject: str, body: str) -> str:
+        """
+        Crea un mensaje codificado en base64 para enviar a través de la API de Gmail.
+
+        Args:
+            to (str): Dirección de correo electrónico del destinatario.
+            subject (str): Asunto del correo electrónico.
+            body (str): Cuerpo del correo electrónico.
+
+        Returns:
+            str: Mensaje codificado en base64.
+        """
+        message = EmailMessage()
+        message.set_content(body)
+        message['To'] = to
+        message['Subject'] = subject
+        return base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

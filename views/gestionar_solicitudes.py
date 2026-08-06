@@ -99,7 +99,7 @@ with tabResumenSolicitudes:
     # Siguiente: Definición del Dashboard de Resumen de Solicitudes
     st.divider()
     # Creamos 2 Columnas: 1 para Pie Graph de Estados de Solicitudes y otra para KPIs
-    colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center")
+    colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center", border=True,)
 
     with colPieEstados:
         st.subheader("📊 Distribución de Estados de Solicitudes")
@@ -153,7 +153,7 @@ with tabResumenSolicitudes:
 
     if solicitudes_sin_responder > 0:
         # La Estructura será: 3 Columnas: Casa de Cobro, Banco y Ejecutivo
-        colCasaCobro, colBanco, colEjecutivo = st.columns([3,1,2], gap = "small", vertical_alignment="center")
+        colCasaCobro, colBanco, colEjecutivo = st.columns([3,1,2], gap = "small", vertical_alignment="center", border=True,)
 
         with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
             st.subheader("🥸 Por Casa de Cobro")

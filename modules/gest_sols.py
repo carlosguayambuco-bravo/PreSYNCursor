@@ -280,7 +280,7 @@ def generar_nombre_acuerdo_pago(solicitud_info: pd.Series) -> str:
     esqueleto_nombre = "Acuerdo_Pago_{ID_Solicitud}_{Ids_Deudas} - {Cedula}.pdf"
     return esqueleto_nombre.format(
         ID_Solicitud=solicitud_info['ID_Solicitud'],
-        Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in solicitud_info['JSON_Respuesta']),
+        Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in solicitud_info['JSON_Respuesta'] if d['Monto_Propuesto'] > 0),
         Cedula=solicitud_info['Cedula']
     )
 
@@ -302,7 +302,7 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     # Paso 2: Traer el Servicio de Google Drive desde el Session State
     google_drive_service: GoogleDriveService = st.session_state['google_drive_service']
     # Paso 3: Traer el Folder_ID de los Secretos de Streamlit
-    folder_id = st.secrets['google_drive']['folder_id']
+    folder_id = st.secrets['google_drive']['folder_id_acuerdos_pago']
     # Paso 4: Subir el Archivo a Google Drive
     file_id = google_drive_service.upload_file(
         file_bytes=pdf_bytes,
@@ -508,3 +508,39 @@ def obtener_df_bancos_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]
     df_bancos_sin_responder = solicitudes_exploded.groupby('Bancos').size().reset_index(name='Cantidad_Sin_Responder').rename(columns={'Bancos': 'Banco'})
 
     return df_bancos_sin_responder
+
+def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series) -> pd.Series:
+    """
+    Genera una plantilla de serie para un acuerdo de pago basado en la información de la solicitud.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        pd.Series: Serie con la plantilla del acuerdo de pago.
+    """
+    # Paso 1: Crear un diccionario con los datos necesarios para el acuerdo
+    acuerdo_data = {
+        "Referencia": solicitud['Referencia'],
+        "Cedula": solicitud['Cedula'],
+        "Metadata_Solicitud": {
+            "Nombre_Cliente": solicitud['Metadata_Solicitud']['Nombre_Cliente'],
+            "Metodo_Pago": solicitud['Metadata_Solicitud'].get('Metodo_Pago', ''),
+            "Comentario_Ejecutivo": solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', ''),
+        },
+        "Fecha_Limite_Pago": solicitud['Fecha_Limite_Pago'],
+        "Casa_Cobro": solicitud['Casa_Cobro'],
+        "Ejecutivo": solicitud['Ejecutivo'],
+        "JSON_Respuesta": [
+            {
+                "Banco": deuda['Banco'],
+                "Numero_Credito": deuda['Numero_Credito'],
+                "Monto_Propuesto": deuda.get('Monto_Propuesto', 0),
+                "Num_Cuotas": deuda.get('Num_Cuotas', 1)
+            }
+            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", [])) if deuda.get('Monto_Propuesto', 0) > 0
+        ]
+    }
+
+    # Paso 2: Convertir el diccionario a una Serie de Pandas
+    return pd.Series(acuerdo_data)

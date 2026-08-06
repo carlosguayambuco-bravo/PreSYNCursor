@@ -9,10 +9,11 @@ import streamlit as st
 from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_models import SolicitudesSchema
+from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes
+from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
 
@@ -245,7 +246,134 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
 
 # Función Auxiliar para mostrar las Especificaciones del Acuerdo de Pago Generado
 def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
-    return bytes()
+
+    # Paso 1: Mostrar los Inputs del Acuerdo de Pago Generado
+
+    with st.expander("**Especificaciones del Acuerdo de Pago Generado**", expanded=False, icon="🔏"):
+        st.markdown("### **ℹ️ Información de la Solicitud**")
+
+        # Reunimos la Información de las Deudas y los Addendums en uno Solo
+        deudas_info = solicitud["Datos_Solicitud"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
+
+        # Definimos todas las Deudas Disponibles
+        debt_ids = [d['Id_Deuda'] for d in deudas_info]
+
+        # Creamos una Vista de Pills para definir las Deudas a Usar
+        selected_ids = st.pills(
+            label="**Deudas y Addendums usados**",
+            options=debt_ids,
+            default=debt_ids,
+            help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
+            key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud'])
+        )
+
+        if selected_ids is None or not selected_ids:
+            st.error("Debe seleccionar al menos una deuda o addendum para generar el acuerdo de pago.")
+            st.stop()
+
+        selected_deudas_info = [d for d in deudas_info if (d['Id_Deuda'] in selected_ids)]
+        monto_total = sum(d['Monto_Propuesto'] for d in selected_deudas_info)
+
+        # Creamos 3 Columnas para ayudar con la Organización de la Información
+        col1Info, col2Info, col3Info = st.columns([2, 2, 2], vertical_alignment="center", gap="small")
+
+        # 1.1 Referencia, Nombre del Cliente y Documento (Cedula) -> Inhabilitado
+        with col1Info:
+            st.text_input(
+                label="**📄 Referencia**",
+                value=solicitud["Referencia"],
+                disabled=True,
+                key="referencia_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+
+        with col2Info:
+            st.text_input(
+                label="**👤 Nombre del Cliente**",
+                value=solicitud["Metadata_Solicitud"]["Nombre_Cliente"],
+                disabled=True,
+                key="nombre_cliente_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+
+        with col3Info:
+            st.text_input(
+                label="**🆔 Documento**",
+                value=solicitud["Cedula"],
+                disabled=True,
+                key="cedula_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+
+        # 1.2 Monto Total de Pago, Metodo de Pago y Fecha Limite de Pago (Desabilitados, ya estan como Inputs)
+        with col1Info:
+            st.text_input(
+                label="**💰 Monto Total de Pago**",
+                value="{:,.0f}".format(monto_total),
+                disabled=True,
+                key="monto_total_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+        with col2Info:
+            st.text_input(
+                label="**💳 Método de Pago**",
+                value=solicitud["Tipo_Pago"],
+                disabled=True,
+                key="metodo_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+        with col3Info:
+            st.text_input(
+                label="**📅 Fecha Límite de Pago**",
+                value=solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notna(solicitud["Fecha_Esperada_Pago"]) else "",
+                disabled=True,
+                key="fecha_limite_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            )
+
+        # Ahora vamos a presentar por cada deuda seleccionada: Id_Deuda, Numero_Credito y Monto Propuesto
+        for d in selected_deudas_info:
+            with col1Info:
+                st.text_input(
+                    label="**Id Deuda**",
+                    value=d['Id_Deuda'],
+                    disabled=True,
+                    key="id_deuda_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                )
+            with col2Info:
+                st.text_input(
+                    label="**Número de Crédito**",
+                    value=d['Numero_Credito'],
+                    disabled=True,
+                    key="numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                )
+            with col3Info:
+                st.text_input(
+                    label="**Monto Propuesto**",
+                    value="{:,.0f}".format(d['Monto_Propuesto']),
+                    disabled=True,
+                    key="monto_propuesto_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                )
+
+        # Ahora vamos a crear el Botón para Descargar el Acuerdo de Pago en PDF
+        # Primero Definimos la Key
+        key_acuerdo = "acuerdo_gen_{ID_Sol}_{Ids_Deudas}".format(
+            ID_Sol=solicitud['ID_Solicitud'],
+            Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in selected_deudas_info)
+        )
+
+        # Ahora Creamos el Botón de Generar el PDF
+        generar_pdf = st.button(
+            label="Generar Acuerdo de Pago en PDF",
+            key=key_acuerdo,
+            type="primary",
+            help="Haga clic para generar el acuerdo de pago en formato PDF.",
+            disabled = len(st.session_state.get(key_acuerdo, bytes())) > 0,
+        )
+        if generar_pdf:
+            with st.spinner("⚙️ Generando Acuerdo de Pago en PDF..."):
+                # Paso 1: Crear la Serie de Datos
+                serie_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud)
+                # Paso 2: Obtener los Bytes del Acuerdo
+                pdf_bytes = generate_payment_agreement_pdf(agreement=serie_acuerdo, assets_dir="assets", alpha=0.10) # type: ignore
+                # Paso 3: Guardar los Bytes en el Session State
+                st.session_state[key_acuerdo] = pdf_bytes
+
+    return st.session_state.get(key_acuerdo, bytes())
 
 # Función para Abrir el Dialogo de Respuesta de una Solicitud
 @st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large")
@@ -596,7 +724,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         else:
             addendum_num_cuotas = num_coutas_global
         addendums.append({
-            "Id_Counter": i,
+            "Id_Deuda": "ADD_{}".format(str(i)),
             "Banco": addendum_banco,
             "Numero_Credito": addendum_numero_credito,
             "Monto_Actual": addendum_monto_actual,
@@ -646,7 +774,6 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
-
         mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
         st.stop()
 
@@ -696,7 +823,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
             # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
             if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
-                st.error("Error al generar el PDF del acuerdo de pago. Por favor, intente nuevamente creelo manualmente.")
+                st.warning("Debes oprimir el Botón de Generar PDF para poder generar el Acuerdo de Pago")
                 st.stop()
 
         # Creamos un popover para mostrar el PDF generado o subido

@@ -7,8 +7,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions # type: ignore
 from modules.classes import crear_diccionario_aliados
-from services.metabase import MetabaseService
-from services.google_sheets import GoogleSheetsService
+from services import MetabaseService, GoogleSheetsService, GoogleMailService, GoogleDriveService
 
 # Creamos el Servicio de Metabase y de GoogleSheets
 def initialize_services(debugging_mode: bool = False):
@@ -25,15 +24,29 @@ def initialize_services(debugging_mode: bool = False):
         st.success("Metabase Service Initialized")
 
     # Inicializamos el Servicio de GoogleSheets
-    google_sheets_credentials = json.loads(st.secrets["google_credentials"]['json'])
-    google_sheets_service = GoogleSheetsService(google_sheets_credentials)
+    google_credentials = json.loads(st.secrets["google_credentials"]['json'])
+    google_sheets_service = GoogleSheetsService(google_credentials)
 
     if debugging_mode:
         st.success("Google Sheets Service Initialized")
 
+    # Inicializamos el Servicio de GoogleMail
+    google_mail_service = GoogleMailService(google_credentials)
+
+    if debugging_mode:
+        st.success("Google Mail Service Initialized")
+
+    # Inicializamos el Servicio de GoogleDrive
+    google_drive_service = GoogleDriveService(google_credentials)
+
+    if debugging_mode:
+        st.success("Google Drive Service Initialized")
+
     # Guardamos los servicios en el estado de la aplicación para que estén disponibles globalmente
     st.session_state["metabase_service"] = metabase_service
     st.session_state["google_sheets_service"] = google_sheets_service
+    st.session_state["google_mail_service"] = google_mail_service
+    st.session_state["google_drive_service"] = google_drive_service
 
 # Función Auxiliar para Inicializar los Datos
 def initialize_data(debugging_mode: bool = False):
