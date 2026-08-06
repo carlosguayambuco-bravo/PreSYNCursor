@@ -89,7 +89,9 @@ class _AgreementCanvas(Canvas):
         clip = self.beginPath(); clip.roundRect(x, y, width, height, radius)
         self.clipPath(clip, stroke=0, fill=0)
         self.setFillColor(fill or self.palette["card"]); self.rect(x, y, width, height, stroke=0, fill=1)
-        if self.watermark:
+        # El formato vertical mantiene la marca de agua por tarjeta. En el
+        # horizontal se dibuja una sola vez al fondo de toda la hoja.
+        if self.watermark and self.orientation != "horizontal":
             drawing = copy.deepcopy(self.watermark)
             scale = width / float(drawing.width)
             drawing.scale(scale, scale)
@@ -105,21 +107,29 @@ class _AgreementCanvas(Canvas):
 
     def draw_document(self, data: Mapping[str, Any], debts: list[dict[str, Any]], considerations: Sequence[str], moment: datetime) -> None:
         margin, content_w = 26, self.width - 52
+        if self.orientation == "horizontal":
+            self._page_watermark()
         y = self._header(margin)
         y = self._identity(data, margin, y, content_w)
         y = self._summary(data, debts, margin, y - 14, content_w) - 14
-        per_page = 10 if self.orientation == "horizontal" else 12
+        # En horizontal quedan espacio para comentario y recomendaciones.
+        per_page = 7 if self.orientation == "horizontal" else 12
         chunks = [debts[index:index + per_page] for index in range(0, len(debts), per_page)] or [[]]
         for page_index, chunk in enumerate(chunks):
             if page_index:
                 self._footer(data, moment); self.showPage()
+                if self.orientation == "horizontal":
+                    self._page_watermark()
                 y = self._header(margin, compact=True)
             if self.orientation == "horizontal":
                 table_w, gap = content_w * .63, 12
                 y_after_table = self._debt_table(chunk, margin, y, table_w)
-                box_h = max(90, 33 + 15 * len(considerations))
-                self._considerations(considerations, margin + table_w + gap, y, content_w - table_w - gap, box_h)
-                y = min(y_after_table, y - box_h)
+                comment_h = max(90, y - y_after_table)
+                self._comment(data["executive_comment"], margin + table_w + gap, y, content_w - table_w - gap, comment_h)
+                recommendations_h = max(65, 30 + 14 * len(considerations))
+                y = min(y_after_table, y - comment_h) - 14
+                self._considerations(considerations, margin, y, content_w, recommendations_h)
+                y -= recommendations_h
             else:
                 y = self._debt_table(chunk, margin, y, content_w)
 
@@ -149,11 +159,12 @@ class _AgreementCanvas(Canvas):
         cursor = x
         for column in columns[:-1]:
             cursor += column; self.setStrokeColor(self.palette["border"]); self.line(cursor, y - height, cursor, y)
+        emphasis_size = 13.5 if self.orientation == "horizontal" else 9
         self._field("REFERENCIA", data["reference"], x + 10, y, columns[0] - 18)
-        self._field("CLIENTE", data["customer_name"], x + columns[0] + 10, y, columns[1] - 18)
-        self._field("DOCUMENTO", data["document"], x + columns[0] + columns[1] + 10, y, columns[2] - 18)
+        self._field("CLIENTE", data["customer_name"], x + columns[0] + 10, y, columns[1] - 18, value_size=emphasis_size)
+        self._field("DOCUMENTO", data["document"], x + columns[0] + columns[1] + 10, y, columns[2] - 18, value_size=emphasis_size)
         ally_x = x + main_w + 10
-        self._center_field("ALIADO DE LIQUIDACIÓN", data["settlement_partner"], ally_x, y, ally_w, 49)
+        self._center_field("CASA DE COBRO", data["settlement_partner"], ally_x, y, ally_w, 49, important=True, value_size=emphasis_size)
         self.setStrokeColor(self.palette["border"]); self.line(ally_x, y - 49, ally_x + ally_w, y - 49)
         self._center_field("BANCOS A LIQUIDAR", ", ".join(data["banks"]) or "-", ally_x, y - 49, ally_w, 33)
         return y - height
@@ -163,11 +174,12 @@ class _AgreementCanvas(Canvas):
         self.card(x, y - height, width, height)
         self.setStrokeColor(self.palette["border"]); self.line(x + left_w, y - height, x + left_w, y); self.line(x + left_w, y - 38, x + width, y - 38)
         total = sum((debt["amount"] for debt in debts), Decimal("0"))
-        self._field("MONTO TOTAL DE PAGO", _currency(total), x + 13, y, left_w - 24, important=True, value_size=21)
+        centered = self.orientation == "horizontal"
+        self._field("MONTO TOTAL DE PAGO", _currency(total), x + 13, y, left_w - 24, important=True, value_size=21, value_alignment=1 if centered else 0)
         # Cada bloque de la derecha tiene una separación fija respecto a su
         # divisor: evita que el texto invada la línea horizontal central.
-        self._field("FORMA DE PAGO", data["payment_method"], x + left_w + 12, y, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34)
-        self._field("FECHA LÍMITE DE PAGO", _format_date(data["due_date"]), x + left_w + 12, y - 38, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34)
+        self._field("FORMA DE PAGO", data["payment_method"], x + left_w + 12, y, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
+        self._field("FECHA LÍMITE DE PAGO", _format_date(data["due_date"]), x + left_w + 12, y - 38, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
         return y - height
 
     def _debt_table(self, debts: list[dict[str, Any]], x: float, y: float, width: float) -> float:
@@ -177,8 +189,13 @@ class _AgreementCanvas(Canvas):
         self.card(x, y - height, width, height)
         self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 11)
         self.drawCentredString(x + width / 2, y - 16, "RELACIÓN DE DEUDAS")
-        table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO"]] + [[d["id"], d["bank"], d["credit_number"]] for d in rows]
-        table = Table(table_data, colWidths=[width * .25, width * .35, width * .40], rowHeights=row_h)
+        if self.orientation == "horizontal":
+            table_data = [["ID DEUDA", "NÚMERO CRÉDITO"]] + [[d["id"], d["credit_number"]] for d in rows]
+            column_widths = [width * .38, width * .62]
+        else:
+            table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO"]] + [[d["id"], d["bank"], d["credit_number"]] for d in rows]
+            column_widths = [width * .25, width * .35, width * .40]
+        table = Table(table_data, colWidths=column_widths, rowHeights=row_h)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), self.palette["primary"]), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), self.bold_font), ("FONTNAME", (0, 1), (-1, -1), self.font),
@@ -198,18 +215,43 @@ class _AgreementCanvas(Canvas):
             paragraph = Paragraph(_escape(f"{index}. {item}"), style); _, p_h = paragraph.wrap(width - 24, height)
             paragraph.drawOn(self, x + 14, cursor - p_h); cursor -= p_h + 4
 
-    def _field(self, label: str, value: Any, x: float, top: float, width: float, important: bool = False, value_size: float = 9, label_offset: float = 18, value_bottom_offset: Optional[float] = None) -> None:
+    def _comment(self, value: Any, x: float, y: float, width: float, height: float) -> None:
+        self.card(x, y - height, width, height, fill=HexColor("#FFF8F7"))
+        self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 10)
+        self.drawString(x + 12, y - 18, "COMENTARIO DEL EJECUTIVO")
+        style = ParagraphStyle("executive-comment", fontName=self.font, fontSize=8.2, leading=10.2, textColor=self.palette["text"])
+        paragraph = Paragraph(_escape(str(value or "Sin Comentario adicional, priorizar el pago")), style)
+        _, p_h = paragraph.wrap(width - 24, height - 35)
+        paragraph.drawOn(self, x + 14, y - 33 - p_h)
+
+    def _field(self, label: str, value: Any, x: float, top: float, width: float, important: bool = False, value_size: float = 9, label_offset: float = 18, value_bottom_offset: Optional[float] = None, value_alignment: int = 0) -> None:
         self.setFillColor(self.palette["muted"]); self.setFont(self.font, 7)
         self.drawString(x, top - label_offset, label)
-        style = ParagraphStyle("field", fontName=self.bold_font if important else self.font, fontSize=value_size, leading=value_size * 1.16, textColor=self.palette["text"])
+        style = ParagraphStyle("field", fontName=self.bold_font if important else self.font, fontSize=value_size, leading=value_size * 1.16, textColor=self.palette["text"], alignment=value_alignment) # type: ignore
         paragraph = Paragraph(_escape(str(value or "-")), style); _, p_h = paragraph.wrap(width, 31)
         # Valor centrado en el espacio restante entre etiqueta y base de tarjeta.
         paragraph.drawOn(self, x, top - value_bottom_offset if value_bottom_offset is not None else top - 31 - p_h)
 
-    def _center_field(self, label: str, value: Any, x: float, top: float, width: float, height: float) -> None:
+    def _page_watermark(self) -> None:
+        """Dibuja la marca de agua de fondo sin invadir encabezado ni pie."""
+        if not self.watermark:
+            return
+        self.saveState()
+        lower, upper = 52, self.height - 108
+        path = self.beginPath(); path.rect(0, lower, self.width, upper - lower)
+        self.clipPath(path, stroke=0, fill=0)
+        drawing = copy.deepcopy(self.watermark)
+        scale = self.width / float(drawing.width)
+        drawing.scale(scale, scale)
+        self.setFillAlpha(self.alpha); self.setStrokeAlpha(self.alpha)
+        _set_drawing_alpha(drawing, self.alpha)
+        renderPDF.draw(drawing, self, 0, lower + (upper - lower - drawing.height * scale) / 2)
+        self.restoreState()
+
+    def _center_field(self, label: str, value: Any, x: float, top: float, width: float, height: float, important: bool = False, value_size: float = 7.4) -> None:
         self.setFillColor(self.palette["muted"]); self.setFont(self.font, 6.6)
         self.drawCentredString(x + width / 2, top - 14, label)
-        style = ParagraphStyle("center-field", fontName=self.font, fontSize=7.4, leading=8.4, textColor=self.palette["text"], alignment=1)
+        style = ParagraphStyle("center-field", fontName=self.font if not important else self.bold_font, fontSize=value_size, leading=value_size * 1.16, textColor=self.palette["text"], alignment=1)
         paragraph = Paragraph(_escape(str(value or "-")), style); _, p_h = paragraph.wrap(width - 16, height - 20)
         # Centrado vertical en el área posterior a la etiqueta.
         content_bottom = top - height + 5
@@ -232,7 +274,7 @@ class _AgreementCanvas(Canvas):
 
 def _extract_agreement(source: Mapping[str, Any], debts: list[dict[str, Any]]) -> dict[str, Any]:
     metadata = _mapping_value(source, "Metadata_Solicitud")
-    return {"reference": _find(source, "Referencia", "Id del Cliente"), "customer_name": _find(metadata, "Nombre_Cliente", "Nombre del Cliente"), "document": _find(source, "Cedula", "Documento del Cliente"), "payment_method": _find(metadata, "Metodo_Pago", "Forma de Pago"), "due_date": _find(source, "Fecha_Limite_Pago", "Fecha Limite de Pago"), "settlement_partner": _find(source, "Casa_Cobro", "Aliado de Liquidación"), "executive": _find(source, "Ejecutivo"), "banks": list(dict.fromkeys(debt["bank"] for debt in debts if debt["bank"] != "-"))}
+    return {"reference": _find(source, "Referencia", "Id del Cliente"), "customer_name": _find(metadata, "Nombre_Cliente", "Nombre del Cliente"), "document": _find(source, "Cedula", "Documento del Cliente"), "payment_method": _find(metadata, "Metodo_Pago", "Forma de Pago"), "due_date": _find(source, "Fecha_Limite_Pago", "Fecha Limite de Pago"), "settlement_partner": _find(source, "Casa_Cobro", "Aliado de Liquidación"), "executive": _find(source, "Ejecutivo"), "executive_comment": _find(metadata, "Comentario_Ejecutivo", "Comentario Ejecutivo"), "banks": list(dict.fromkeys(debt["bank"] for debt in debts if debt["bank"] != "-"))}
 
 
 def _extract_debts(source: Mapping[str, Any]) -> list[dict[str, Any]]:
