@@ -1,17 +1,23 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Literal
+import json
+from typing import Literal, Any, Hashable, Optional
+from io import BytesIO
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NameObject, TextStringObject
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes, load_masivas
-from data.data_uploader import update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_to_google_sheets, upload_addendum_debt
+from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_to_google_sheets, upload_addendum_debt
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
-from services.google_drive import GoogleDriveService
+from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
+from modules.forms import obtener_nombre_negociador
+from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import getBDDaysDiffFloat_vectorized
 
 def get_solicitud_txt(solicitud: pd.Series) -> str:
@@ -122,7 +128,7 @@ def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) 
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
     return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
 
-def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
+def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
     """
     Distribuye el resultado de la solicitud a las diferentes solicitudes disponibles
 
@@ -132,10 +138,6 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
     Returns:
         bool: True si la distribución fue exitosa, False en caso contrario.
     """
-    # Paso 1: Verificar que se puede Distribuir el Resultado de la Solicitud
-    if solicitud['Estado_Solicitud'] != "Exitoso":
-        # Solo actualizamos la Solicitud y ya
-        return update_solicitud_in_google_sheets(solicitud)
 
     # Paso 2: Actualizar Solicitudes con mismas deudas, misma Casa_Cobro y mismo Tipo_Solicitud (Sin Responder)
     solicitudes_df: DataFrame[SolicitudesSchema] = load_current_month_solicitudes()
@@ -144,10 +146,11 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
-    maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder
+    maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
+    maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder & maskDiffID
 
-    curr_state = True # Inicializamos el True o False
     updated_ids = set() # Inicializamos el Set de IDs Actualizados
+    need_update_rows = [solicitud] # Inicializamos la lista de filas que necesitan ser actualizadas con la solicitud actual
     for _, solicitud_to_update in solicitudes_df[maskFinal].iterrows():
 
         # Verificamos que no sea la solicitud actual, de lo contrario se salta la actualización
@@ -156,9 +159,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
 
         solicitud_to_update['Estado_Solicitud'] = solicitud['Estado_Solicitud']
         solicitud_to_update['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
-        solicitud_to_update['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
-        solicitud_to_update['JSON_Respuesta'] = solicitud['JSON_Respuesta']
-        solicitud_to_update['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
+        solicitud_to_update['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
+        solicitud_to_update['JSON_Respuesta'] = solicitud.get('JSON_Respuesta', '')
+        solicitud_to_update['Fecha_Limite_Pago'] = solicitud.get('Fecha_Limite_Pago', '')
         solicitud_to_update['Ejecutivo'] = solicitud['Ejecutivo']
         solicitud_to_update['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
 
@@ -166,20 +169,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
         if 'Addendums' in solicitud['Metadata_Solicitud']:
             solicitud_to_update['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
 
-        # Actualizamos la Solicitud en Google Sheets
-        curr_state = update_solicitud_in_google_sheets(solicitud_to_update) and curr_state
-
-        # Verificamos que no haya habido algún error en la actualización
-        if not curr_state:
-            st.error(f"Error al actualizar la solicitud con ID: {solicitud_to_update['ID_Solicitud']}")
-            return False
-
-        # Agregamos el ID de la Solicitud a los Ids Banneados
-        banned_manager = get_banned_manager()
-        banned_manager.ban(solicitud_to_update['ID_Solicitud'])
-
         # Agregamos el ID de la Solicitud Actualizada al Set de IDs Actualizados
         updated_ids.add(solicitud_to_update['ID_Solicitud'])
+        need_update_rows.append(solicitud_to_update)
 
     # Paso 3: Actualizar Sub-Solicitdues si no es necesario el Pago Total Obligatorio
     if solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False):
@@ -190,7 +182,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
         ids_solicitud_actual = set(d['Id_Deuda'] for d in solicitud['JSON_Respuesta'])
         mask_sub_solicitudes = solicitudes_df['Datos_Solicitud'].apply(lambda x: set(d['Id_Deuda'] for d in x).issubset(ids_solicitud_actual))
         # Creamos la Máscara como: mask_sub_solicitudes & maskCasa & maskTipo & maskSinResponder
-        mask_sub_solicitudes_final = mask_sub_solicitudes & maskCasa & maskTipo & maskSinResponder
+        mask_sub_solicitudes_final = mask_sub_solicitudes & maskCasa & maskTipo & maskSinResponder & maskDiffID
 
         for _,sub_solicitud in solicitudes_df[mask_sub_solicitudes_final].iterrows():
 
@@ -201,7 +193,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
             ids_solicitud_actual = set(d['Id_Deuda'] for d in sub_solicitud['Datos_Solicitud'])
             sub_solicitud['Estado_Solicitud'] = solicitud['Estado_Solicitud']
             sub_solicitud['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
-            sub_solicitud['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+            sub_solicitud['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
             sub_solicitud['JSON_Respuesta'] = [ d for d in solicitud['JSON_Respuesta'] if d['Id_Deuda'] in ids_solicitud_actual ]
             sub_solicitud['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
             sub_solicitud['Ejecutivo'] = solicitud['Ejecutivo']
@@ -211,19 +203,54 @@ def distribuir_resultado_solicitud(solicitud: pd.Series) -> bool:
             if 'Addendums' in solicitud['Metadata_Solicitud']:
                 sub_solicitud['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
 
-            # Actualizamos la Sub-Solicitud en Google Sheets
-            curr_state = update_solicitud_in_google_sheets(sub_solicitud) and curr_state
-
-            # Verificamos que no haya habido algún error en la actualización
-            if not curr_state:
-                st.error(f"Error al actualizar la sub-solicitud con ID: {sub_solicitud['ID_Solicitud']}")
-                return False
-
             # Agregamos el ID de la Sub-Solicitud Actualizada al Set de IDs Actualizados
             updated_ids.add(sub_solicitud['ID_Solicitud'])
 
-    # Por Último, subimos la solicitud Inicial a actualizar
-    return update_solicitud_in_google_sheets(solicitud) and curr_state
+            # Agregamos la Sub-Solicitud a la lista de filas que necesitan ser actualizadas
+            need_update_rows.append(sub_solicitud)
+
+    # Volvemos todas las que necesitan actualizaciones un DF
+    need_update_df = pd.DataFrame(need_update_rows)
+
+    # Si la Solicitud Inicial es Exitosa, Es Acuerdo de Pago u Oferta de Acuerdo y tenemos bytes del PDF
+    # Se envia el correo correspondiente
+    if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
+        send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes)
+
+    # Por Último, devolvemos la actualización masiva
+    return update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)  
+
+def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
+    # Paso 1: Definir todos los Destinatarios Principales
+    main_recipients = list(set([sol['Correo'] for sol in solicitudes]))
+    main_recipients = ', '.join(main_recipients)
+    # Paso 2: Definir todos los CCs
+    current_ccs = DEFAULT_CCS
+    # Si el Tipo Pago == Crédito, se añade el CC de Crédito
+    if any(sol['Tipo_Pago'] == 'Crédito' for sol in solicitudes):
+        current_ccs += CCS_CREDITO
+    # Paso 3: Generar el Nombre del Acuerdo
+    pdf_name = generar_nombre_acuerdo_pago(solicitud_info=solicitudes[0])
+    # Paso 4: Obtener el asunto del correo según el Tipo de Solicitud
+    tipo_solicitud = solicitudes[0]['Tipo_Solicitud']
+    asunto_correo = EMAIL_SUBJECT_MAPPER.get(tipo_solicitud, "Acuerdo de Pago")
+    # Paso 5: Generar el Cuerpo del Correo
+    string_solicitado = "por {}".format(obtener_nombre_negociador(email=solicitudes[0]['Correo'])) if len(solicitudes) > 1 else "por ti"
+    body_correo = EMAIL_BODY_GENERAL.format(
+        string_solicitado=string_solicitado,
+        nombre_ejecutivo=st.session_state['user_name']
+    )
+    # Paso 6: Traer el Servicio de Google Mail desde el Session State
+    google_mail_service: GoogleMailService = st.session_state['google_mail_service']
+    # Paso 7: Enviar el Correo y devolver los resultados
+    return google_mail_service.send_email(
+        to=main_recipients,
+        cc_emails=current_ccs,
+        subject=asunto_correo,
+        body=body_correo,
+        pdf_bytes=pdf_bytes,
+        pdf_name=pdf_name,
+    )
 
 def upload_massive_addendums(*,solicitud: pd.Series) -> bool:
     """Sube los Addendums que se requieran a Alianzas - Ejecutivos
@@ -562,3 +589,36 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series) -> pd.Series:
 
     # Paso 2: Convertir el diccionario a una Serie de Pandas
     return pd.Series(acuerdo_data)
+
+def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, Any]) -> bytes:
+    """
+    Agrega metadatos a un archivo PDF subido.
+
+    Args:
+        pdf_bytes (bytes): Contenido del PDF en bytes.
+        metadata (dict[Hashable, Any]): Diccionario con los metadatos a agregar.
+
+    Returns:
+        bytes: Contenido del PDF con los metadatos agregados en formato binario.
+    """
+    # Paso 1: Leer el PDF desde los bytes
+    reader = PdfReader(BytesIO(pdf_bytes))
+    writer = PdfWriter()
+
+    # Paso 2: Copiar todas las páginas del lector al escritor
+    for page in reader.pages:
+        writer.add_page(page)
+
+    # Paso 3: Crear la Llave de Acceso y Guardar la Información de Metadatos en el PDF
+    hidden_key = NameObject("/Acuerdo_Info_Metadata")
+    hidden_value = TextStringObject(json.dumps({"agreement":metadata, "generated_at": pd.Timestamp.now('America/Bogota').isoformat()}, ensure_ascii=False))
+
+    # Paso 4: Agregar los metadatos al PDF
+    writer.add_metadata({hidden_key: hidden_value})
+
+    # Paso 5: Guardar el PDF con los metadatos en un objeto BytesIO
+    output_pdf_bytes = BytesIO()
+    writer.write(output_pdf_bytes)
+
+    # Paso 6: Retornar los bytes del PDF con los metadatos agregados
+    return output_pdf_bytes.getvalue()

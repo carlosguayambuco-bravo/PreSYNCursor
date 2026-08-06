@@ -46,9 +46,12 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
         solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)
 
-    # Volvemos las Columnas Referencia y Cedula a String
-    for col in ['Referencia', 'Cedula']:
+    # Volvemos las Columnas Referencia, ID_Solicitud y Cedula a String
+    for col in ['Referencia', 'ID_Solicitud', 'Cedula']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+
+    # Guardamos el Primer ID_Solicitud
+    st.session_state["first_id_solicitud"] = solicitudes_df['ID_Solicitud'].iloc[0] if not solicitudes_df.empty else None
 
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')

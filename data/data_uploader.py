@@ -7,9 +7,21 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_loader import SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from data.data_models import SolicitudesSchema
 from modules.constants import SOLICITUDES_ID_DELAY
-from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets
+from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
+
+# Función Auxiliar para Obtener la Fila de Sheets basado en el ID de Solicitud
+def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
+    # Paso 1: Convertir el ID de Solicitud a int
+    solicitud_id_int = int(solicitud_id)
+    # Paso 2: Buscar en el Session State el primer id, si no esta se usa el delay
+    first_id = st.session_state.get("first_id_solicitud", SOLICITUDES_ID_DELAY)
+    # Paso 3: Convertimos los Datos a int
+    first_id_int = int(first_id)
+    # Paso 4: Calculamos la fila en Google Sheets
+    return solicitud_id_int - first_id_int + 2  # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
 
 # Función para subir una respuesta de Formulario a Google Sheets
 def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, int]:
@@ -57,7 +69,7 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
 
     # Buscamos la fila correspondiente a la solicitud por su ID
     solicitud_id = float(solicitud['ID_Solicitud'])
-    solicitud_sheets_row = int(solicitud_id - SOLICITUDES_ID_DELAY + 2) # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
+    solicitud_sheets_row = get_solicitud_row_in_google_sheets(str(int(solicitud_id)))
     try:
         # Obtenemos los Headers de la Worksheet guardados en el Session State
         headers = st.session_state.get("solicitudes_headers", [])
@@ -74,6 +86,30 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
     except Exception as e:
         st.error(f"Error al actualizar la solicitud en Google Sheets: {e}")
         return False
+
+def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) -> bool:
+    # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+
+    # Abrimos la Worksheet 'Solicitudes_MEC' usando el servicio de Sheets
+    solicitudes_ws = sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
+
+    # Obtenemos los Headers de la Worksheet guardados en el Session State
+    headers = st.session_state.get("solicitudes_headers", [])
+
+    # Organizamos los datos de las solicitudes en el orden de los headers
+    solicitudes_data = solicitudes_df[headers].applymap(convert_data_to_string).values.tolist()
+
+    # Ahora a cada lista le añadimos como elemento 0 la fila de sheets correspondiente a cada solicitud
+    solicitudes_data = [[get_solicitud_row_in_google_sheets(row[0])] + row for row in solicitudes_data]
+
+    # Usamos la función de actualización masiva
+    return update_sheet_data_batch(
+        ws=solicitudes_ws,
+        data=solicitudes_data,
+        start_col_letter="A",
+        cell_threshold=10000
+    )
 
 # Función Auxiliar para Subir una plantilla masiva de Solicitudes a Sheets
 def upload_massive_solicitudes_to_google_sheets(plantilla_df: pd.DataFrame) -> bool:

@@ -23,6 +23,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import Paragraph, Table, TableStyle
 from svglib.svglib import svg2rlg
+import pandas as pd
 
 
 DEFAULT_CONSIDERATIONS = (
@@ -37,7 +38,6 @@ def generate_payment_agreement_pdf(
     colors_config: Optional[Mapping[str, str]] = None,
     considerations: Optional[Sequence[str]] = None,
     assets_dir: Optional[Union[str, os.PathLike[str]]] = None,
-    generated_at: Optional[datetime] = None,
     orientation: str = "horizontal",
     alpha: float = 0.10,
 ) -> bytes:
@@ -64,14 +64,14 @@ def generate_payment_agreement_pdf(
     source = _as_mapping(agreement)
     debts = _extract_debts(source)
     data = _extract_agreement(source, debts)
-    moment = generated_at or datetime.now()
+    moment = pd.Timestamp.now("America/Bogota")
     page_size = landscape(letter) if normalized_orientation == "horizontal" else letter
     normal_font, bold_font = _resolve_fonts(font)
     stream = io.BytesIO()
     pdf = _AgreementCanvas(stream, page_size, _palette(colors_config), normal_font, bold_font, Path(assets_dir) if assets_dir else Path(__file__).parent / "assets", normalized_orientation, alpha)
     pdf.draw_document(data, debts, tuple(considerations or DEFAULT_CONSIDERATIONS), moment)
     pdf.save()
-    return _embed_metadata(stream.getvalue(), {"agreement": data, "debts": debts, "generated_at": moment.isoformat(), "orientation": normalized_orientation})
+    return _embed_metadata(stream.getvalue(), {"agreement": agreement, "generated_at": moment.isoformat()})
 
 
 class _AgreementCanvas(Canvas):
@@ -89,14 +89,10 @@ class _AgreementCanvas(Canvas):
         clip = self.beginPath(); clip.roundRect(x, y, width, height, radius)
         self.clipPath(clip, stroke=0, fill=0)
         self.setFillColor(fill or self.palette["card"]); self.rect(x, y, width, height, stroke=0, fill=1)
-        # El formato vertical mantiene la marca de agua por tarjeta. En el
-        # horizontal se dibuja una sola vez al fondo de toda la hoja.
         if self.watermark and self.orientation != "horizontal":
             drawing = copy.deepcopy(self.watermark)
             scale = width / float(drawing.width)
             drawing.scale(scale, scale)
-            # Drawing no admite .opacity. La transparencia se aplica al canvas
-            # y saveState/restoreState garantiza que no afecte el resto del PDF.
             self.setFillAlpha(self.alpha)
             self.setStrokeAlpha(self.alpha)
             _set_drawing_alpha(drawing, self.alpha)
@@ -112,7 +108,6 @@ class _AgreementCanvas(Canvas):
         y = self._header(margin)
         y = self._identity(data, margin, y, content_w)
         y = self._summary(data, debts, margin, y - 14, content_w) - 14
-        # En horizontal quedan espacio para comentario y recomendaciones.
         per_page = 7 if self.orientation == "horizontal" else 12
         chunks = [debts[index:index + per_page] for index in range(0, len(debts), per_page)] or [[]]
         for page_index, chunk in enumerate(chunks):
@@ -164,9 +159,8 @@ class _AgreementCanvas(Canvas):
         self._field("CLIENTE", data["customer_name"], x + columns[0] + 10, y, columns[1] - 18, value_size=emphasis_size)
         self._field("DOCUMENTO", data["document"], x + columns[0] + columns[1] + 10, y, columns[2] - 18, value_size=emphasis_size)
         ally_x = x + main_w + 10
-        self._center_field("CASA DE COBRO", data["settlement_partner"], ally_x, y, ally_w, 49, important=True, value_size=emphasis_size)
-        self.setStrokeColor(self.palette["border"]); self.line(ally_x, y - 49, ally_x + ally_w, y - 49)
-        self._center_field("BANCOS A LIQUIDAR", ", ".join(data["banks"]) or "-", ally_x, y - 49, ally_w, 33)
+        # Casa de Cobro ahora ocupa todo el alto disponible (height = 82) de forma centrada
+        self._center_field("CASA DE COBRO", data["settlement_partner"], ally_x, y, ally_w, height, important=True, value_size=emphasis_size)
         return y - height
 
     def _summary(self, data: Mapping[str, Any], debts: list[dict[str, Any]], x: float, y: float, width: float) -> float:
@@ -176,8 +170,6 @@ class _AgreementCanvas(Canvas):
         total = sum((debt["amount"] for debt in debts), Decimal("0"))
         centered = self.orientation == "horizontal"
         self._field("MONTO TOTAL DE PAGO", _currency(total), x + 13, y, left_w - 24, important=True, value_size=21, value_alignment=1 if centered else 0)
-        # Cada bloque de la derecha tiene una separación fija respecto a su
-        # divisor: evita que el texto invada la línea horizontal central.
         self._field("FORMA DE PAGO", data["payment_method"], x + left_w + 12, y, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
         self._field("FECHA LÍMITE DE PAGO", _format_date(data["due_date"]), x + left_w + 12, y - 38, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
         return y - height
@@ -189,12 +181,11 @@ class _AgreementCanvas(Canvas):
         self.card(x, y - height, width, height)
         self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 11)
         self.drawCentredString(x + width / 2, y - 16, "RELACIÓN DE DEUDAS")
-        if self.orientation == "horizontal":
-            table_data = [["ID DEUDA", "NÚMERO CRÉDITO"]] + [[d["id"], d["credit_number"]] for d in rows]
-            column_widths = [width * .38, width * .62]
-        else:
-            table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO"]] + [[d["id"], d["bank"], d["credit_number"]] for d in rows]
-            column_widths = [width * .25, width * .35, width * .40]
+        
+        # Columna BANCO integrada para ambas orientaciones entre ID DEUDA y NÚMERO CRÉDITO
+        table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO"]] + [[d["id"], d["bank"], d["credit_number"]] for d in rows]
+        column_widths = [width * .25, width * .35, width * .40]
+
         table = Table(table_data, colWidths=column_widths, rowHeights=row_h)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), self.palette["primary"]), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -229,7 +220,6 @@ class _AgreementCanvas(Canvas):
         self.drawString(x, top - label_offset, label)
         style = ParagraphStyle("field", fontName=self.bold_font if important else self.font, fontSize=value_size, leading=value_size * 1.16, textColor=self.palette["text"], alignment=value_alignment) # type: ignore
         paragraph = Paragraph(_escape(str(value or "-")), style); _, p_h = paragraph.wrap(width, 31)
-        # Valor centrado en el espacio restante entre etiqueta y base de tarjeta.
         paragraph.drawOn(self, x, top - value_bottom_offset if value_bottom_offset is not None else top - 31 - p_h)
 
     def _page_watermark(self) -> None:
@@ -253,7 +243,6 @@ class _AgreementCanvas(Canvas):
         self.drawCentredString(x + width / 2, top - 14, label)
         style = ParagraphStyle("center-field", fontName=self.font if not important else self.bold_font, fontSize=value_size, leading=value_size * 1.16, textColor=self.palette["text"], alignment=1)
         paragraph = Paragraph(_escape(str(value or "-")), style); _, p_h = paragraph.wrap(width - 16, height - 20)
-        # Centrado vertical en el área posterior a la etiqueta.
         content_bottom = top - height + 5
         available_height = height - 25
         paragraph.drawOn(self, x + 8, content_bottom + max(0, (available_height - p_h) / 2))
@@ -267,7 +256,6 @@ class _AgreementCanvas(Canvas):
     def _footer(self, data: Mapping[str, Any], moment: datetime) -> None:
         self.setStrokeColor(self.palette["border"]); self.line(26, 38, self.width - 26, 38)
         self.setFillColor(self.palette["muted"]); self.setFont(self.font, 7)
-        # Los dos centros se sitúan a 1/4 y 3/4 del ancho: espaciado uniforme.
         self.drawCentredString(self.width * .25, 25, f"Generado el {moment.strftime('%d/%m/%Y %H:%M')}")
         self.drawCentredString(self.width * .75, 25, f"Ejecutivo: {data['executive'] or '-'}")
 
@@ -336,13 +324,6 @@ def _load_svg(path: Path):
     try: return svg2rlg(str(path)) if path.is_file() else None
     except (OSError, ValueError): return None
 def _set_drawing_alpha(node: Any, alpha: float) -> None:
-    """Atenúa los colores propios de un Drawing de svglib.
-
-    ``renderPDF`` puede ignorar el canal alfa de un SVG al restablecer los
-    colores de cada forma. Se conserva el alfa y además se mezcla cada color
-    con blanco, de modo que la marca permanece visualmente al 20 % incluso en
-    esos renderizadores.
-    """
     for attribute in ("fillColor", "strokeColor"):
         color = getattr(node, attribute, None)
         if isinstance(color, Color):
@@ -352,6 +333,6 @@ def _set_drawing_alpha(node: Any, alpha: float) -> None:
 def _embed_metadata(pdf: bytes, payload: Mapping[str, Any]) -> bytes:
     reader, writer = PdfReader(io.BytesIO(pdf)), PdfWriter()
     for page in reader.pages: writer.add_page(page)
-    writer.add_metadata({"/Title": "Acuerdo de pago", "/AgreementMetadata": json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))})
+    writer.add_metadata({"/Title": "Acuerdo de pago", "/Acuerdo_Info_Metadata": json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))})
     output = io.BytesIO(); writer.write(output); return output.getvalue()
 def _escape(value: str) -> str: return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

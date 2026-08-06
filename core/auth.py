@@ -20,6 +20,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/drive.file",  # Grants access to files created/opened by this app
     "https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
+    "https://www.googleapis.com/auth/chat.messages.create", # Grants access to send messages in Google Chat on behalf of the user
 ]
 
 def generate_jwt_token(cv: str) -> str:

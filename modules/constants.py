@@ -145,3 +145,35 @@ SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud p
 
 DEFAULT_DISCOUNT_PL = 0.15
 LIMITE_MEC = 5 # El Día límite para Considerar el Día como mes operativo
+
+# --- Constantes de Correos Electrónicos ---
+EMAIL_SUBJECT_ACUERDO = "Acuerdo de Pago ({estado_solicitud}) - REF: {referencia} - {nombre_cliente}"
+EMAIL_SUBJECT_OFERTA_ACUERDO = "Oferta de Acuerdo ({estado_solicitud}) - REF: {referencia} - {nombre_cliente}"
+EMAIL_SUBJECT_MAPPER ={
+    "Acuerdo de Pago": EMAIL_SUBJECT_ACUERDO,
+    "Oferta de Acuerdo": EMAIL_SUBJECT_OFERTA_ACUERDO,
+}
+
+EMAIL_BODY_GENERAL = """Cordial saludo,
+
+Espero que te encuentres bien.
+
+El motivo del presente mensaje es hacer la entrega formal del acuerdo de pago que fue solicitado {string_solicitado}. Adjunto a este correo podrás encontrar todos los detalles correspondientes.
+
+Quedo atento a cualquier comentario o paso adicional que se deba seguir.
+
+Muchas gracias por tu atención.
+
+Atentamente,
+{nombre_ejecutivo}
+"""
+
+DEFAULT_CCS = [
+    "julio.delgado@gobravo.com.co",
+    "alianzasco@gobravo.com.co",
+]
+
+CCS_CREDITO = [
+    "laura.guasca@gobravo.com.co",
+    "nmcaro@gobravo.com.co"
+]

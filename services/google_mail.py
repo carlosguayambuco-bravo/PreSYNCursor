@@ -1,6 +1,7 @@
 # Usando Pep8
 # Librerías de Python
 import base64
+from typing import Optional
 # Librerías de Terceros
 from email.message import EmailMessage
 from google.oauth2.service_account import Credentials
@@ -19,7 +20,7 @@ class GoogleMailService:
         self.credentials = Credentials.from_service_account_info(credentials_json, scopes=['https://www.googleapis.com/auth/gmail.send'])
         self.service = build('gmail', 'v1', credentials=self.credentials)
 
-    def send_email(self, to: str, subject: str, body: str) -> bool:
+    def send_email(self, to: str, subject: str, body: str, cc_emails: Optional[list] = None, pdf_bytes: Optional[bytes] = None, pdf_name: Optional[str] = None) -> bool:
         """
         Envía un correo electrónico utilizando la API de Gmail.
 
@@ -27,13 +28,16 @@ class GoogleMailService:
             to (str): Dirección de correo electrónico del destinatario.
             subject (str): Asunto del correo electrónico.
             body (str): Cuerpo del correo electrónico.
+            cc_emails (Optional[list]): Lista de correos electrónicos para copia (opcional).
+            pdf_bytes (Optional[bytes]): Contenido del archivo PDF en bytes (opcional).
+            pdf_name (Optional[str]): Nombre del archivo PDF adjunto (opcional).
 
         Returns:
             bool: True si el correo se envió correctamente, False en caso contrario.
         """
         try:
             message = {
-                'raw': self._create_message(to, subject, body)
+                'raw': self._create_message(to, subject, body, cc_emails, pdf_bytes, pdf_name)
             }
             self.service.users().messages().send(userId='me', body=message).execute()
             return True
@@ -41,7 +45,7 @@ class GoogleMailService:
             st.error(f"Error al enviar el correo: {e}")
             return False
 
-    def _create_message(self, to: str, subject: str, body: str) -> str:
+    def _create_message(self, to: str, subject: str, body: str, cc_emails: Optional[list[str]] = None, pdf_bytes: Optional[bytes] = None, pdf_name: Optional[str] = None) -> str:
         """
         Crea un mensaje codificado en base64 para enviar a través de la API de Gmail.
 
@@ -57,4 +61,12 @@ class GoogleMailService:
         message.set_content(body)
         message['To'] = to
         message['Subject'] = subject
+
+        if cc_emails:
+            message['Cc'] = ', '.join(cc_emails)
+
+        if pdf_bytes and pdf_name:
+            # Agregar el archivo PDF como adjunto
+            message.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_name)
+
         return base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

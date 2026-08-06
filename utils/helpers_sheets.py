@@ -34,6 +34,160 @@ def _retry(fn, label="", tries=MAX_RETRIES, base_sleep=1.5, jitter=0.6, max_slee
             raise e
     raise last_err
 
+def _batch_update_rows(ws, start_col_letter: str, end_col_letter: str, row_blocks: list[tuple[int,int,list[list[str]]]], cell_threshold: int = 10000):
+    """
+    Updates Google Sheets using batch_update to minimize API calls.
+    Groups row_blocks into 'mega-batches' based on a cell_threshold.
+    """
+
+    current_batch_data = []
+    current_cell_count = 0
+
+    for (r1, r2, mat) in row_blocks:
+        # Calculate cells in this specific block
+        block_cells = len(mat) * len(mat[0]) if mat else 0
+        rng = f"{start_col_letter}{r1}:{end_col_letter}{r2}"
+
+        # Prepare the update object for this block
+        update_item = {
+            'range': rng,
+            'values': mat
+        }
+
+        # Check if adding this block exceeds our threshold
+        if current_cell_count + block_cells > cell_threshold and current_batch_data:
+            # Execute the accumulated batch before starting a new one
+            _execute_batch_retry(ws, current_batch_data)
+            current_batch_data = []
+            current_cell_count = 0
+            sleep(0.5) # Slight breather between mega-batches
+
+        current_batch_data.append(update_item)
+        current_cell_count += block_cells
+
+    # Final execution for any remaining data
+    if current_batch_data:
+        _execute_batch_retry(ws, current_batch_data)
+
+def _execute_batch_retry(ws, data_list):
+    """
+    Helper to wrap the batch_update in your retry logic.
+    """
+    _retry(
+        lambda: ws.batch_update(data_list, value_input_option="USER_ENTERED"),
+        label=f"batch_update for {len(data_list)} ranges"
+    )
+
+# Funcion auxiliar para unir filas actualizadas en una sola y poder realizar cambios enteros por chunks
+def _make_consecutive_blocks(rownums_sorted: list[int], values_by_rownum: dict[int, list[str]]):
+    """
+    Agrupa filas consecutivas para reducir llamadas a la API.
+    Retorna [(start_row, end_row, matrix_values)]
+    """
+    blocks = []
+    if not rownums_sorted:
+        return blocks
+
+    start = prev = rownums_sorted[0]
+    mat = [values_by_rownum[start]]
+
+    for r in rownums_sorted[1:]:
+        # Si la fila es adyacente a la anterior se uno como un bloque
+        if r == prev + 1:
+            mat.append(values_by_rownum[r])
+            prev = r
+        else:
+        # Si no, entonces se guarda el bloque y se crea uno nuevo
+            blocks.append((start, prev, mat))
+            start = prev = r
+            mat = [values_by_rownum[r]]
+    # Se guarda el último bloque en memoria
+    blocks.append((start, prev, mat))
+    return blocks
+
+def letter_to_col(col_str: str) -> int:
+    """Convierte una letra de columna de Sheets (ej. 'A', 'Z', 'AA') a su número de índice 1-based."""
+    num = 0
+    for char in col_str.upper():
+        num = num * 26 + (ord(char) - ord('A') + 1)
+    return num
+
+
+def col_to_letter(col_idx: int) -> str:
+    """Convierte un índice numérico 1-based de columna a su letra correspondiente en Sheets."""
+    result = ""
+    while col_idx > 0:
+        col_idx, remainder = divmod(col_idx - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def update_sheet_data_batch(
+    ws,
+    data: list[list],
+    start_col_letter: str = "A",
+    cell_threshold: int = 10000
+) -> bool:
+    """
+    Actualiza Google Sheets de forma masiva y eficiente agrupando filas consecutivas
+    y dividiendo los envíos en bloques según un umbral de celdas.
+
+    :param ws: Objeto Worksheet de gspread.
+    :param data: Lista de listas con estructura [Número_Fila_Sheets, col1, col2, ...].
+    :param start_col_letter: Letra de la columna donde inicia el bloque de datos (por defecto 'A').
+    :param cell_threshold: Umbral máximo de celdas por solicitud batch_update.
+    :return: True si la actualización se completó con éxito, False de lo contrario.
+    """
+    if not data:
+        return True
+
+    try:
+        # 1. Extraer los números de fila y mapear sus respectivos valores
+        values_by_rownum = {}
+        num_cols = None
+
+        for item in data:
+            if not item:
+                continue
+            
+            row_num = item[0]
+            row_values = item[1:]
+
+            # Registrar la cantidad de columnas basada en la primera fila no vacía
+            if num_cols is None:
+                num_cols = len(row_values)
+
+            values_by_rownum[row_num] = row_values
+
+        if not values_by_rownum or num_cols == 0:
+            return True
+
+        # 2. Ordenar las filas para poder detectar la consecutividad
+        rownums_sorted = sorted(values_by_rownum.keys())
+
+        # 3. Calcular la letra de la columna final según la longitud de los headers/datos
+        start_col_idx = letter_to_col(start_col_letter)
+        end_col_idx = start_col_idx + num_cols - 1 # type: ignore
+        end_col_letter = col_to_letter(end_col_idx)
+
+        # 4. Crear bloques de filas consecutivas
+        row_blocks = _make_consecutive_blocks(rownums_sorted, values_by_rownum)
+
+        # 5. Ejecutar la actualización masiva utilizando los bloques generados
+        _batch_update_rows(
+            ws=ws,
+            start_col_letter=start_col_letter.upper(),
+            end_col_letter=end_col_letter,
+            row_blocks=row_blocks,
+            cell_threshold=cell_threshold
+        )
+
+        return True
+
+    except Exception as e:
+        print(f"[Error] No se pudo completar la actualización en lote: {e}")
+        return False
+
 # Función Auxiliar para Obtener un Diccionario con las Variables de Entorno
 def getEnvVarsFromSheet(ws: gspread.Worksheet, cellRange: str) -> dict:
     # Get values using your retry logic

@@ -7,7 +7,7 @@ import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_aliados_dataframe, load_app_config, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
+from data.data_loader import load_app_config, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
 from data.data_models import DeudasActivasSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage

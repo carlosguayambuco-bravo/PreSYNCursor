@@ -13,7 +13,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes, generate_plantilla_serie_acuerdo
+from modules.gest_sols import add_metadata_to_uploaded_pdf, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -193,7 +193,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
         # Paso 3: X2 a la Diferencia_Dias si Tipo_Pago == 'Crédito'
         calc_df["Diferencia_Dias"] *= np.where(calc_df["Tipo_Pago"] == "Crédito", 2, 1)
         # Paso 4: Usar np.argsort para obtener los índices ordenados por Diferencia_Dias de mayor a menor
-        sorted_indices = np.argsort((calc_df["Diferencia_Dias"]* -1).to_numpy())
+        sorted_indices = np.argsort((calc_df["Diferencia_Dias"]).to_numpy())
         # Paso 5: Aplicar este orden a solicitudes_df para obtener el DataFrame final ordenado
         solicitudes_df = solicitudes_df.iloc[sorted_indices]
     else:
@@ -227,12 +227,16 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
         )
     if actualizar_solicitud:
         with st.spinner("Subiendo Solicitud a Google Sheets..."):
-            # Actualizamos la Solicitud en Google Sheets
-            success = distribuir_resultado_solicitud(solicitud)
             # Subimos el Acuerdo de Pago si es necesario
             if (pdf_bytes is not None) and len(pdf_bytes) > 0:
                 file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
-                success = success and bool(file_id)
+                success = bool(file_id)
+                # Guardamos el Id del Acuerdo en la Metadata de la Solicitud
+                solicitud["Metadata_Solicitud"]["Id_Acuerdo_Pago"] = file_id
+            else:
+                success = True  # No hay PDF para subir, consideramos que la subida fue exitosa
+            # Actualizamos la Solicitud en Google Sheets
+            success = distribuir_resultado_solicitud(solicitud)
             # Actualizamos los Datos de Addendums
             upload_massive_addendums(solicitud=solicitud)
         if success:
@@ -340,7 +344,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                 st.text_input(
                     label="**Número de Crédito**",
                     value=d['Numero_Credito'],
-                    disabled=True,
+                    disabled=False, # Este si se puede cambiar
                     key="numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                 )
             with col3Info:
@@ -361,7 +365,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         # Ahora Creamos el Botón de Generar el PDF
         generar_pdf = st.button(
             label="Generar Acuerdo de Pago en PDF",
-            key=key_acuerdo + 'button',
+            key=key_acuerdo + '_button',
             type="primary",
             help="Haga clic para generar el acuerdo de pago en formato PDF.",
             disabled = len(st.session_state.get(key_acuerdo, bytes())) > 0,
@@ -846,6 +850,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 st.stop()
             # Obtenemos los bytes del archivo subido
             bytes_acuerdo = bytes_acuerdo.getvalue()
+            # Generamos la Metadata de la Solicitud
+            metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta)
+            # Guardamos la Metadata en el PDF
+            bytes_acuerdo = add_metadata_to_uploaded_pdf(pdf_bytes=bytes_acuerdo, metadata=metadata_to_add_acuerdo.to_dict())
+
             
         elif formato_pago == "Generar PDF":
             bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
