@@ -106,7 +106,7 @@ with tabResumenSolicitudes:
         # Creamos el Gráfico de Pie de Estados de Solicitudes
         fig_pie_estados = px.pie(
             solicitudes_filtered,
-            names='estado_solicitud',
+            names='Estado_Solicitud',
             title='Distribución de Estados de Solicitudes',
             hole=0.4,
             color_discrete_sequence=px.colors.qualitative.Set3
@@ -137,8 +137,8 @@ with tabResumenSolicitudes:
         )
         # Ahora Creamos 2 Popovers para mostrar los detalles de los KPIs
         with st.popover("Respuestas por Día", icon="ℹ️"):
-            st.write("**Promedio de Respuestas por Día:**")
-            for dia, respuestas in respuestas_por_dia['promedio_por_dia'].items(): # type: ignore
+            st.write("**Promedio de Respuestas por Día por Tipo de Solicitud:**")
+            for dia, respuestas in respuestas_por_dia['promedio_por_tipo'].items(): # type: ignore
                 st.write(f"- {dia}: {respuestas:.2f} respuestas")
 
         with st.popover("Tiempos por Tipo", icon="ℹ️"):
@@ -153,35 +153,37 @@ with tabResumenSolicitudes:
 
     if solicitudes_sin_responder > 0:
         # La Estructura será: 3 Columnas: Casa de Cobro, Banco y Ejecutivo
-        colCasaCobro, colBanco, colEjecutivo = st.columns([3,1,2], gap = "small", vertical_alignment="center", border=True,)
+        colCasaCobro, colEjecutivo = st.columns([4,3], gap = "small", vertical_alignment="center", border=True,)
 
         with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
             st.subheader("🥸 Por Casa de Cobro")
+
             fig_casa_cobro = px.bar(
-                mascara_sin_responder.groupby('casa_cobro').size().reset_index(name='count'),
-                x='casa_cobro',
-                y='count',
+                solicitudes_filtered.groupby('Casa_Cobro').size().reset_index(name='count'),
+                x='count',                # Swapped: values on x-axis
+                y='Casa_Cobro',            # Swapped: labels on y-axis
                 title='Solicitudes Sin Responder por Casa de Cobro',
                 color='count',
-                orientation='v',
+                orientation='h',           # Set orientation to horizontal
                 color_continuous_scale=px.colors.sequential.Viridis
             )
-            st.plotly_chart(fig_casa_cobro, use_container_width=True)
 
-        with colBanco: # Mostramos un DF 
-            st.subheader("🏦 Por Banco")
-            bancos_sin_responder_df = obtener_df_bancos_sin_responder(solicitudes_filtered)
-            # Estilizamos el DF para que se vea mejor en Streamlit
-            st.dataframe(
-                bancos_sin_responder_df.style.format({"Solicitudes Sin Responder": "{:,.0f}"}).background_gradient(cmap='YlGnBu', subset=["Solicitudes Sin Responder"]),
-                use_container_width=True,
-                hide_index=True
+            # Ahora Renombramos los ejes para que sean más claros
+            fig_casa_cobro.update_layout(
+                xaxis_title="Cantidad de Solicitudes Sin Responder",
+                yaxis_title="Casa de Cobro",
+                coloraxis_colorbar=dict(title="Cantidad")
             )
+
+            # Optional: To keep the top category at the top of the chart
+            fig_casa_cobro.update_layout(yaxis={'categoryorder': 'total ascending'})
+
+            st.plotly_chart(fig_casa_cobro, use_container_width=True)
 
         with colEjecutivo: # Mostramos un Pie
             st.subheader("👨‍💼 Por Ejecutivo")
             fig_ejecutivo = px.pie(
-                mascara_sin_responder.groupby('Ejecutivo').size().reset_index(name='count'),
+                solicitudes_filtered.groupby('Ejecutivo').size().reset_index(name='count'),
                 names='Ejecutivo',
                 values='count',
                 title='Solicitudes Sin Responder por Ejecutivo',

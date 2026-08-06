@@ -416,8 +416,26 @@ def reiniciar_filtros_solicitudes(method: Literal['reset','basic'] = "reset") ->
         "cedula_solicitud_gestion_input",
         "id_deuda_solicitud_gestion_input",
     ]
+    keys_to_list = [
+        'tipo_solicitud_gestion_input',
+        'aliado_solicitud_gestion_input',
+        'estado_solicitud_gestion_input',
+        'ejecutivo_solicitud_gestion_input',
+        'banco_solicitud_gestion_input'
+    ]
+    keys_to_Todos = [
+        "persona_solicitud_gestion_input",
+        "id_solicitud_gestion_input",
+        "cedula_solicitud_gestion_input",
+        "id_deuda_solicitud_gestion_input",
+    ]
     for key in keys_to_remove:
-        st.session_state[key] = None
+        if key in keys_to_list:
+            st.session_state[key] = []
+        elif key in keys_to_Todos:
+            st.session_state[key] = "Todos"
+        else:
+            st.session_state[key] = None
     # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
     if method == 'basic':
         st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
@@ -505,7 +523,7 @@ def obtener_df_bancos_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]
     solicitudes_exploded = solicitudes_sin_responder.explode('Bancos')
 
     # Paso 4: Agrupar por Banco y Contar la Cantidad de Solicitudes Sin Responder
-    df_bancos_sin_responder = solicitudes_exploded.groupby('Bancos').size().reset_index(name='Cantidad_Sin_Responder').rename(columns={'Bancos': 'Banco'})
+    df_bancos_sin_responder = solicitudes_exploded.groupby('Bancos').size().reset_index(name='Solicitudes Sin Responder').rename(columns={'Bancos': 'Banco'})
 
     return df_bancos_sin_responder
 

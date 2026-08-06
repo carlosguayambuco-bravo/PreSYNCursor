@@ -16,6 +16,9 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     # Vamos a Añadir 2 Checbox: Seleccionar Todas y Deseleccionar Todas
     colDeselectAll, colSelectAll  = st.columns(2, vertical_alignment="center")
 
+    # Ordenamos los Datos por Banco
+    deudas_activas_df = deudas_activas_df.sort_values(by=['Banco', 'Id_Deuda'], ascending=[True, True])
+
     with colDeselectAll:
         if st.button("Deseleccionar Todas", key="deselect_all_deudas", type="primary", width="stretch"):
             for _, row in deudas_activas_df.iterrows():

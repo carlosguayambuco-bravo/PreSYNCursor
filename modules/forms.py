@@ -53,7 +53,7 @@ def obtener_descuento_optimo_credito(*,referencia: str, deudas: list[str], pago_
 def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: float, pago_total_original: float, descuento_pl: float) -> tuple[float, str]:
     descuento_trad = obtener_descuento_optimo_tradicional(referencia=referencia, pricing=pricing, pago_total_original=pago_total_original, descuento_pl=descuento_pl)
     descuento_cred = obtener_descuento_optimo_credito(referencia=referencia, deudas=deudas, pago_total_original=pago_total_original)
-    return min(descuento_trad, descuento_cred), "Tradicional" if descuento_trad <= descuento_cred else "Crédito"
+    return min(descuento_trad, descuento_cred), "Tradicional" if descuento_trad <= descuento_cred else "Crédito - PaB Ideal"
 
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
 def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) -> tuple[bool, float]:

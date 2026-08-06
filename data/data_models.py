@@ -234,8 +234,8 @@ class PlantillaSolicitudesSchema(pa.DataFrameModel):
     Banco: str
     Numero_Obligacion: str
     Propuesta: float
-    Portafolio: float|int = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Plazos: int|float
+    Portafolio: str = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Plazos: str = pa.Field(nullable=True)  # Puede ser nulo si no aplica
 
     class Config:
         strict = True  # Validación estricta de columnas

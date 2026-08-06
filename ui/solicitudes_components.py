@@ -15,7 +15,7 @@ from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_S
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
-from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
+from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
 # Función para Mostrar los Filtros Generales de una Solicitud
 def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
@@ -249,7 +249,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
 
     # Paso 1: Mostrar los Inputs del Acuerdo de Pago Generado
 
-    with st.expander("**Especificaciones del Acuerdo de Pago Generado**", expanded=False, icon="🔏"):
+    with st.expander("**🔏 Especificaciones del Acuerdo de Pago Generado**", expanded=False):
         st.markdown("### **ℹ️ Información de la Solicitud**")
 
         # Reunimos la Información de las Deudas y los Addendums en uno Solo
@@ -260,11 +260,13 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
 
         # Creamos una Vista de Pills para definir las Deudas a Usar
         selected_ids = st.pills(
-            label="**Deudas y Addendums usados**",
+            "**Deudas y Addendums usados**",
             options=debt_ids,
             default=debt_ids,
             help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
-            key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud'])
+            key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            selection_mode="multi",
+            width="stretch",
         )
 
         if selected_ids is None or not selected_ids:
@@ -359,7 +361,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         # Ahora Creamos el Botón de Generar el PDF
         generar_pdf = st.button(
             label="Generar Acuerdo de Pago en PDF",
-            key=key_acuerdo,
+            key=key_acuerdo + 'button',
             type="primary",
             help="Haga clic para generar el acuerdo de pago en formato PDF.",
             disabled = len(st.session_state.get(key_acuerdo, bytes())) > 0,
@@ -472,7 +474,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         if not (key_monto in st.session_state):
             st.session_state[key_monto] = '{:,.0f}'.format(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
-            st.session_state[key_cuotas] = '{}'.format(d['Num_Cuotas'])
+            st.session_state[key_cuotas] = d['Num_Cuotas']
 
     # Paso 3: Aplicar Lógica de Recálculo basado en los Session States
     if st.session_state[key_usar_monto_total]:
@@ -547,7 +549,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         )
 
     # Siguiente: Expander para mostrar los Inputs por Deuda
-    with st.expander("**Respuesta por Deuda**", expanded=False):
+    with st.expander("**💸 Respuesta por Deuda**", expanded=False):
         if cuotas_input == "Por Deuda":
             colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5, vertical_alignment="center")
         else:
@@ -576,7 +578,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             with colMontoPropuesto:
                 key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
                 st.text_input(
-                    "",
+                    label="Monto Propuesto",
                     key=key_monto,
                     help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
                     label_visibility="collapsed",
@@ -586,7 +588,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 with colCuotasDeuda: # type: ignore
                     key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
                     st.number_input(
-                        "",
+                        label="Número de Cuotas",
                         value=1,
                         min_value=1,
                         max_value=60,
@@ -597,7 +599,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     )
 
         # Siguiente: Mostramos Posibilidad de Agregar Addendums
-        with st.expander("**Agregar Addendums a la Solicitud**", expanded=False, icon = "📝"):
+        with st.expander("**📝 Agregar Addendums a la Solicitud**", expanded=False, icon = "📝"):
 
             # Inicializamos la Cantidad de Addendums con 0 en el Session State si no existe
             key_addendums_count = 'addendums_count_{}'.format(solicitud['ID_Solicitud'])
@@ -623,10 +625,28 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     st.markdown("**Número de Cuotas**")
 
             # Ahora Iteramos por la Cantidad de Addendums y Mostramos los Inputs correspondientes
-            for i in range(st.session_state[key_addendums_count]):
+            for i in range(1,st.session_state[key_addendums_count]+1):
+
+                # Inicializamos los Session States de los Addendums si no existen
+                key_banco_add = 'addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                key_numero_credito_add = 'addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                key_monto_actual_add = 'addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                key_monto_propuesto_add = 'addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                key_cuotas_add = 'addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                if not (key_banco_add in st.session_state):
+                    st.session_state[key_banco_add] = ""
+                if not (key_numero_credito_add in st.session_state):
+                    st.session_state[key_numero_credito_add] = ""
+                if not (key_monto_actual_add in st.session_state):
+                    st.session_state[key_monto_actual_add] = ""
+                if not (key_monto_propuesto_add in st.session_state):
+                    st.session_state[key_monto_propuesto_add] = ""
+                if not (key_cuotas_add in st.session_state):
+                    st.session_state[key_cuotas_add] = 1
+
                 with colBancoAdd:
                     st.selectbox(
-                        "",
+                        label="",
                         options=BANCOS_UNICOS,
                         key='addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i),
                         help="Ingrese el banco para el addendum {}.".format(i+1),
@@ -657,7 +677,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 if cuotas_input == "Por Deuda":
                     with colCuotasDeudaAdd: # type: ignore
                         st.number_input(
-                            "",
+                            label="Número de Cuotas",
                             key='addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i),
                             help="Ingrese el número de cuotas para el addendum {}.".format(i+1),
                             label_visibility="collapsed",
@@ -679,6 +699,9 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 ):
                     if st.session_state[key_addendums_count] > 0:
                         st.session_state[key_addendums_count] -= 1
+                        st.rerun(scope="fragment")
+                    else:
+                        st.toast("No hay addendums para quitar.", icon="⚠️")
 
             with colAddendumAgregar:
                 if st.button(
@@ -688,8 +711,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     type="primary",
                 ):
                     st.session_state[key_addendums_count] += 1
-
-    st.divider()
+                    st.rerun(scope="fragment")
 
     # Siguiente: Generamos el JSON_Respuesta con: Monto Propuesto por Deuda, Cuotas por Deuda
     json_respuesta = []
@@ -714,7 +736,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Agregamos los Addendums a la solicitud_respuesta si existen
     addendums = []
-    for i in range(st.session_state[key_addendums_count]):
+    for i in range(1, st.session_state[key_addendums_count]+1):
+
         addendum_banco = st.session_state['addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i)]
         addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i)]
         addendum_monto_actual = cleanNumber(st.session_state['addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i)], default_nan=0.0)
@@ -723,6 +746,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             addendum_num_cuotas = int(st.session_state['addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i)])
         else:
             addendum_num_cuotas = num_coutas_global
+
+        # Si no hay banco o Numero de Credito no se agrega
+        if not (addendum_banco or addendum_numero_credito):
+            continue
+
         addendums.append({
             "Id_Deuda": "ADD_{}".format(str(i)),
             "Banco": addendum_banco,
@@ -851,23 +879,20 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main):
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
-        st.space("xxsmall")
+        st.space("small")
 
 
         # Creamos 5 Columnas para Mostrar: ID, Monto Total, Persona que Solicita ,Bancos y Cedula
-        colID, colMonto, colPersona, colBancos, colCedula = st.columns([1,1,2,2,1],vertical_alignment="center")
-
-        with colID:
-            st.metric(
-                label="**ID de Solicitud:**", value=solicitud["ID_Solicitud"],
-                help = "El ID de la Solicitud que se mantiende de forma interna en el Sistema",
-            )
+        colMonto, colPersona, colBancos, colCedula = st.columns([2,2,2,2],vertical_alignment="center")
 
         with colMonto:
             monto_total_solicitud = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
+            monto_actual_solicitud = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"])
             st.metric(
-                label="**Monto Total:**", value="${:,.2f}".format(monto_total_solicitud),
+                label="**Monto Total:**", value="${:,.0f}".format(monto_total_solicitud),
                 help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
+                delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
+                border=True,
             )
         
         with colPersona:
@@ -875,6 +900,10 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             st.metric(
                 label="**Persona que Solicita:**", value=nombre_nego,
                 help = "El Nombre del Negociador que realizó la solicitud",
+                border=True,
+                delta = "{}".format(solicitud["Correo"]),
+                delta_color="gray",
+                delta_arrow="off"
             )
 
         with colBancos:
@@ -883,6 +912,10 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             st.metric(
                 label="**Bancos:**", value=bancos_str,
                 help = "Los Bancos involucrados en la solicitud",
+                border=True,
+                delta = "Número de Bancos: {}".format(len(bancos_list)),
+                delta_color="gray",
+                delta_arrow="off",
             )
 
         with colCedula:
@@ -893,55 +926,68 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             st.metric(
                 label="**Cédula:**", value=cedula_limpia,
                 help = "El Número de Cedula del titular Solicitado",
+                border=True,
+                delta = "{}".format(solicitud["Metadata_Solicitud"]["Nombre_Cliente"]),
+                delta_color="gray",
+                delta_arrow="off",
             )
 
         # Siguiente: Caso Especial: Si es Acuerdo de Pago o Oferta de Pago, Mostrar Fecha de Pago y Tipo de Pago
-        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Pago"]:
+        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
             colFechaPago, colTipoPago = st.columns(2)
 
             with colFechaPago:
-                st.markdown("**Fecha de Pago:**")
                 fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
-                st.code(fecha_pago, language="text")
+                falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+                st.metric(
+                    label="**Fecha de Pago:**", value=fecha_pago,
+                    help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
+                    border=True,
+                    delta_color = "red" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "green",
+                    delta_arrow="down" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "up",
+                    delta = "{} {:.1f} días hábiles".format("Faltan" if falta_para_pago > 0 else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
+                )
 
             with colTipoPago:
-                st.markdown("**Tipo de Pago:**")
-                tipo_pago = solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado"
-                st.code(tipo_pago, language="text")
+                st.metric(
+                    label="**Tipo de Pago:**", value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
+                    help = "El Método de Pago del Acuerdo u Oferta de Pago",
+                    border=True,
+                    delta="Ojala que paguen",
+                    delta_color="gray",
+                    delta_arrow="off",
+                )
 
         # Paso Siguiente: Mostrar las Caracteristicas por Deuda de la Solicitud
         st.space("xsmall")
         st.divider()
 
         # Creamos un Botón para Copiar los Datos de la Solicitud
-        colBotonCopy, colInfoCopy = st.columns([1, 5], vertical_alignment="center")
+        colBotonCopy, colInfoCopy = st.columns([1, 5], vertical_alignment="top")
         solicitud_txt = get_solicitud_txt(solicitud=solicitud)
         with colBotonCopy:
             if st_copy_to_clipboard(solicitud_txt, key="copy_solicitud_{}_info".format(solicitud['ID_Solicitud'])):
                 st.toast("Datos de la solicitud {} copiados al portapapeles.".format(solicitud['ID_Solicitud']), icon=":material/content_copy:")
         
         with colInfoCopy:
-            st.markdown("**Copiar Datos de la Solicitud**")
             st.info("Haga clic en el botón para copiar todos los datos de la solicitud al portapapeles.", icon="ℹ️")
 
         # Vamos a Crear 6 o 7 Columnas: Boton de Copiar, Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
         hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
-        with st.expander("**Detalles de la Solicitud por Deuda**", expanded=False, icon="💰"):
+        with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
 
             if hay_cuotas:
-                colBtCopy, colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([1,3,3,3,6,6,3], vertical_alignment="center")
+                colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
             else:
-                colBtCopy, colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([1,3,3,3,6,6], vertical_alignment="center")
+                colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([3,3,3,6,6], vertical_alignment="top")
 
-            with colBtCopy:
-                st.markdown("**Copiar**")
             with colIdDeuda:
                 st.markdown("**ID de Deuda:**")
             with colBanco:
                 st.markdown("**Banco:**")
             with colNumCredito:
-                st.markdown("**Número de Crédito:**")
+                st.markdown("**Número Crédito:**")
             with colActualizaciones:
                 st.markdown("**Descuentos en Base:**")
             with colMontoPropuesto:
@@ -955,10 +1001,6 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 txt_debt = "ID Deuda: {}\nBanco: {}\nNúmero de Crédito: {}\nMonto Propuesto: ${:,.2f}".format(
                     d['Id_Deuda'], d['Banco'], d['Numero_Credito'], d['Monto_Propuesto']
                 )
-
-                with colBtCopy:
-                    if st_copy_to_clipboard(txt_debt, key="copy_debt_{}".format(d['Id_Deuda'])):
-                        st.toast("Datos de la deuda {} copiados al portapapeles.".format(d['Id_Deuda']), icon=":material/content_copy:")
 
                 with colIdDeuda:
                     st.code(d['Id_Deuda'], language="text")
@@ -974,13 +1016,12 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                                 st.markdown(descuento)
                         else:
                             st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
+                    st.space("xxsmall")
                 with colMontoPropuesto:
                     st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
                 if hay_cuotas:
                     with colCuotas: # type: ignore
                         st.code(d['Cuotas'], language="text")
-
-        st.divider()
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
         # Definimos si la Solicitud se ha respondido o no, para deshabilitar el botón si ya fue respondida
