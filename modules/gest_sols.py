@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from typing import Literal
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from data.data_uploader import update_solicitud_in_google_sheets, upload_log_to_
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
 from services.google_drive import GoogleDriveService
+from utils.helpers_general import getBDDaysDiffFloat_vectorized
 
 def get_solicitud_txt(solicitud: pd.Series) -> str:
     """
@@ -395,3 +397,114 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: DataFrame[SolicitudesSche
 
     # Paso 3: Subir la Plantilla Masiva a Google Sheets
     return upload_massive_solicitudes_to_google_sheets(plantilla_df)
+
+# Función para Reiniciar los Filtros de Solicitudes en el Session State
+def reiniciar_filtros_solicitudes(method: Literal['reset','basic'] = "reset") -> None:
+    """
+    Reinicia los filtros de solicitudes en el estado de la sesión.
+    Esta función elimina las claves relacionadas con los filtros de solicitudes del estado de la sesión.
+    """
+    # Lista de claves a reiniciar del Session State
+    keys_to_remove = [
+        "tipo_solicitud_gestion_input",
+        "aliado_solicitud_gestion_input",
+        "estado_solicitud_gestion_input",
+        "ejecutivo_solicitud_gestion_input",
+        "persona_solicitud_gestion_input",
+        "banco_solicitud_gestion_input",
+        "id_solicitud_gestion_input",
+        "cedula_solicitud_gestion_input",
+        "id_deuda_solicitud_gestion_input",
+    ]
+    for key in keys_to_remove:
+        st.session_state[key] = None
+    # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
+    if method == 'basic':
+        st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
+
+def obtener_promedio_tiempos_respuesta(solicitudes_df: DataFrame[SolicitudesSchema]) -> dict[str, float|dict]:
+    """
+    Calcula el promedio de tiempos de respuesta para las solicitudes.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, float]: Diccionario con los promedios de tiempos de respuesta.
+            - 'promedio_general': Promedio general de días de respuesta.
+            - 'promedio_por_tipo': Promedio de días de respuesta por tipo de solicitud.
+    """
+    # Paso 1: Crear Columna de Tiempos Respuesta como Diferencia en Días entre Fecha_Respuesta y Timestamp
+    solicitudes_aux = solicitudes_df.reset_index(drop=True).assign(
+        Tiempo_Respuesta_Dias=getBDDaysDiffFloat_vectorized(
+            solicitudes_df['Fecha_Respuesta'],
+            solicitudes_df['Timestamp']
+        )
+    )
+
+    # Paso 2: Calcular el Promedio General de Tiempos de Respuesta
+    promedio_general = solicitudes_aux['Tiempo_Respuesta_Dias'].mean()
+
+    # Paso 3: Calcular el Promedio de Tiempos de Respuesta por Tipo de Solicitud
+    promedio_por_tipo = solicitudes_aux.groupby('Tipo_Solicitud')['Tiempo_Respuesta_Dias'].mean().to_dict()
+
+    return {
+        'promedio_general': promedio_general,
+        'promedio_por_tipo': promedio_por_tipo
+    }
+
+def obtener_promedio_respuestas_dia(solicitudes_df: DataFrame[SolicitudesSchema]) -> dict[str, float|dict]:
+    """
+    Calcula el promedio de respuestas por día para las solicitudes.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, float]: Diccionario con los promedios de respuestas por día.
+            - 'promedio_general': Promedio general de respuestas por día.
+            - 'promedio_por_tipo': Promedio de respuestas por día por tipo de solicitud.
+    """
+    # Paso 1: Crear Columna de Fecha de Respuesta como Fecha sin Hora
+    solicitudes_aux = solicitudes_df.reset_index(drop=True).assign(
+        Fecha_Respuesta_Solo_Fecha=solicitudes_df['Fecha_Respuesta'].dt.date
+    )
+
+    # Paso 2: Calcular el Promedio General de Respuestas por Día
+    promedio_general = solicitudes_aux.groupby('Fecha_Respuesta_Solo_Fecha').size().mean()
+
+    # Paso 3: Calcular el Promedio de Respuestas por Día por Tipo de Solicitud
+    promedio_por_tipo = solicitudes_aux.groupby(['Tipo_Solicitud', 'Fecha_Respuesta_Solo_Fecha']).size().groupby('Tipo_Solicitud').mean().to_dict()
+
+    return {
+        'promedio_general': promedio_general,
+        'promedio_por_tipo': promedio_por_tipo
+    }
+
+def obtener_df_bancos_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.DataFrame:
+    """
+    Obtiene un DataFrame con la cantidad de solicitudes sin responder por banco.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+
+    Returns:
+        pd.DataFrame: DataFrame con la cantidad de solicitudes sin responder por banco.
+            Columnas: 'Banco', 'Cantidad_Sin_Responder'
+    """
+    # Paso 1: Filtrar las Solicitudes Sin Responder
+    mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
+    solicitudes_sin_responder = solicitudes_df[mask_sin_responder]
+
+    # Paso 2: Crear Columna Axuiliar Bancos que viene desde Datos_Solicitud
+    solicitudes_sin_responder = solicitudes_sin_responder.assign(
+        Bancos=solicitudes_sin_responder['Datos_Solicitud'].apply(lambda x: [d['Banco'] for d in x])
+    )
+
+    # Paso 3: Explode la Columna Bancos para tener una fila por cada Banco
+    solicitudes_exploded = solicitudes_sin_responder.explode('Bancos')
+
+    # Paso 4: Agrupar por Banco y Contar la Cantidad de Solicitudes Sin Responder
+    df_bancos_sin_responder = solicitudes_exploded.groupby('Bancos').size().reset_index(name='Cantidad_Sin_Responder').rename(columns={'Bancos': 'Banco'})
+
+    return df_bancos_sin_responder

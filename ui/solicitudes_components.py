@@ -12,35 +12,9 @@ from data.data_models import SolicitudesSchema
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums
+from modules.gest_sols import subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
-
-# Función para Reiniciar los Filtros de Solicitudes en el Session State
-def reiniciar_filtros_solicitudes(method: Literal['reset','basic']) -> None:
-    """
-    Reinicia los filtros de solicitudes en el estado de la sesión.
-    Esta función elimina las claves relacionadas con los filtros de solicitudes del estado de la sesión.
-    """
-    # Lista de claves a reiniciar del Session State
-    keys_to_remove = [
-        "tipo_solicitud_gestion_input",
-        "aliado_solicitud_gestion_input",
-        "estado_solicitud_gestion_input",
-        "ejecutivo_solicitud_gestion_input",
-        "persona_solicitud_gestion_input",
-        "banco_solicitud_gestion_input",
-        "id_solicitud_gestion_input",
-        "cedula_solicitud_gestion_input",
-        "id_deuda_solicitud_gestion_input",
-    ]
-    for key in keys_to_remove:
-        st.session_state[key] = None
-    # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
-    if method == 'basic':
-        st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
-
-    # Cambiam el Session_State de 
 
 # Función para Mostrar los Filtros Generales de una Solicitud
 def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
@@ -54,6 +28,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
         st.button(
             label="Reiniciar Filtros (Total)",
             key="reiniciar_filtros_solicitudes_total",
+            type="secondary",
             on_click=reiniciar_filtros_solicitudes,
             args=('reset',),
             help="Haga clic para reiniciar todos los filtros de solicitudes.",
@@ -63,6 +38,7 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
         usar_basico = st.button(
             label="Reiniciar Filtros (Básico)",
             key="reiniciar_filtros_solicitudes_basico",
+            type="primary",
             on_click=reiniciar_filtros_solicitudes,
             args=('basic',),
             help="Haga clic para reiniciar los filtros de solicitudes de forma básica.",
@@ -283,6 +259,9 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Ahora Agregamos la Fecha_Respuesta a hoy en estos momentos
     solicitud_respuesta["Fecha_Respuesta"] = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+
+    # Actualizamos el Ejecutivo de la Solicitud Respuesta con el Nombre si existe, de lo contrario el Correo
+    solicitud_respuesta["Ejecutivo"] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
 
     st.markdown("### **ℹ️ Información de la Solicitud**")
     # Paso 1: Escogencia de Aliado, Estado de Solicitud y (Llamada )

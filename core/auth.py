@@ -90,6 +90,10 @@ def get_user_role(email: str) -> str:
         st.stop()
     # Obtenemos la Fila
     user_row = user_row.iloc[0]
+
+    # Guardamos el Nombre del Usuario en el Session State
+    st.session_state['user_name'] = user_row['Nombre']
+
     # Ahora, si 'Es_Negociador' es True, entonces devolvemos 'nego'
     if user_row['Es_Negociador']:
         return 'nego'
