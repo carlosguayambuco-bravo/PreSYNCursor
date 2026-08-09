@@ -23,13 +23,14 @@ class SolicitudesSchema(pa.DataFrameModel):
     Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
     Ejecutivo: str = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
     Metadata_Solicitud: str  # Es un JSON que contiene:
-    # - Estado de Comité: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
-    # - Estado de Ilocalizable: int (0: Esperando Respuesta, 1: Aprobado, 2: Rechazado)
-    # - Pago Total Obligatorio: bool
-    # - Metodo de Pago: str ('Efectivo-Cheque','PSE','Transferencia')
+    # - Estado_Comite: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
+    # - Estado_Titular_Ilocalizable: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
+    # - Pago_Total_Obligatorio: bool
+    # - Metodo_Pago: str ('Efectivo-Cheque','PSE','Transferencia')
     # - Comentario Ejecutivo: str
     # - Comentario Negociador: str
-    # - Fecha Llamada: str (YYYY-MM-DD HH:MM:SS)
+    # - Fue_Llamada: bool
+    # - Id_Acuerdo_Pago: str
     Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
     Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
     Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
@@ -147,6 +148,7 @@ class HeadCountSchema(pa.DataFrameModel):
     ID_Empleado: str = pa.Field(unique=True)  # Aseguramos que ID_Empleado sea único
     Nombre: str
     Nombre_Empleo: str
+    Lider: str
     Estado: str
     Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,12}$")  # Validación de cédula
     Es_Negociador: bool

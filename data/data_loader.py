@@ -447,10 +447,11 @@ def load_headcount_negociacion() -> DataFrame[HeadCountSchema]:
         'job_title': 'Nombre_Empleo',
         'status': 'Estado',
         'cedula': 'Cedula',
+        'leader': 'Lider'
     })
 
     # Dejamos solo las Columnas Necesarias
-    hc_negociacion_df = hc_negociacion_df[['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado', 'Cedula']]
+    hc_negociacion_df = hc_negociacion_df[['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado', 'Cedula','Lider']]
 
     # Quitamos Datos con NaN
     hc_negociacion_df = hc_negociacion_df.dropna(subset=['Correo', 'ID_Empleado', 'Nombre', 'Nombre_Empleo', 'Estado'])

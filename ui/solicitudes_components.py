@@ -13,12 +13,12 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import add_metadata_to_uploaded_pdf, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes, generate_plantilla_serie_acuerdo
+from modules.gest_sols import add_metadata_to_uploaded_pdf, es_solicitud_sin_responder, obtener_mascara_aprobacion_necesaria, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
-# Función para Mostrar los Filtros Generales de una Solicitud
-def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+# Función para Mostrar los Filtros Generales de una Solicitud (Versión Ejecutivo)
+def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
 
     solicitudes_copy = solicitudes_df.copy()  # Creamos una copia del DataFrame para no modificar el original
 
@@ -28,9 +28,9 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     with colResetTotal:
         st.button(
             label="Reiniciar Filtros (Total)",
-            key="reiniciar_filtros_solicitudes_total",
+            key="reiniciar_filtros_solicitudes_ejecutivo_total",
             type="secondary",
-            on_click=reiniciar_filtros_solicitudes,
+            on_click=reiniciar_filtros_solicitudes_ejecutivo,
             args=('reset',),
             help="Haga clic para reiniciar todos los filtros de solicitudes.",
         )
@@ -38,9 +38,9 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     with colResetBasico:
         usar_basico = st.button(
             label="Reiniciar Filtros (Básico)",
-            key="reiniciar_filtros_solicitudes_basico",
+            key="reiniciar_filtros_solicitudes_ejecutivo_basico",
             type="primary",
-            on_click=reiniciar_filtros_solicitudes,
+            on_click=reiniciar_filtros_solicitudes_ejecutivo,
             args=('basic',),
             help="Haga clic para reiniciar los filtros de solicitudes de forma básica.",
         )
@@ -199,6 +199,180 @@ def mostrar_filtros_generales_solicitud(*, solicitudes_df: DataFrame[Solicitudes
     else:
         # Ordenamos los más antiguos primero
         solicitudes_df = solicitudes_df.sort_values(by="Timestamp", ascending=True)
+
+    # Por Último devolvemos el DataFrame de Solicitudes filtrado
+    return solicitudes_df
+
+# Función Auxiliar para mostrar filtros generales de Solicitudes (Versión Negociador)
+def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+
+    # Si no hay Solicitudes, no hacemos nada
+    if solicitudes_df.empty:
+        st.warning("No hay solicitudes disponibles para mostrar. Sube una Solicitud", icon="⚠️")
+        return solicitudes_df
+
+    # Paso 1: Filtros Generales
+    # Se van a tener estos Filtros: Toggles (Sin Responder, Aprobación y Ordenamiento por Fecha)
+    # Nombre Cliente, Tipo de Soliciutd, Estado Solicitud, Aliado
+    
+    # Creamos las Columnas
+    colCliente, colTipoSolicitud, colEstado, colAliado, colToggles = st.columns(5, vertical_alignment="center", border=True)
+
+    with colCliente:
+        clientes_posibles = list(solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Nombre_Cliente", "Desconocido")).unique())
+        cliente_seleccionado = st.selectbox(
+            label="**👤 Nombre del Cliente**",
+            options=["Todos"] + clientes_posibles,
+            index=0,
+            key="cliente_solicitud_nego_input",
+            help="Seleccione el nombre del cliente que desea filtrar",
+        )
+
+    with colTipoSolicitud:
+        tipos_posibles = list(solicitudes_df["Tipo_Solicitud"].unique())
+        tipo_seleccionado = st.selectbox(
+            label="**📋 Tipo de Solicitud**",
+            options=["Todos"] + tipos_posibles,
+            index=0,
+            key="tipo_solicitud_nego_input",
+            help="Seleccione el tipo de solicitud que desea filtrar",
+        )
+
+    with colEstado:
+        estados_posibles = list(solicitudes_df["Estado_Solicitud"].unique())
+        estado_seleccionado = st.selectbox(
+            label="**📊 Estado de Solicitud**",
+            options=["Todos"] + estados_posibles,
+            index=0,
+            key="estado_solicitud_nego_input",
+            help="Seleccione el estado de la solicitud que desea filtrar",
+        )
+
+    with colAliado:
+        aliados_posibles = list(solicitudes_df["Casa_Cobro"].unique())
+        aliado_seleccionado = st.selectbox(
+            label="**🥸 Aliado - Casa de Cobro**",
+            options=["Todos"] + aliados_posibles,
+            index=0,
+            key="aliado_solicitud_nego_input",
+            help="Seleccione el aliado que desea filtrar",
+        )
+
+    with colToggles:
+        toggle_sin_responder = st.toggle(
+            label="**📌 Sin Responder**",
+            value=True,
+            key="toggle_sin_responder_solicitud_nego_input",
+            help="Filtra las solicitudes que aún no han sido respondidas.",
+        )
+        toggle_aprobacion = st.toggle(
+            label="**🔐 Requiere Aprobación**",
+            value=False,
+            key="toggle_aprobacion_solicitud_nego_input",
+            help="Filtra las solicitudes que están en estado de aprobación.",
+        )
+        toggle_orden_fecha = st.toggle(
+            label="**🗓️ Ordenar de Primera a Última**",
+            value=False,
+            key="toggle_orden_fecha_solicitud_nego_input",
+            help="Ordena las solicitudes por fecha de creación.",
+        )
+
+    # Ahora Creamos un Expander para los Filtros Específicos, que son:
+    # ID_Solicitud, Referencia, Id_Deuda, Banco, Persona que Solicito
+    with st.expander("✴️ **Filtros Específicos**", expanded=False):
+        # Creamos las 5 Columnas
+        colID, colPersona, colReferencia, colIdDeuda, colBanco = st.columns(5, vertical_alignment="center")
+
+        with colID:
+            ids_posibles = list(solicitudes_df["ID_Solicitud"].unique())
+            id_solicitud = st.selectbox(
+                label="**🆔 ID de Solicitud**",
+                options=["Todos"] + ids_posibles,
+                index=0,
+                key="id_solicitud_nego_input",
+                help="Ingrese el ID de la solicitud que desea filtrar",
+            )
+
+        with colPersona:
+            personas_posibles = list(solicitudes_df["Correo"].unique())
+            persona_solicitud = st.selectbox(
+                label="**📧 Persona que Solicita**",
+                options=["Todos"] + personas_posibles,
+                index=0,
+                key="persona_solicitud_nego_input",
+                help="Ingrese el correo de la persona que solicita la solicitud que desea filtrar",
+            )
+
+        with colReferencia:
+            referencias_posibles = list(solicitudes_df["Referencia"].unique())
+            referencia_solicitud = st.selectbox(
+                label="**📄 Referencia**",
+                options=["Todos"] + referencias_posibles,
+                index=0,
+                key="referencia_solicitud_nego_input",
+                help="Ingrese la referencia de la solicitud que desea filtrar",
+            )
+
+        with colIdDeuda:
+            # Obtenemos los IDs de Deuda posibles
+            id_deuda_posibles = list(solicitudes_df["Ids_Deuda"].str.split("-").explode().unique())
+            id_deuda_solicitud = st.multiselect(
+                label="**🆔 ID de Deuda**",
+                options=["Todos"] + id_deuda_posibles,
+                default=["Todos"],
+                key="id_deuda_solicitud_nego_input",
+                help="Ingrese el ID de la deuda que desea filtrar",
+            )
+
+        with colBanco:
+            bancos_posibles = list(solicitudes_df["Datos_Solicitud"].apply(lambda l: [x.get("Banco", "Desconocido") for x in l]).explode().unique())
+            banco_solicitud = st.multiselect(
+                label="**🏦 Banco**",
+                options=["Todos"] + bancos_posibles,
+                default=["Todos"],
+                key="banco_solicitud_nego_input",
+                help="Ingrese el nombre del banco que desea filtrar",
+            )
+
+    # Siguiente: Aplicar los Filtros Seleccionados al DataFrame de Solicitudes
+    if cliente_seleccionado != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Nombre_Cliente", "Desconocido")) == cliente_seleccionado]
+
+    if tipo_seleccionado != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Tipo_Solicitud"] == tipo_seleccionado]
+
+    if estado_seleccionado != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"] == estado_seleccionado]
+
+    if aliado_seleccionado != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"] == aliado_seleccionado]
+
+    if id_solicitud != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["ID_Solicitud"] == id_solicitud]
+
+    if persona_solicitud != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Correo"] == persona_solicitud]
+
+    if referencia_solicitud != "Todos":
+        solicitudes_df = solicitudes_df[solicitudes_df["Referencia"] == referencia_solicitud]
+
+    if not ("Todos" in id_deuda_solicitud) and id_deuda_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Ids_Deuda"].str.contains("|".join(id_deuda_solicitud))]
+
+    if not ("Todos" in banco_solicitud) and banco_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Datos_Solicitud"].apply(lambda l: [x.get("Banco", "Desconocido") for x in l]).apply(lambda x: any(b in x for b in banco_solicitud))]
+
+    # Siguiente: Aplicar la Lógica de los Toggles
+    if toggle_sin_responder:
+        maskNotAnswered = obtener_mascara_sin_responder(solicitudes_df)
+        solicitudes_df = solicitudes_df[maskNotAnswered]
+    if toggle_aprobacion:
+        maskAprobacion = obtener_mascara_aprobacion_necesaria(solicitudes_df)
+        solicitudes_df = solicitudes_df[maskAprobacion]
+
+    # Aplicamos el Ordenamiento por Fecha
+    solicitudes_df = solicitudes_df.sort_values(by=["Fecha_Respuesta","Timestamp"], ascending=toggle_orden_fecha, na_position="last")
 
     # Por Último devolvemos el DataFrame de Solicitudes filtrado
     return solicitudes_df
@@ -869,10 +1043,58 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 st.markdown("**Vista Previa del Acuerdo de Pago:**")
                 st.pdf(bytes_acuerdo)
             else:
-                st.warning("No hay un acuerdo de pago disponible para mostrar.")
+                st.warning("No hay un acuerdo de pago disponible para mostrar. Hay que subir o generar el acuerdo de pago en PDF.", icon="⚠️")
+                st.stop()
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
+
+
+# Función Auxiliar para Mostrar los Detalles de los Solicitudes de Deuda
+def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series) -> None:
+    # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
+    hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
+
+    if hay_cuotas:
+        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
+    else:
+        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([3,3,3,6,6], vertical_alignment="top")
+
+    with colIdDeuda:
+        st.markdown("**ID de Deuda:**")
+    with colBanco:
+        st.markdown("**Banco:**")
+    with colNumCredito:
+        st.markdown("**Número Crédito:**")
+    with colActualizaciones:
+        st.markdown("**Descuentos en Base:**")
+    with colMontoPropuesto:
+        st.markdown("**Monto Propuesto:**")
+    if hay_cuotas:
+        with colCuotas: # type: ignore
+            st.markdown("**Cuotas:**")
+
+    for d in solicitud["Datos_Solicitud"]:
+        with colIdDeuda:
+            st.code(d['Id_Deuda'], language="text")
+        with colBanco:
+            st.code(d['Banco'], language="text")
+        with colNumCredito:
+            st.code(d['Numero_Credito'], language="text")
+        with colActualizaciones:
+            datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
+            with st.popover("**Descuentos en Base {}**".format(d['Id_Deuda']), icon="👌"):
+                if datos_act:
+                    for descuento in datos_act:
+                        st.markdown(descuento)
+                else:
+                    st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
+            st.space("xxsmall")
+        with colMontoPropuesto:
+            st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
+        if hay_cuotas:
+            with colCuotas: # type: ignore
+                st.code(d['Num_Cuotas'], language="text")
 
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
@@ -891,7 +1113,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         st.space("small")
 
 
-        # Creamos 5 Columnas para Mostrar: ID, Monto Total, Persona que Solicita ,Bancos y Cedula
+        # Creamos 4 Columnas para Mostrar: Monto Total, Persona que Solicita ,Bancos y Cedula
         colMonto, colPersona, colBancos, colCedula = st.columns([2,2,2,2],vertical_alignment="center")
 
         with colMonto:
@@ -967,8 +1189,13 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                     delta_arrow="off",
                 )
 
+        # Si hay Comentario_Negociador en la Metadata, se muestra
+        if "Comentario_Negociador" in solicitud["Metadata_Solicitud"]:
+            comentario_negociador = solicitud["Metadata_Solicitud"]["Comentario_Negociador"]
+            if comentario_negociador:
+                st.info("**Comentario del Negociador:** {}".format(comentario_negociador), icon="ℹ️")
+
         # Paso Siguiente: Mostrar las Caracteristicas por Deuda de la Solicitud
-        st.space("xsmall")
         st.divider()
 
         # Creamos un Botón para Copiar los Datos de la Solicitud
@@ -985,65 +1212,10 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
-
-            if hay_cuotas:
-                colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
-            else:
-                colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([3,3,3,6,6], vertical_alignment="top")
-
-            with colIdDeuda:
-                st.markdown("**ID de Deuda:**")
-            with colBanco:
-                st.markdown("**Banco:**")
-            with colNumCredito:
-                st.markdown("**Número Crédito:**")
-            with colActualizaciones:
-                st.markdown("**Descuentos en Base:**")
-            with colMontoPropuesto:
-                st.markdown("**Monto Propuesto:**")
-            if hay_cuotas:
-                with colCuotas: # type: ignore
-                    st.markdown("**Cuotas:**")
-
-            for d in solicitud["Datos_Solicitud"]:
-
-                txt_debt = "ID Deuda: {}\nBanco: {}\nNúmero de Crédito: {}\nMonto Propuesto: ${:,.2f}".format(
-                    d['Id_Deuda'], d['Banco'], d['Numero_Credito'], d['Monto_Propuesto']
-                )
-
-                with colIdDeuda:
-                    st.code(d['Id_Deuda'], language="text")
-                with colBanco:
-                    st.code(d['Banco'], language="text")
-                with colNumCredito:
-                    st.code(d['Numero_Credito'], language="text")
-                with colActualizaciones:
-                    datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
-                    with st.popover("**Descuentos en Base {}**".format(d['Id_Deuda']), icon="👌"):
-                        if datos_act:
-                            for descuento in datos_act:
-                                st.markdown(descuento)
-                        else:
-                            st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
-                    st.space("xxsmall")
-                with colMontoPropuesto:
-                    st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
-                if hay_cuotas:
-                    with colCuotas: # type: ignore
-                        st.code(d['Cuotas'], language="text")
+            mostrar_detalles_solicitudes_deuda(solicitud=solicitud)
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
-        # Definimos si la Solicitud se ha respondido o no, para deshabilitar el botón si ya fue respondida
-        solicitud_ya_gestionada = (solicitud["Estado_Solicitud"] in ESTADOS_RESPONDIBLES_SOLICITUD)
-        # Verificamos que no esté en el BannedManager
-        banned_manager = get_banned_manager()
-        if banned_manager.is_banned(solicitud["ID_Solicitud"]):
-            solicitud_ya_gestionada = True
-        # Verificamos que no este a la espera de comité o ilocalizable, ya que no se puede responder hasta que se resuelva el estado
-        if (solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1) or (solicitud["Metadata_Solicitud"].get("Estado_Ilocalizable", 0) == 1):
-            solicitud_ya_gestionada = True
-
-        st.space("xsmall")
+        solicitud_ya_gestionada = es_solicitud_sin_responder(solicitud)
 
         # Creamos Dos Columnas: Una para Informacion y otra para el Boton
         colInfo, colBoton = st.columns([4, 2], vertical_alignment="top")
@@ -1063,3 +1235,98 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 help="Haga clic para responder la solicitud. Esta acción abrirá un diálogo donde podrá ingresar su respuesta.",
             ):
                 dialog_respuesta_solicitud(solicitud=solicitud)
+
+# Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
+def mostrar_datos_solicitud_negociador(*,solicitud):
+    # Definimos el Nombre del Expander
+    expander_name = "**{tipo}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
+        tipo=solicitud["Tipo_Solicitud"],
+        fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
+        estado=solicitud["Estado_Solicitud"],
+        aliado=solicitud["Casa_Cobro"]
+    )
+
+    with st.expander(expander_name, expanded=False):
+        # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
+        colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], vertical_alignment="center")
+        with colReferencia:
+            st.metric(
+                label="**Referencia:**", value=solicitud["Referencia"],
+                help = "La Referencia del Cliente que realizó la solicitud",
+                delta = "CC: {}".format(solicitud["Cedula"]) if pd.notnull(solicitud["Cedula"]) else "No Brindada",
+                delta_color="gray",
+                delta_arrow="off",
+                border=True,
+            )
+        with colMontoTotal:
+            monto_total_solicitud = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
+            monto_actual_solicitud = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"])
+            st.metric(
+                label="**Monto Total:**", value="${:,.0f}".format(monto_total_solicitud),
+                help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
+                delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
+                border=True,
+            )
+        with colEjecutivo:
+            st.metric(
+                label="**Ejecutivo:**",
+                value=solicitud["Ejecutivo"] if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar",
+                help = "El Ejecutivo que atiende la solicitud",
+                border=True,
+            )
+        with colFechaSolicitud:
+            dias_delta = getBDDaysDiffFloat(
+                                    solicitud["Timestamp"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+                                )
+            st.metric(
+                label="**Fecha de Solicitud:**",
+                value=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
+                help = "La fecha y hora en que se realizó la solicitud",
+                delta = "{:.1f} días atrás".format(dias_delta),
+                border=True,
+                delta_color="red" if dias_delta > 7 else "green",
+                delta_arrow="down" if dias_delta > 7 else "up",
+            )
+
+
+        # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
+        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
+            # Dos Columnas: Una para Fecha de Pago y otra para Tipo de Pago
+            colFechaPago, colTipoPago = st.columns(2, vertical_alignment="center")
+
+            with colFechaPago:
+                fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
+                falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+                st.metric(
+                    label="**Fecha de Pago:**", value=fecha_pago,
+                    help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
+                    border=True,
+                    delta_color = "red" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "green",
+                    delta_arrow="down" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "up",
+                    delta = "{} {:.1f} días hábiles".format("Faltan" if falta_para_pago > 0 else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
+                )
+
+            with colTipoPago:
+                st.metric(
+                    label="**Tipo de Pago:**", value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
+                    help = "El Método de Pago del Acuerdo u Oferta de Pago",
+                    border=True,
+                    delta="Pagar la Solicitud :D",
+                    delta_color="gray",
+                    delta_arrow="off",
+                )
+
+        # Añadimos un Divisor
+        st.divider()
+
+        # Mostramos los Datos por Deuda de la Solicitud en un Expander
+        with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
+            mostrar_detalles_solicitudes_deuda(solicitud=solicitud)
+
+        # Siguiente: Verificamos si la Solicitud ya esta respondida
+        solicitud_ya_gestionada = es_solicitud_sin_responder(solicitud)
+
+        # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
+        if not solicitud_ya_gestionada:
+            st.info("Esta solicitud aún no ha sido respondida. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
+            return 

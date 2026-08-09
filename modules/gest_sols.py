@@ -11,7 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_current_month_solicitudes, load_masivas
+from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_masivas
 from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_to_google_sheets, upload_addendum_debt
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
@@ -111,6 +111,23 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
 
     return descuentos_formateados
 
+def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
+    """
+    Determina si una solicitud específica no ha sido respondida.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        bool: True si la solicitud no ha sido respondida, False en caso contrario.
+    """
+    maskSinTocar = solicitud["Estado_Solicitud"] == "Sin Tocar"
+    maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité"
+    maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
+    banner_manager = get_banned_manager()
+    maskSinBan = not banner_manager.is_banned(solicitud["ID_Solicitud"])
+    return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan
+
 def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
     """
     Filtra las solicitudes que no han sido respondidas.
@@ -127,6 +144,21 @@ def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) 
     banner_manager = get_banned_manager()
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
     return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
+
+def obtener_mascara_aprobacion_necesaria(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
+    """
+    Filtra las solicitudes que requieren aprobación.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+
+    Returns:
+        pd.Series: Serie con las solicitudes que requieren aprobación.
+    """
+    maskAprobComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
+    maskAprobIlocalizado = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
+    maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
+    return (maskAprobComite | maskAprobIlocalizado) & maskSinResponder
 
 def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
     """
@@ -160,6 +192,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         solicitud_to_update['Estado_Solicitud'] = solicitud['Estado_Solicitud']
         solicitud_to_update['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
         solicitud_to_update['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
+        solicitud_to_update['Metadata_Solicitud']['Pago_Total_Obligatorio'] = solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', True)
         solicitud_to_update['JSON_Respuesta'] = solicitud.get('JSON_Respuesta', '')
         solicitud_to_update['Fecha_Limite_Pago'] = solicitud.get('Fecha_Limite_Pago', '')
         solicitud_to_update['Ejecutivo'] = solicitud['Ejecutivo']
@@ -173,8 +206,10 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         updated_ids.add(solicitud_to_update['ID_Solicitud'])
         need_update_rows.append(solicitud_to_update)
 
-    # Paso 3: Actualizar Sub-Solicitdues si no es necesario el Pago Total Obligatorio
-    if solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False):
+    # Verificación Intermedia: Si la solicitud no es Exitosa, no hay posiblidad de Sub-Solicitudes, entonces se deja así
+
+    # Paso 3: Actualizar Sub-Solicitdues si no es necesario el Pago Total Obligatorio y si es Exitosa y si es Validación
+    if solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] == 'Validación':
 
         # Paso 3.1 Obtener las Sub-Solicitudes de la Solicitud Actual
         # Estás son solicitudes que tienen un subconjunto de los IDs de Deuda de la Solicitud Actual
@@ -194,6 +229,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             sub_solicitud['Estado_Solicitud'] = solicitud['Estado_Solicitud']
             sub_solicitud['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
             sub_solicitud['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
+            sub_solicitud['Metadata_Solicitud']['Pago_Total_Obligatorio'] = solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', True)
             sub_solicitud['JSON_Respuesta'] = [ d for d in solicitud['JSON_Respuesta'] if d['Id_Deuda'] in ids_solicitud_actual ]
             sub_solicitud['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
             sub_solicitud['Ejecutivo'] = solicitud['Ejecutivo']
@@ -426,7 +462,7 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: DataFrame[SolicitudesSche
     return upload_massive_solicitudes_to_google_sheets(plantilla_df)
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
-def reiniciar_filtros_solicitudes(method: Literal['reset','basic'] = "reset") -> None:
+def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "reset") -> None:
     """
     Reinicia los filtros de solicitudes en el estado de la sesión.
     Esta función elimina las claves relacionadas con los filtros de solicitudes del estado de la sesión.
@@ -466,6 +502,52 @@ def reiniciar_filtros_solicitudes(method: Literal['reset','basic'] = "reset") ->
     # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
     if method == 'basic':
         st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
+
+def reiniciar_filtros_solicitudes_negociadores() -> None:
+    """
+    Reinicia los filtros de solicitudes para los negociadores en el estado de la sesión.
+    Esta función elimina las claves relacionadas con los filtros de solicitudes del estado de la sesión.
+    """
+    # Lista de claves a reiniciar del Session State
+    keys_to_remove = [
+        "tipo_solicitud_gestion_input",
+        "aliado_solicitud_gestion_input",
+        "estado_solicitud_gestion_input",
+        "ejecutivo_solicitud_gestion_input",
+        "persona_solicitud_gestion_input",
+        "banco_solicitud_gestion_input",
+        "id_solicitud_gestion_input",
+        "cedula_solicitud_gestion_input",
+        "id_deuda_solicitud_gestion_input",
+    ]
+    keys_to_list = [
+        'id_deuda_solicitud_nego_input',
+        'banco_solicitud_nego_input',
+    ]
+    keys_to_Todos = [
+        'cliente_solicitud_nego_input',
+        'tipo_solicitud_nego_input',
+        'estado_solicitud_nego_input',
+        'aliado_solicitud_nego_input',
+        'id_solicitud_nego_input',
+        'persona_solicitud_nego_input',
+        'referencia_solicitud_nego_input',
+    ]
+    keys_to_False = [
+        'toggle_sin_responder_solicitud_nego_input',
+        'toggle_aprobacion_solicitud_nego_input',
+        'toggle_orden_fecha_solicitud_nego_input',
+    ]
+
+    for key in keys_to_remove:
+        if key in keys_to_list:
+            st.session_state[key] = []
+        elif key in keys_to_Todos:
+            st.session_state[key] = "Todos"
+        elif key in keys_to_False:
+            st.session_state[key] = False
+        else:
+            st.session_state[key] = None
 
 def obtener_promedio_tiempos_respuesta(solicitudes_df: DataFrame[SolicitudesSchema]) -> dict[str, float|dict]:
     """
@@ -622,3 +704,39 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
 
     # Paso 6: Retornar los bytes del PDF con los metadatos agregados
     return output_pdf_bytes.getvalue()
+
+# Función Auxiliar para obtener el DF de las Solicitudes del Usario Actual
+def filtrar_solicitudes_por_usuario_actual(solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+    """
+    Filtra las solicitudes para obtener solo aquellas que pertenecen al usuario actual.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+
+    Returns:
+        DataFrame[SolicitudesSchema]: DataFrame filtrado con las solicitudes del usuario actual.
+    """
+    # Paso 1: Obtener el correo del usuario actual desde el estado de la sesión
+    user_email = st.session_state.get('user_email', '')
+
+    # Paso 2: Filtrar las solicitudes por el correo del usuario actual
+    maskEmail = (solicitudes_df['Correo'] == user_email)
+
+    # Paso 3: Cargar el Headcount de Negociación
+    headcount_df = load_headcount_negociacion()
+
+    # Paso 4: Obtener la Fila para este correo
+    user_row = headcount_df[headcount_df['Correo'] == user_email]
+    if user_row.empty:
+        return solicitudes_df[maskEmail]  # Retornamos el DataFrame filtrado sin cambios
+
+    user_row = user_row.iloc[0]
+
+    # Paso 5: Obtener el Nombre del Negociador
+    nombre_negociador = user_row['Nombre']
+    # Paso 6: Buscar los Correos donde el Lider tenga ese nombre
+    lider_emails = headcount_df[headcount_df['Nombre'] == nombre_negociador]['Correo'].tolist()
+    # Añadimos esos correos a la máscara de filtrado
+    maskLider = solicitudes_df['Correo'].isin(lider_emails)
+
+    return solicitudes_df[maskEmail | maskLider]

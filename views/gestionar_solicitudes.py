@@ -8,8 +8,8 @@ from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
-from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_df_bancos_sin_responder, obtener_mascara_sin_responder, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, reiniciar_filtros_solicitudes, subir_masivo_plantilla_solicitudes
-from ui.solicitudes_components import mostrar_filtros_generales_solicitud, mostrar_datos_solicitud_ejecutivo
+from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_df_bancos_sin_responder, obtener_mascara_sin_responder, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
+from ui.solicitudes_components import mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo
 
 # Paso 1: Inicializar el State Session de Cantidad_Solicitudes_Ver
 if not ('Cantidad_Solicitudes_Ver' in st.session_state):
@@ -17,12 +17,12 @@ if not ('Cantidad_Solicitudes_Ver' in st.session_state):
 # Paso 2: Cargar las Solicitudes MEC
 solicitudes_df = load_current_month_solicitudes()
 # Paso 3: Mostrar los Filtros Generales de Solicitud
-solicitudes_filtered = mostrar_filtros_generales_solicitud(solicitudes_df=solicitudes_df)
+solicitudes_filtered = mostrar_filtros_generales_solicitud_ejecutivo(solicitudes_df=solicitudes_df)
 
 def on_change_tab_gest_sols():
     # Si el cambio de pestaña fue a la pestaña de Dashboard, reiniciamos los filtros de solicitudes
     if st.session_state['tabs_gestionar_solicitudes'] == "😎 Resumen de Solicitudes":
-        reiniciar_filtros_solicitudes(method='reset')
+        reiniciar_filtros_solicitudes_ejecutivo(method='reset')
 
 # Vamos a Crear 2 Sub-Páginas: Una para mostrar las Soliciutdes y otra para mostrar un Dashboard
 tabSolicitudes, tabResumenSolicitudes = st.tabs(
@@ -152,7 +152,7 @@ with tabResumenSolicitudes:
     st.subheader("📊 Solicitudes Sin Responder")
 
     if solicitudes_sin_responder > 0:
-        # La Estructura será: 3 Columnas: Casa de Cobro, Banco y Ejecutivo
+        # La Estructura será: 2 Columnas: Casa de Cobro y Ejecutivo
         colCasaCobro, colEjecutivo = st.columns([4,3], gap = "small", vertical_alignment="center", border=True,)
 
         with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
@@ -191,5 +191,24 @@ with tabResumenSolicitudes:
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
             st.plotly_chart(fig_ejecutivo, use_container_width=True)
+
+        # Ahora Mostramos un Gráfico de Barras para Bancos
+        st.subheader("🏦 Por Banco")
+        df_bancos_sin_responder = obtener_df_bancos_sin_responder(solicitudes_filtered)
+        fig_bancos = px.bar(
+            df_bancos_sin_responder,
+            x='Banco',
+            y='count',
+            title='Solicitudes Sin Responder por Banco',
+            color='count',
+            color_continuous_scale=px.colors.sequential.Viridis
+        )
+        # Ahora Renombramos los ejes para que sean más claros
+        fig_bancos.update_layout(
+            xaxis_title="Banco",
+            yaxis_title="Cantidad de Solicitudes Sin Responder",
+            coloraxis_colorbar=dict(title="Cantidad")
+        )
+        st.plotly_chart(fig_bancos, use_container_width=True)
     else:
         st.success("No hay solicitudes sin responder en este momento.", icon="✅")
