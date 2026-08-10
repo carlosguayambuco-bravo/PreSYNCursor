@@ -7,13 +7,15 @@ import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
 from st_copy_to_clipboard import st_copy_to_clipboard
+import plotly.graph_objects as go
+import plotly.express as px
 # Librerías Locales
 from data.data_models import SolicitudesSchema
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import add_metadata_to_uploaded_pdf, es_solicitud_sin_responder, obtener_mascara_aprobacion_necesaria, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -1096,6 +1098,49 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series) -> None:
             with colCuotas: # type: ignore
                 st.code(d['Num_Cuotas'], language="text")
 
+# Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud por Deuda
+def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
+    # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Monto Solicitado, Monto Respuesta, Cuotas (Si Hay)
+    hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["JSON_Respuesta"])
+    if hay_cuotas:
+        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
+    else:
+        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta = st.columns([3,3,3,6,6], vertical_alignment="top")
+
+    with colIdDeuda:
+        st.markdown("**ID de Deuda:**")
+    with colBanco:
+        st.markdown("**Banco:**")
+    with colNumCredito:
+        st.markdown("**Número de Crédito:**")
+    with colMontoSolicitado:
+        st.markdown("**Monto Solicitado:**")
+    with colMontoRespuesta:
+        st.markdown("**Monto Respuesta:**")
+    if hay_cuotas:
+        with colCuotas: # type: ignore
+            st.markdown("**Cuotas:**")
+    
+    for d in solicitud["Datos_Solicitud"]:
+        # Definimos el Monto Solicitado Original de la Deuda
+        monto_respuesta = next((item['Monto_Propuesto'] for item in solicitud["JSON_Respuesta"] if item["Id_Deuda"] == d["Id_Deuda"]), "N/A")
+        with colIdDeuda:
+            st.code(d['Id_Deuda'], language="text")
+        with colBanco:
+            st.code(d['Banco'], language="text")
+        with colNumCredito:
+            st.code(d['Numero_Credito'], language="text")
+        with colMontoSolicitado:
+            st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
+        with colMontoRespuesta:
+            if monto_respuesta != "N/A":
+                st.code("${:,.2f}".format(monto_respuesta), language="text")
+            else:
+                st.code("No Brindado", language="text")
+        if hay_cuotas:
+            with colCuotas: # type: ignore
+                st.code(d['Num_Cuotas'], language="text")
+
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
@@ -1247,6 +1292,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
     )
 
     with st.expander(expander_name, expanded=False):
+
         # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
         colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], vertical_alignment="center")
         with colReferencia:
@@ -1288,6 +1334,14 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 delta_arrow="down" if dias_delta > 7 else "up",
             )
 
+        # Mostramos el Comentario del Negociadoor y el Ejecutivo
+        comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "")
+        comentario_ejecutivo = solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "")
+
+        if comentario_negociador:
+            st.info("**Comentario del Negociador:** {}".format(comentario_negociador), icon="ℹ️")
+        if comentario_ejecutivo:
+            st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
 
         # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
@@ -1297,13 +1351,14 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colFechaPago:
                 fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
                 falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+                ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
                 st.metric(
                     label="**Fecha de Pago:**", value=fecha_pago,
                     help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
                     border=True,
-                    delta_color = "red" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "green",
-                    delta_arrow="down" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "up",
-                    delta = "{} {:.1f} días hábiles".format("Faltan" if falta_para_pago > 0 else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
+                    delta_color = "red" if ya_paso_fecha else "green",
+                    delta_arrow="down" if ya_paso_fecha else "up",
+                    delta = "{} {:.1f} días hábiles".format("Faltan" if ya_paso_fecha else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
                 )
 
             with colTipoPago:
@@ -1330,3 +1385,407 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if not solicitud_ya_gestionada:
             st.info("Esta solicitud aún no ha sido respondida. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
             return 
+
+        # Siguiente verificación: SI neceista aprobación es necesario que se aprube o desapruebe
+        if es_solicitud_aprobacion_necesaria(solicitud):
+            # Definimos el Tipo de AProbación
+            tipo_aprobacion = obtener_tipo_aprobacion_necesaria(solicitud)
+            st.info("Esta solicitud requiere aprobación de tipo: {}".format(tipo_aprobacion), icon="ℹ️")
+
+            # Creamos 2 Botones: Uno para Aprobar y Otro para Desaprobar la Solicitud
+            colAprobar, colDesaprobar = st.columns(2, vertical_alignment="center", gap="large")
+
+            with colAprobar:
+                hacer_aprobacion = st.button(
+                    label="Aprobar Solicitud",
+                    key="aprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
+                    help="Haga clic para aprobar la solicitud. Esta acción enviará la solicitud al aliado.",
+                    type="primary",
+                )
+            with colDesaprobar:
+                hacer_desaprobacion = st.button(
+                    label="Desaprobar Solicitud",
+                    key="desaprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
+                    help="Haga clic para desaprobar la solicitud. Esta acción enviará la solicitud al aliado.",
+                    type="secondary",
+                )
+
+            if hacer_aprobacion or hacer_desaprobacion:
+                aprobado = hacer_aprobacion
+                # Subimos la Aprobación
+                success = actualizar_aprobacion_necesaria(
+                    solicitud=solicitud,
+                    tipo_aprobacion=tipo_aprobacion,
+                    aprobado=aprobado
+                )
+                if success:
+                    st.toast("Solicitud {} {} correctamente.".format(solicitud['ID_Solicitud'], "aprobada" if aprobado else "desaprobada"), icon="✅")
+                    st.rerun()
+                else:
+                    st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aprobado else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
+
+            # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
+            return 
+
+        # Siguiente Paso: Mostramos la Info de la Respuesta
+        st.subheader("**📋 Información de la Respuesta a la Solicitud**")
+
+        # Creamos Columnas para Mostrar: Fecha de Respuesta, Estado de Solicitud, Monto Respuesta (Si Hay)
+        if solicitud["Estado_Solicitud"] == "Exitosa":
+            colFechaResp, colEstadoSolicitud, colMontoRespuesta = st.columns([2, 2, 2], vertical_alignment="center")
+        else:
+            colFechaResp, colEstadoSolicitud = st.columns([2, 2], vertical_alignment="center")
+
+        with colFechaResp:
+            st.metric(
+                label="**Fecha de Respuesta:**",
+                value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
+                help = "La Fecha de Respuesta de la solicitud",
+                border=True,
+            )
+        with colEstadoSolicitud:
+            st.metric(
+                label="**Estado de Solicitud:**",
+                value=solicitud["Estado_Solicitud"],
+                help = "El Estado de la solicitud",
+                border=True,
+            )
+
+        if solicitud["Estado_Solicitud"] == "Exitosa":
+            with colMontoRespuesta: # type: ignore
+                deudas_respuesta = solicitud.get("JSON_Respuesta", [])
+                deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
+                monto_total_respuesta = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
+                monto_actual_respuesta = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
+                st.metric(
+                    label="**Monto Respuesta:**", value="${:,.0f}".format(monto_total_respuesta),
+                    help = "El monto total de la respuesta (La Suma de los Valores Propuestos por Deuda) que se envió al Aliado",
+                    delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
+                    border=True,
+                )
+
+        # Mostramos los Comentarios del Ejecutivo otra vez
+        comentario_ejecutivo = solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "")
+        if comentario_ejecutivo:
+            st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
+
+        # Si la Solicitud no es Exitosa, todo finaliza aquí
+        if solicitud["Estado_Solicitud"] != "Exitosa":
+            return
+
+        # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
+        with st.expander("**💰 Detalles de la Respuesta por Deuda**", expanded=True):
+            mostrar_detalles_respuesta_deuda(solicitud=solicitud)
+
+        # Siguiente: Mostrar Fecha_Limite_Pago, Pago Total Obligatorio y Metodo de Pago si no es Validación
+        if solicitud["Tipo_Solicitud"] == "Validación":
+            colFechaLimite, colPagoTotal = st.columns([2, 2, 2], vertical_alignment="center")
+        else:
+            colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], vertical_alignment="center")
+
+        with colFechaLimite:
+            fecha_limite_pago = solicitud.get("Fecha_Limite_Pago", None)
+            st.metric(
+                label="**Fecha Límite de Pago:**",
+                value=fecha_limite_pago.strftime("%Y-%m-%d") if pd.notnull(fecha_limite_pago) else "No Brindada",
+                help = "La Fecha Límite de Pago de la solicitud",
+                border=True,
+            )
+        with colPagoTotal:
+            aplica_pto = solicitud.get("Metadata_Solicitud", {}).get("Pago_Total_Obligatorio", False)
+            st.metric(
+                label="**Pago Total Obligatorio:**",
+                value="Sí" if aplica_pto else "No",
+                help = "El monto total obligatorio de la solicitud",
+                delta= "Necesitas pagar todas las deudas" if aplica_pto else "Puedes pagar deudas de forma individual",
+                border=True,
+            )
+        if solicitud["Tipo_Solicitud"] != "Validación":
+            with colMetodoPago:  # type: ignore
+                st.metric(
+                    label="**Método de Pago:**",
+                    value=solicitud.get("Metodo_Pago", "No Brindado"),
+                    help = "El Método de Pago de la solicitud",
+                    border=True,
+                )
+
+        # Siguiente: Mostrar el Botón al acuerdo de Pago
+        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
+            file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
+            if file_id is None:
+                st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
+            else:
+                url_acuerdo_pago = obtener_link_acuerdo_pago(file_id)
+                st.link_button(
+                    label="📄 Descargar Acuerdo de Pago",
+                    url=url_acuerdo_pago,
+                    type="primary",
+                    help="Haga clic para ver el Acuerdo de Pago en PDF.",
+                )
+
+# Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
+def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesSchema]) -> None:
+    st.title("😎 Resumen de Solicitudes")
+    # Siguiente: Definición del Dashboard de Resumen de Solicitudes
+    st.divider()
+    # Creamos 2 Columnas: 1 para Pie Graph de Estados de Solicitudes y otra para KPIs
+    colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center", border=True,)
+
+    with colPieEstados:
+        st.subheader("📊 Distribución de Estados de Solicitudes")
+        # Creamos el Gráfico de Pie de Estados de Solicitudes
+        fig_pie_estados = px.pie(
+            solicitudes,
+            names='Estado_Solicitud',
+            title='Distribución de Estados de Solicitudes',
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        st.plotly_chart(fig_pie_estados, use_container_width=True)
+
+    with colKPIs:
+        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes)
+        respuestas_por_dia = obtener_promedio_respuestas_dia(solicitudes)
+        mascara_sin_responder = obtener_mascara_sin_responder(solicitudes)
+        solicitudes_sin_responder = mascara_sin_responder.sum()
+
+        st.subheader("📈 KPIs de Respuesta")
+        st.metric(
+            "**Solicitudes Sin Responder**", 
+            f"{solicitudes_sin_responder} Solicitudes", 
+            delta_color= "green" if solicitudes_sin_responder <= 20 else "red"
+        )
+        st.metric(
+            "**Promedio de Tiempo de Respuesta (días)**", 
+            f"{tiempos_respuesta['promedio_general']:.2f}",
+            delta_color= "green" if tiempos_respuesta['promedio_general'] <= 3 else "red" # type: ignore
+        )
+        st.metric(
+            "**Respuestas por Día**",
+            f"{respuestas_por_dia['promedio_general']:.2f}",
+            delta_color= "green" if respuestas_por_dia['promedio_general'] >= 10 else "red" # type: ignore
+        )
+        # Ahora Creamos 2 Popovers para mostrar los detalles de los KPIs
+        with st.popover("Respuestas por Día", icon="ℹ️"):
+            st.write("**Promedio de Respuestas por Día por Tipo de Solicitud:**")
+            for dia, respuestas in respuestas_por_dia['promedio_por_tipo'].items(): # type: ignore
+                st.write(f"- {dia}: {respuestas:.2f} respuestas")
+
+        with st.popover("Tiempos por Tipo", icon="ℹ️"):
+            st.write("**Promedio de Tiempo de Respuesta por Tipo de Solicitud:**")
+            for tipo, tiempo in tiempos_respuesta['promedio_por_tipo'].items(): # type: ignore
+                st.write(f"- {tipo}: {tiempo:.2f} días")
+
+    # Añadimos un Divisor
+    st.divider()
+    # Siguientes Gráficos: Solicitudes sin Responder por Casa de Cobro, Bancos y Ejecutivos
+    st.subheader("📊 Solicitudes Sin Responder")
+
+    if solicitudes_sin_responder > 0:
+        # La Estructura será: 2 Columnas: Casa de Cobro y Ejecutivo
+        colCasaCobro, colEjecutivo = st.columns([4,3], gap = "small", vertical_alignment="center", border=True,)
+
+        with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
+            st.subheader("🥸 Por Casa de Cobro")
+
+            fig_casa_cobro = px.bar(
+                solicitudes.groupby('Casa_Cobro').size().reset_index(name='count'),
+                x='count',                # Swapped: values on x-axis
+                y='Casa_Cobro',            # Swapped: labels on y-axis
+                title='Solicitudes Sin Responder por Casa de Cobro',
+                color='count',
+                orientation='h',           # Set orientation to horizontal
+                color_continuous_scale=px.colors.sequential.Viridis
+            )
+
+            # Ahora Renombramos los ejes para que sean más claros
+            fig_casa_cobro.update_layout(
+                xaxis_title="Cantidad de Solicitudes Sin Responder",
+                yaxis_title="Casa de Cobro",
+                coloraxis_colorbar=dict(title="Cantidad")
+            )
+
+            # Optional: To keep the top category at the top of the chart
+            fig_casa_cobro.update_layout(yaxis={'categoryorder': 'total ascending'})
+
+            st.plotly_chart(fig_casa_cobro, use_container_width=True)
+
+        with colEjecutivo: # Mostramos un Pie
+            st.subheader("👨‍💼 Por Ejecutivo")
+            fig_ejecutivo = px.pie(
+                solicitudes.groupby('Ejecutivo').size().reset_index(name='count'),
+                names='Ejecutivo',
+                values='count',
+                title='Solicitudes Sin Responder por Ejecutivo',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            st.plotly_chart(fig_ejecutivo, use_container_width=True)
+
+        # Ahora Mostramos un Gráfico de Barras para Bancos
+        st.subheader("🏦 Por Banco")
+        df_bancos_sin_responder = obtener_df_bancos_sin_responder(solicitudes)
+        fig_bancos = px.bar(
+            df_bancos_sin_responder,
+            x='Banco',
+            y='count',
+            title='Solicitudes Sin Responder por Banco',
+            color='count',
+            color_continuous_scale=px.colors.sequential.Viridis
+        )
+        # Ahora Renombramos los ejes para que sean más claros
+        fig_bancos.update_layout(
+            xaxis_title="Banco",
+            yaxis_title="Cantidad de Solicitudes Sin Responder",
+            coloraxis_colorbar=dict(title="Cantidad")
+        )
+        st.plotly_chart(fig_bancos, use_container_width=True)
+    else:
+        st.success("No hay solicitudes sin responder en este momento.", icon="✅")
+
+# Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
+def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[SolicitudesSchema]) -> None:
+    # Paso 1: Verificar si hay solicitudes
+    if solicitudes.empty:
+        st.info("No hay solicitudes disponibles para mostrar.", icon="ℹ️")
+        return
+
+    # Paso 2: Sacar KPIs
+    # Número de Solicitudes (con Exitosas y % de Exitosas)
+    num_solicitudes = len(solicitudes)
+    num_solicitudes_exitosas = np.sum(solicitudes["Estado_Solicitud"] == "Exitosa")
+    porcentaje_exitosas = (num_solicitudes_exitosas / num_solicitudes) * 100 if num_solicitudes > 0 else 0
+    # Numero de Deudas y Clientes Solicitados
+    num_deudas = solicitudes["Datos_Solicitud"].apply(len).sum()
+    num_clientes = solicitudes["Referencia"].nunique()
+    # Días hasta Respuesta Promedio y Días hasta Respuesta Máximo
+    # Primero Obtenemos las Solicitudes con Respuesta
+    sols_respondidas = ~obtener_mascara_sin_responder(solicitudes)
+    if sols_respondidas.any():
+        dias_respuesta = getBDDaysDiffFloat_vectorized(
+            solicitudes.loc[sols_respondidas, "Timestamp"],
+            solicitudes.loc[sols_respondidas, "Fecha_Respuesta"]
+        )
+        dias_respuesta_promedio = dias_respuesta.mean()
+        dias_respuesta_maximo = dias_respuesta.max()
+    else:
+        dias_respuesta_promedio = 0
+        dias_respuesta_maximo = 0
+
+    st.subheader("**📊 Resumen de Solicitudes del Negociador**")
+
+    # Paso 3: Mostrar los KPIs en 3 Columnas
+    colNumSols, colNumDeudas, colDiasRespuesta = st.columns(3, vertical_alignment="center")
+
+    with colNumSols:
+        st.metric(
+            label="**Número de Solicitudes:**",
+            value=num_solicitudes,
+            help="El número total de solicitudes realizadas por el negociador.",
+            delta="{} Exitosas ({:.1f}% Exitosas)".format(num_solicitudes_exitosas, porcentaje_exitosas),
+            delta_color="green" if porcentaje_exitosas > 50 else "yellow" if porcentaje_exitosas > 20 else "red",
+            border=True,
+        )
+    with colNumDeudas:
+        st.metric(
+            label="**Deudas y Clientes Solicitados:**",
+            value="{} deudas, {} clientes".format(num_deudas, num_clientes),
+            help="El número total de deudas e clientes incluidos en las solicitudes.",
+            delta = "{} deudas por cliente en promedio".format(num_deudas / num_clientes) if num_clientes > 0 else "N/A",
+            delta_color="gray",
+            delta_arrow="off",
+            border=True
+        )
+    with colDiasRespuesta:
+        st.metric(
+            label="**Días hasta Respuesta (Promedio):**",
+            value="{:.1f}".format(dias_respuesta_promedio),
+            delta = "{:.1f} días máximo".format(dias_respuesta_maximo),
+            delta_color = "green" if dias_respuesta_promedio < 3 else "yellow" if dias_respuesta_promedio < 7 else "red",
+            delta_arrow = "up" if dias_respuesta_promedio > 7 else "down",
+            help="El número promedio de días que toma responder a una solicitud.",
+            border=True
+        )
+
+    st.divider()
+
+    st.subheader("**📋 Solicitudes en el Tiempo**")
+
+    # Vamos a Crear un Gráfico de lineas que va a acumular:
+    # Solicitudes realizadas (por Timestamp)
+    # Solicitudes respondidas (por Fecha_Respuesta)
+
+    # Paso 1: Crear los DFs separados por Timestamp y Fecha_Respuesta
+    df_timestamp = solicitudes[solicitudes["Timestamp"].notna()].copy()
+    df_respuesta = solicitudes[solicitudes["Fecha_Respuesta"].notna()].copy()
+
+    # Paso 2: Ordenar los Dfs por sus fechas
+    df_timestamp = df_timestamp.sort_values(by="Timestamp")
+    df_respuesta = df_respuesta.sort_values(by="Fecha_Respuesta")
+
+    # Paso 3: Crear el Conteo Acumulado
+    df_timestamp['Conteo'] = 1
+    df_respuesta['Conteo'] = 1
+    df_timestamp_acumulado = df_timestamp.groupby(df_timestamp["Timestamp"].dt.date).agg({"Conteo": "sum"}).cumsum().reset_index()
+    df_respuesta_acumulado = df_respuesta.groupby(df_respuesta["Fecha_Respuesta"].dt.date).agg({"Conteo": "sum"}).cumsum().reset_index()
+
+    # Paso 4: Crear el Gráfico de Líneas con Plotly
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=df_timestamp_acumulado["Timestamp"],
+        y=df_timestamp_acumulado["Conteo"],
+        mode='lines+markers',
+        name='Solicitudes Realizadas',
+        line=dict(color='blue', width=2),
+        marker=dict(size=6),
+        fill='tozeroy',
+        fillcolor='rgba(0, 0, 255, 0.1)'
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df_respuesta_acumulado["Fecha_Respuesta"],
+        y=df_respuesta_acumulado["Conteo"],
+        mode='lines+markers',
+        name='Solicitudes Respondidas',
+        line=dict(color='green', width=2),
+        marker=dict(size=6),
+        fill='tozeroy',
+        fillcolor='rgba(0, 255, 0, 0.1)',
+    ))
+
+    # Actualizamos el Layout del Gráfico
+    fig.update_layout(
+        title='Solicitudes en el Tiempo',
+        xaxis_title='Fecha',
+        yaxis_title='Número de Solicitudes',
+        legend_title='Tipo de Solicitud',
+        hovermode='x unified'
+    )
+
+    # Mostramos el Gráfico
+    st.plotly_chart(fig, width="stretch")
+
+    st.divider()
+
+    st.subheader("**🤖 Distribución de Solicitudes**")
+
+    # Vamos a Crear 2 Pies
+    # Pie de Estados de Solicitud
+    # Pie de Aliados Solicitados (Casa_Cobro)
+
+    colEstados, colAliados = st.columns(2, vertical_alignment="center", border=True)
+
+    with colEstados:
+        # Creamos un Pie de Estados de Solicitud
+        estados_counts = solicitudes["Estado_Solicitud"].value_counts()
+        fig_estados = go.Figure(data=[go.Pie(labels=estados_counts.index, values=estados_counts.values, hole=.3)])
+        fig_estados.update_layout(title_text='Distribución de Estados de Solicitud')
+        st.plotly_chart(fig_estados, width="stretch")
+
+    with colAliados:
+        # Creamos un Pie de Aliados Solicitados (Casa_Cobro)
+        aliados_counts = solicitudes["Casa_Cobro"].value_counts()
+        fig_aliados = go.Figure(data=[go.Pie(labels=aliados_counts.index, values=aliados_counts.values, hole=.3)])
+        fig_aliados.update_layout(title_text='Distribución de Aliados Solicitados')
+        st.plotly_chart(fig_aliados, width="stretch")

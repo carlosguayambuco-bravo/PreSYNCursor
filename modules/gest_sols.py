@@ -128,6 +128,38 @@ def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     maskSinBan = not banner_manager.is_banned(solicitud["ID_Solicitud"])
     return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan
 
+def es_solicitud_aprobacion_necesaria(solicitud: pd.Series) -> bool:
+    """
+    Determina si una solicitud específica requiere aprobación.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        bool: True si la solicitud requiere aprobación, False en caso contrario.
+    """
+    maskAprobComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité"
+    maskAprobIlocalizado = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
+    maskSinResponder = es_solicitud_sin_responder(solicitud)
+    return (maskAprobComite or maskAprobIlocalizado) and maskSinResponder
+
+def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal["Comité", "Titular Ilocalizable"]]:
+    """
+    Determina el tipo de aprobación necesaria para una solicitud específica.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        Optional[Literal["Comité", "Titular Ilocalizable"]]: Tipo de aprobación necesaria ("Comité" o "Titular Ilocalizable") o None si no requiere aprobación.
+    """
+    if solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité":
+        return "Comité"
+    elif solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable":
+        return "Titular Ilocalizable"
+    else:
+        return None
+
 def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
     """
     Filtra las solicitudes que no han sido respondidas.
@@ -159,6 +191,29 @@ def obtener_mascara_aprobacion_necesaria(solicitudes_df: DataFrame[SolicitudesSc
     maskAprobIlocalizado = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
     return (maskAprobComite | maskAprobIlocalizado) & maskSinResponder
+
+def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Optional[Literal["Comité", "Titular Ilocalizable"]], aprobado: bool) -> bool:
+    """
+    Actualiza el estado de aprobación de una solicitud específica.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+        aprobado (bool): Indica si la solicitud fue aprobada o no.
+
+    Returns:
+        bool: True si la actualización fue exitosa, False en caso contrario.
+    """
+    # Si no se conoce el tipo de aprobación se muestra un error y ya
+    if tipo_aprobacion is None:
+        st.error("No se puede actualizar la aprobación de la solicitud porque no se conoce el tipo de aprobación necesaria.")
+        return False
+    # Paso 1: Definir la Llave de Metadata según el Tipo de Aprobación
+    llave_metadata = "Estado_Comite" if tipo_aprobacion == "Comité" else "Estado_Titular_Ilocalizable"
+    # Paso 2: Actualizar el Estado (2 = Aprobado, 3 = Desaprobado)
+    solicitud['Metadata_Solicitud'][llave_metadata] = 2 if aprobado else 3
+
+    # Paso 3: Actualizar la Solicitud en Google Sheets
+    return update_solicitud_in_google_sheets(solicitud=solicitud)
 
 def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
     """
@@ -375,6 +430,18 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     )
     # Paso 5: Retornar el ID del Archivo Subido
     return file_id
+
+def obtener_link_acuerdo_pago(file_id: str) -> str:
+    """
+    Obtiene el enlace de visualización de un archivo en Google Drive.
+
+    Args:
+        file_id (str): ID del archivo en Google Drive.
+
+    Returns:
+        str: Enlace de visualización del archivo.
+    """
+    return f"https://drive.google.com/open?id={file_id}"
 
 def generar_plantilla_masiva_solicitudes(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.DataFrame:
     """
@@ -705,6 +772,39 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
     # Paso 6: Retornar los bytes del PDF con los metadatos agregados
     return output_pdf_bytes.getvalue()
 
+# Función Auxiliar para obtener los Correos a Cargo del Usuario Actual
+def obtener_correos_a_cargo_usuario_actual() -> list[str]:
+    """
+    Obtiene los correos electrónicos de los usuarios a cargo del usuario actual.
+
+    Returns:
+        list[str]: Lista de correos electrónicos de los usuarios a cargo.
+    """
+    # Paso 1: Obtener el correo del usuario actual desde el estado de la sesión
+    user_email = st.session_state.get('user_email', '')
+
+    # Paso 2: Cargar el Headcount de Negociación
+    headcount_df = load_headcount_negociacion()
+
+    # Si el Usuario es Administrador, se retornan todos los Correos
+    if st.session_state.get('user_role', '') == 'admin':
+        return headcount_df['Correo'].unique().tolist()
+
+    # Paso 3: Obtener la Fila para este correo
+    user_row = headcount_df[headcount_df['Correo'] == user_email]
+    if user_row.empty:
+        return []  # Retornamos una lista vacía si no se encuentra el usuario
+
+    user_row = user_row.iloc[0]
+
+    # Paso 4: Obtener el Nombre del Negociador
+    nombre_negociador = user_row['Nombre']
+
+    # Paso 5: Buscar los Correos donde el Lider tenga ese nombre
+    lider_emails = headcount_df[headcount_df['Nombre'] == nombre_negociador]['Correo'].tolist()
+
+    return lider_emails
+
 # Función Auxiliar para obtener el DF de las Solicitudes del Usario Actual
 def filtrar_solicitudes_por_usuario_actual(solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
     """
@@ -716,27 +816,10 @@ def filtrar_solicitudes_por_usuario_actual(solicitudes_df: DataFrame[Solicitudes
     Returns:
         DataFrame[SolicitudesSchema]: DataFrame filtrado con las solicitudes del usuario actual.
     """
-    # Paso 1: Obtener el correo del usuario actual desde el estado de la sesión
-    user_email = st.session_state.get('user_email', '')
-
-    # Paso 2: Filtrar las solicitudes por el correo del usuario actual
-    maskEmail = (solicitudes_df['Correo'] == user_email)
-
-    # Paso 3: Cargar el Headcount de Negociación
-    headcount_df = load_headcount_negociacion()
-
-    # Paso 4: Obtener la Fila para este correo
-    user_row = headcount_df[headcount_df['Correo'] == user_email]
-    if user_row.empty:
-        return solicitudes_df[maskEmail]  # Retornamos el DataFrame filtrado sin cambios
-
-    user_row = user_row.iloc[0]
-
-    # Paso 5: Obtener el Nombre del Negociador
-    nombre_negociador = user_row['Nombre']
-    # Paso 6: Buscar los Correos donde el Lider tenga ese nombre
-    lider_emails = headcount_df[headcount_df['Nombre'] == nombre_negociador]['Correo'].tolist()
-    # Añadimos esos correos a la máscara de filtrado
-    maskLider = solicitudes_df['Correo'].isin(lider_emails)
-
-    return solicitudes_df[maskEmail | maskLider]
+    # Paso 1: Obtener los Correos a Cargo del Usuario Actual
+    correos_a_cargo = obtener_correos_a_cargo_usuario_actual()
+    # Paso 2: Filtrar el DataFrame de Solicitudes por los Correos a Cargo
+    mask_correos_lider = solicitudes_df['Correo'].isin(correos_a_cargo)
+    mask_correos_usuario_actual = (solicitudes_df['Correo'] == st.session_state.get('user_email', ''))
+    mask_final = (mask_correos_lider | mask_correos_usuario_actual)
+    return solicitudes_df[mask_final]

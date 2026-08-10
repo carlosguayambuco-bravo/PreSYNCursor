@@ -9,11 +9,11 @@ from st_copy_to_clipboard import st_copy_to_clipboard
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
 from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_df_bancos_sin_responder, obtener_mascara_sin_responder, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
-from ui.solicitudes_components import mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo
+from ui.solicitudes_components import mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo
 
-# Paso 1: Inicializar el State Session de Cantidad_Solicitudes_Ver
-if not ('Cantidad_Solicitudes_Ver' in st.session_state):
-    st.session_state['Cantidad_Solicitudes_Ver'] = 10  # Valor por defecto
+# Paso 1: Inicializar el State Session de Cantidad_Solicitudes_Ver_Ejecutivo
+if not ('Cantidad_Solicitudes_Ver_Ejecutivo' in st.session_state):
+    st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'] = 10  # Valor por defecto
 # Paso 2: Cargar las Solicitudes MEC
 solicitudes_df = load_current_month_solicitudes()
 # Paso 3: Mostrar los Filtros Generales de Solicitud
@@ -42,9 +42,9 @@ with tabSolicitudes:
         st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
         st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
 
-    # Paso 4: Mostrar los Primeros N Registros de Solicitudes según la Cantidad_Solicitudes_Ver
+    # Paso 4: Mostrar los Primeros N Registros de Solicitudes según la Cantidad_Solicitudes_Ver_Ejecutivo
     principal_sol = True
-    for _, solicitud in solicitudes_filtered.head(st.session_state['Cantidad_Solicitudes_Ver']).iterrows():
+    for _, solicitud in solicitudes_filtered.head(st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo']).iterrows():
         mostrar_datos_solicitud_ejecutivo(solicitud=solicitud, is_main = principal_sol)
         principal_sol = False  # Solo la primera solicitud es la principal, las demás son secundarias
 
@@ -55,7 +55,7 @@ with tabSolicitudes:
         mas_solicitudes =  st.button("Cargar Más Solicitudes",
             key="cargar_mas_solicitudes_button",
             help="Haz clic para cargar más solicitudes",
-            disabled = len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver'],
+            disabled = len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'],
             type="secondary"
         )
     with colDescargar:
@@ -91,124 +91,8 @@ with tabSolicitudes:
             st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
 
     if mas_solicitudes:
-        st.session_state['Cantidad_Solicitudes_Ver'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar
+        st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar
 
 # Ahora Creamos el Dashboard
 with tabResumenSolicitudes:
-    st.title("😎 Resumen de Solicitudes")
-    # Siguiente: Definición del Dashboard de Resumen de Solicitudes
-    st.divider()
-    # Creamos 2 Columnas: 1 para Pie Graph de Estados de Solicitudes y otra para KPIs
-    colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center", border=True,)
-
-    with colPieEstados:
-        st.subheader("📊 Distribución de Estados de Solicitudes")
-        # Creamos el Gráfico de Pie de Estados de Solicitudes
-        fig_pie_estados = px.pie(
-            solicitudes_filtered,
-            names='Estado_Solicitud',
-            title='Distribución de Estados de Solicitudes',
-            hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Set3
-        )
-        st.plotly_chart(fig_pie_estados, use_container_width=True)
-
-    with colKPIs:
-        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes_filtered)
-        respuestas_por_dia = obtener_promedio_respuestas_dia(solicitudes_filtered)
-        mascara_sin_responder = obtener_mascara_sin_responder(solicitudes_filtered)
-        solicitudes_sin_responder = mascara_sin_responder.sum()
-
-        st.subheader("📈 KPIs de Respuesta")
-        st.metric(
-            "**Solicitudes Sin Responder**", 
-            f"{solicitudes_sin_responder} Solicitudes", 
-            delta_color= "green" if solicitudes_sin_responder <= 20 else "red"
-        )
-        st.metric(
-            "**Promedio de Tiempo de Respuesta (días)**", 
-            f"{tiempos_respuesta['promedio_general']:.2f}",
-            delta_color= "green" if tiempos_respuesta['promedio_general'] <= 3 else "red" # type: ignore
-        )
-        st.metric(
-            "**Respuestas por Día**",
-            f"{respuestas_por_dia['promedio_general']:.2f}",
-            delta_color= "green" if respuestas_por_dia['promedio_general'] >= 10 else "red" # type: ignore
-        )
-        # Ahora Creamos 2 Popovers para mostrar los detalles de los KPIs
-        with st.popover("Respuestas por Día", icon="ℹ️"):
-            st.write("**Promedio de Respuestas por Día por Tipo de Solicitud:**")
-            for dia, respuestas in respuestas_por_dia['promedio_por_tipo'].items(): # type: ignore
-                st.write(f"- {dia}: {respuestas:.2f} respuestas")
-
-        with st.popover("Tiempos por Tipo", icon="ℹ️"):
-            st.write("**Promedio de Tiempo de Respuesta por Tipo de Solicitud:**")
-            for tipo, tiempo in tiempos_respuesta['promedio_por_tipo'].items(): # type: ignore
-                st.write(f"- {tipo}: {tiempo:.2f} días")
-
-    # Añadimos un Divisor
-    st.divider()
-    # Siguientes Gráficos: Solicitudes sin Responder por Casa de Cobro, Bancos y Ejecutivos
-    st.subheader("📊 Solicitudes Sin Responder")
-
-    if solicitudes_sin_responder > 0:
-        # La Estructura será: 2 Columnas: Casa de Cobro y Ejecutivo
-        colCasaCobro, colEjecutivo = st.columns([4,3], gap = "small", vertical_alignment="center", border=True,)
-
-        with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
-            st.subheader("🥸 Por Casa de Cobro")
-
-            fig_casa_cobro = px.bar(
-                solicitudes_filtered.groupby('Casa_Cobro').size().reset_index(name='count'),
-                x='count',                # Swapped: values on x-axis
-                y='Casa_Cobro',            # Swapped: labels on y-axis
-                title='Solicitudes Sin Responder por Casa de Cobro',
-                color='count',
-                orientation='h',           # Set orientation to horizontal
-                color_continuous_scale=px.colors.sequential.Viridis
-            )
-
-            # Ahora Renombramos los ejes para que sean más claros
-            fig_casa_cobro.update_layout(
-                xaxis_title="Cantidad de Solicitudes Sin Responder",
-                yaxis_title="Casa de Cobro",
-                coloraxis_colorbar=dict(title="Cantidad")
-            )
-
-            # Optional: To keep the top category at the top of the chart
-            fig_casa_cobro.update_layout(yaxis={'categoryorder': 'total ascending'})
-
-            st.plotly_chart(fig_casa_cobro, use_container_width=True)
-
-        with colEjecutivo: # Mostramos un Pie
-            st.subheader("👨‍💼 Por Ejecutivo")
-            fig_ejecutivo = px.pie(
-                solicitudes_filtered.groupby('Ejecutivo').size().reset_index(name='count'),
-                names='Ejecutivo',
-                values='count',
-                title='Solicitudes Sin Responder por Ejecutivo',
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            st.plotly_chart(fig_ejecutivo, use_container_width=True)
-
-        # Ahora Mostramos un Gráfico de Barras para Bancos
-        st.subheader("🏦 Por Banco")
-        df_bancos_sin_responder = obtener_df_bancos_sin_responder(solicitudes_filtered)
-        fig_bancos = px.bar(
-            df_bancos_sin_responder,
-            x='Banco',
-            y='count',
-            title='Solicitudes Sin Responder por Banco',
-            color='count',
-            color_continuous_scale=px.colors.sequential.Viridis
-        )
-        # Ahora Renombramos los ejes para que sean más claros
-        fig_bancos.update_layout(
-            xaxis_title="Banco",
-            yaxis_title="Cantidad de Solicitudes Sin Responder",
-            coloraxis_colorbar=dict(title="Cantidad")
-        )
-        st.plotly_chart(fig_bancos, use_container_width=True)
-    else:
-        st.success("No hay solicitudes sin responder en este momento.", icon="✅")
+    mostrar_resumen_solicitudes_ejecutivo(solicitudes=solicitudes_filtered)

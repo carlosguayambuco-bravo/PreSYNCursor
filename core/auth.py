@@ -123,6 +123,10 @@ def create_user_from_session():
         st.session_state["user_email"] = user_info.get("email", "Unknown")
 
         user_role = get_user_role(user_info.get("email", "Unknown"))
+
+        # Guardamos el user_role en el Session_State
+        st.session_state["user_role"] = user_role
+
         return User(
             name=user_info.get("name", "Unknown"),
             email=user_info.get("email", "Unknown"),

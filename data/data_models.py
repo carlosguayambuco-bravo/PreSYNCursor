@@ -35,6 +35,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
     Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
     JSON_Respuesta: str = pa.Field(nullable=True)  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
+    # Tiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas
 
     class Config:
         strict = True  # Validación estricta de columnas
