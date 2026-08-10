@@ -824,3 +824,53 @@ def filtrar_solicitudes_por_usuario_actual(solicitudes_df: DataFrame[Solicitudes
     mask_correos_usuario_actual = (solicitudes_df['Correo'] == st.session_state.get('user_email', ''))
     mask_final = (mask_correos_lider | mask_correos_usuario_actual)
     return solicitudes_df[mask_final]
+
+# Función Auxiliar para crear la plantilla de solicitud de acuerdo de pago
+def crear_plantilla_solicitud_acuerdo_pago(
+        *,
+        solicitud: pd.Series,
+        selected_ids: list[str],
+        fecha_pago: pd.Timestamp,
+        tipo_pago: str,
+    ) -> pd.Series:
+    """Crea la Plantilla de Solicitud a subir a partir de la validación exitosa
+
+    Args:
+        solicitud (pd.Series): Los Datos de la Solicitud actual
+        selected_ids (list[str]): Lista de los ID_Deuda a subir para la nueva solicitud
+
+    Returns:
+        pd.Series: La plantilla de la nueva solicitud de acuerdo de pago.
+    """
+    # Paso 1: Definir los Valores Iniciales
+    solicitud_template = {
+        'Referencia': solicitud['Referencia'],
+        'Cedula': solicitud['Cedula'],
+        'Ids_Deuda': '-'.join(selected_ids),
+        'Casa_Cobro': solicitud['Casa_Cobro'],
+        'Tipo_Solicitud': 'Acuerdo de Pago',
+        'Datos_Solicitud': json.dumps(
+        [
+            {
+                'Id_Deuda': deuda['Id_Deuda'],
+                'Banco': deuda['Banco'],
+                'Numero_Credito': deuda['Numero_Credito'],
+                'Monto_Propuesto': deuda.get('Monto_Propuesto', 0),
+                'Num_Cuotas': deuda.get('Num_Cuotas', 1)
+            }
+            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", []))
+            if (deuda.get('Monto_Propuesto', 0) > 0) and (deuda['Id_Deuda'] in selected_ids)
+        ]
+        ),
+        'Ejecutivo': solicitud['Ejecutivo'],
+        'Fecha_Pago': fecha_pago.strftime('%Y-%m-%d'),
+        'Tipo_Pago': tipo_pago,
+        'Metadata_Solicitud': json.dumps({
+            'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
+            'Comentario_Negociador': solicitud['Metadata_Solicitud'].get('Comentario_Negociador', ''),
+            'Origen_Solicitud': solicitud['ID_Solicitud'],
+        }),
+        'Estado_Solicitud': 'Sin Tocar',
+    }
+
+    return pd.Series(solicitud_template)

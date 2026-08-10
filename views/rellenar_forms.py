@@ -346,7 +346,7 @@ response_info = {
     'Tipo_Pago': tipo_pago if tipo_pago else '',
     'Metadata_Solicitud': json.dumps({
         'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0].title(),
-        'Comentario_Adicional': comentario_adicional,
+        'Comentario_Negociador': comentario_adicional,
     }, ensure_ascii=False),
     'Estado_Solicitud': 'Sin Tocar',
 }

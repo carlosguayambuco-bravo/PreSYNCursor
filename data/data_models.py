@@ -31,6 +31,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     # - Comentario Negociador: str
     # - Fue_Llamada: bool
     # - Id_Acuerdo_Pago: str
+    # - Origen_Acuerdo: str (ID_Solicitud)
     Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
     Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
     Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
