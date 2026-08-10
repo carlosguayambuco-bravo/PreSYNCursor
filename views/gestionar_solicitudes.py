@@ -3,8 +3,8 @@
 from io import BytesIO
 # Librerías de Terceros
 import plotly.express as px
+from st_copy import copy_button
 import streamlit as st
-from st_copy_to_clipboard import st_copy_to_clipboard
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
@@ -79,7 +79,7 @@ with tabSolicitudes:
             )
 
     with colCopiar:
-        if st_copy_to_clipboard(
+        if copy_button(
             get_massive_solicitudes_txt(solicitudes_df=solicitudes_filtered),
             key="copiar_solicitudes_masivas_button",
         ):

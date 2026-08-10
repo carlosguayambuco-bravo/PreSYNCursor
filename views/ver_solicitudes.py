@@ -27,11 +27,6 @@ if not ('Cantidad_Solicitudes_Ver_Negociador' in st.session_state):
 # --- Elementos de la Interfaz de Usuario ---
 solicitudes_filtered = mostrar_filtros_generales_solicitud_negociador(solicitudes_df=solicitudes_df)
 
-# Si no hay solicitudes, mostramos un mensaje
-if solicitudes_filtered.empty:
-    st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
-    st.stop()
-
 # Añadimos un Divisor
 st.divider()
 
@@ -42,6 +37,11 @@ tabVer, tabResumen = st.tabs(
     key="tabs_ver_solicitudes",
     width="stretch",
 )
+
+# Si no hay solicitudes, mostramos un mensaje
+if solicitudes_filtered.empty:
+    st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
+    st.stop()
 
 with tabVer:
     st.title("📄 Ver Solicitudes")
@@ -90,7 +90,7 @@ with tabResumen:
 
     # Mostramos un Resumen general de las solicitudes 
     st.header("📊 Resumen General de Solicitudes")
-    mostrar_resumen_solicitudes_negociador(solicitudes=solicitudes_df)
+    mostrar_resumen_solicitudes_negociador(solicitudes=solicitudes_df, nego_name='general', show_header=False)
 
     st.divider()
 
@@ -103,7 +103,7 @@ with tabResumen:
         with st.expander(nombre_expander, expanded=False, key=key_expander):
             # Filtramos las Solicitudes por el Correo del Negociador
             solicitudes_negociador = solicitudes_df[solicitudes_df['Correo'] == correo]
-            mostrar_resumen_solicitudes_negociador(solicitudes=solicitudes_negociador)
+            mostrar_resumen_solicitudes_negociador(solicitudes=solicitudes_negociador, nego_name=nombre_negociador.replace(" ", "_").lower(), show_header=False)
 
     st.divider()
     # Siguiente: Mostramos el toggle para ver todos a mi cargo y para expandir o no todos los expanders

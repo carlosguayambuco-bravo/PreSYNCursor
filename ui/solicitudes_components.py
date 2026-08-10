@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
-from st_copy_to_clipboard import st_copy_to_clipboard
+from st_copy import copy_button
 import plotly.graph_objects as go
 import plotly.express as px
 # Librerías Locales
@@ -218,7 +218,7 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: DataFrame[
     # Nombre Cliente, Tipo de Soliciutd, Estado Solicitud, Aliado
     
     # Creamos las Columnas
-    colCliente, colTipoSolicitud, colEstado, colAliado, colToggles = st.columns(5, vertical_alignment="center", border=True)
+    colCliente, colTipoSolicitud, colEstado, colAliado, colToggles = st.columns(5, border=True)
 
     with colCliente:
         clientes_posibles = list(solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Nombre_Cliente", "Desconocido")).unique())
@@ -1247,7 +1247,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         colBotonCopy, colInfoCopy = st.columns([1, 5], vertical_alignment="top")
         solicitud_txt = get_solicitud_txt(solicitud=solicitud)
         with colBotonCopy:
-            if st_copy_to_clipboard(solicitud_txt, key="copy_solicitud_{}_info".format(solicitud['ID_Solicitud'])):
+            if copy_button(solicitud_txt, key="copy_solicitud_{}_info".format(solicitud['ID_Solicitud'])):
                 st.toast("Datos de la solicitud {} copiados al portapapeles.".format(solicitud['ID_Solicitud']), icon=":material/content_copy:")
         
         with colInfoCopy:
@@ -1378,12 +1378,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud)
 
-        # Siguiente: Verificamos si la Solicitud ya esta respondida
-        solicitud_ya_gestionada = es_solicitud_sin_responder(solicitud)
-
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
-        if not solicitud_ya_gestionada:
-            st.info("Esta solicitud aún no ha sido respondida. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
+        if es_solicitud_sin_responder(solicitud):
+            st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
             return 
 
         # Siguiente verificación: SI neceista aprobación es necesario que se aprube o desapruebe
@@ -1608,7 +1605,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
             # Optional: To keep the top category at the top of the chart
             fig_casa_cobro.update_layout(yaxis={'categoryorder': 'total ascending'})
 
-            st.plotly_chart(fig_casa_cobro, use_container_width=True)
+            st.plotly_chart(fig_casa_cobro, width='stretch', key="casa_cobro_no_response_ejecutivo")
 
         with colEjecutivo: # Mostramos un Pie
             st.subheader("👨‍💼 Por Ejecutivo")
@@ -1620,7 +1617,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
                 hole=0.4,
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
-            st.plotly_chart(fig_ejecutivo, use_container_width=True)
+            st.plotly_chart(fig_ejecutivo, width='stretch', key="ejecutivo_no_response_ejecutivo")
 
         # Ahora Mostramos un Gráfico de Barras para Bancos
         st.subheader("🏦 Por Banco")
@@ -1639,12 +1636,12 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
             yaxis_title="Cantidad de Solicitudes Sin Responder",
             coloraxis_colorbar=dict(title="Cantidad")
         )
-        st.plotly_chart(fig_bancos, use_container_width=True)
+        st.plotly_chart(fig_bancos, width='stretch', key="bancos_no_response_ejecutivo")
     else:
         st.success("No hay solicitudes sin responder en este momento.", icon="✅")
 
 # Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
-def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[SolicitudesSchema]) -> None:
+def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[SolicitudesSchema], nego_name: str, show_header: bool = True) -> None:
     # Paso 1: Verificar si hay solicitudes
     if solicitudes.empty:
         st.info("No hay solicitudes disponibles para mostrar.", icon="ℹ️")
@@ -1672,7 +1669,8 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[Solicitudes
         dias_respuesta_promedio = 0
         dias_respuesta_maximo = 0
 
-    st.subheader("**📊 Resumen de Solicitudes del Negociador**")
+    if show_header:
+        st.subheader("**📊 Resumen de Solicitudes del Negociador**")
 
     # Paso 3: Mostrar los KPIs en 3 Columnas
     colNumSols, colNumDeudas, colDiasRespuesta = st.columns(3, vertical_alignment="center")
@@ -1764,7 +1762,7 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[Solicitudes
     )
 
     # Mostramos el Gráfico
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", key=f"solicitudes_tiempo_{nego_name}")
 
     st.divider()
 
@@ -1779,13 +1777,13 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[Solicitudes
     with colEstados:
         # Creamos un Pie de Estados de Solicitud
         estados_counts = solicitudes["Estado_Solicitud"].value_counts()
-        fig_estados = go.Figure(data=[go.Pie(labels=estados_counts.index, values=estados_counts.values, hole=.3)])
+        fig_estados = go.Figure(data=[go.Pie(labels=estados_counts.index, values=estados_counts.values, hole=.4)])
         fig_estados.update_layout(title_text='Distribución de Estados de Solicitud')
-        st.plotly_chart(fig_estados, width="stretch")
+        st.plotly_chart(fig_estados, width="stretch", key=f"estados_solicitud_{nego_name}")
 
     with colAliados:
         # Creamos un Pie de Aliados Solicitados (Casa_Cobro)
         aliados_counts = solicitudes["Casa_Cobro"].value_counts()
-        fig_aliados = go.Figure(data=[go.Pie(labels=aliados_counts.index, values=aliados_counts.values, hole=.3)])
+        fig_aliados = go.Figure(data=[go.Pie(labels=aliados_counts.index, values=aliados_counts.values, hole=.4)])
         fig_aliados.update_layout(title_text='Distribución de Aliados Solicitados')
-        st.plotly_chart(fig_aliados, width="stretch")
+        st.plotly_chart(fig_aliados, width="stretch", key=f"aliados_solicitud_{nego_name}")
