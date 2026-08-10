@@ -56,7 +56,7 @@ def cleanNumber(value, default_nan: float = np.nan) -> float:
         elif ',' in clean_val and clean_val.count(',') > 1:
             # Handle "666.666.666" as 666666666
             clean_val = clean_val.replace(',','')
-        elif ',' in clean_val and clean_val.count(',') > 1:
+        elif ',' in clean_val and clean_val.count(',') == 1:
             parts = clean_val.split(',')
             # The first part can be 1-3 digits; all following parts MUST be exactly 3 digits
             if 1 <= len(parts[0]) <= 3 and all(len(s) == 3 for s in parts[1:]):

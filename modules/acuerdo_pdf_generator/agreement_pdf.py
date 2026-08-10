@@ -332,7 +332,10 @@ def _set_drawing_alpha(node: Any, alpha: float) -> None:
         _set_drawing_alpha(child, alpha)
 def _embed_metadata(pdf: bytes, payload: Mapping[str, Any]) -> bytes:
     reader, writer = PdfReader(io.BytesIO(pdf)), PdfWriter()
-    for page in reader.pages: writer.add_page(page)
+    for page in reader.pages:
+        writer.add_page(page)
     writer.add_metadata({"/Title": "Acuerdo de pago", "/Acuerdo_Info_Metadata": json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))})
-    output = io.BytesIO(); writer.write(output); return output.getvalue()
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
 def _escape(value: str) -> str: return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

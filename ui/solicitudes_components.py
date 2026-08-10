@@ -428,7 +428,6 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
 def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
 
     # Paso 1: Mostrar los Inputs del Acuerdo de Pago Generado
-
     with st.expander("**🔏 Especificaciones del Acuerdo de Pago Generado**", expanded=False):
         st.markdown("### **ℹ️ Información de la Solicitud**")
 
@@ -549,16 +548,17 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         if generar_pdf:
             with st.spinner("⚙️ Generando Acuerdo de Pago en PDF..."):
                 # Paso 1: Crear la Serie de Datos
-                serie_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud)
+                serie_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud, deudas=selected_ids)
                 # Paso 2: Obtener los Bytes del Acuerdo
                 pdf_bytes = generate_payment_agreement_pdf(agreement=serie_acuerdo, assets_dir="assets", alpha=0.10) # type: ignore
                 # Paso 3: Guardar los Bytes en el Session State
                 st.session_state[key_acuerdo] = pdf_bytes
+            st.write(type(pdf_bytes))
 
     return st.session_state.get(key_acuerdo, bytes())
 
 # Función para Abrir el Dialogo de Respuesta de una Solicitud
-@st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large")
+@st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large",on_dismiss="rerun")
 def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Creamos una Copia de la solicitud que será la respuesta
     solicitud_respuesta = solicitud.copy()
@@ -663,10 +663,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-            # Limpiamos el Monto Propuesto a float
-            monto_total_float = cleanNumber(monto_total, default_nan=0.0)
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            porcentaje_propuesto_original = monto_total_float / monto_propuesto_total if monto_propuesto_total > 0 else 0
+            porcentaje_propuesto_original = d['Monto_Propuesto'] / monto_propuesto_total if monto_propuesto_total > 0 else 0
             monto_propuesto_nuevo = monto_total * porcentaje_propuesto_original
             # Actualizamos el Session State del Monto Propuesto por Deuda
             st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo)
@@ -676,6 +674,12 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             cleanNumber(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
             )
         st.session_state[key_monto_total] = '{:,.0f}'.format(monto_total)
+        # Actualizamos a cada Deuda el Monto Propuesto basado en el Session State
+        for d in solicitud["Datos_Solicitud"]:
+            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            monto_propuesto_nuevo = cleanNumber(st.session_state[key_monto], default_nan=0.0)
+            # Actualizamos el Session State del Monto Propuesto por Deuda
+            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo) if monto_propuesto_nuevo > 0 else ''
 
     with colFechaLimite:
         fecha_limite_pago = st.date_input(
@@ -779,7 +783,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     )
 
         # Siguiente: Mostramos Posibilidad de Agregar Addendums
-        with st.expander("**📝 Agregar Addendums a la Solicitud**", expanded=False, icon = "📝"):
+        with st.expander("**📝 Agregar Addendums a la Solicitud**", expanded=False):
 
             # Inicializamos la Cantidad de Addendums con 0 en el Session State si no existe
             key_addendums_count = 'addendums_count_{}'.format(solicitud['ID_Solicitud'])
@@ -941,8 +945,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         })
 
     # Añadimos los Addendums a la solicitud_respuesta
-    if len(addendums) > 0:
-        solicitud_respuesta["Metadata_Solicitud"]["Addendums"] = addendums
+    solicitud_respuesta["Metadata_Solicitud"]["Addendums"] = addendums
 
     # Añadimos Fecha_Limite_Pago a la solicitud_respuesta si existe, de lo contrario mostrar alerta
     if fecha_limite_pago:
@@ -950,8 +953,6 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     else:
         st.warning("Debe ingresar una Fecha Límite de Pago para poder finalizar la solicitud.")
         st.stop()
-
-    st.space("small")
 
     st.divider()
 
@@ -1015,6 +1016,24 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
         # Siguiente: Definir el formato_pago
         if formato_pago == "Subir Archivo":
+
+            # Reunimos la Información de las Deudas y los Addendums en uno Solo
+            deudas_info = solicitud["Datos_Solicitud"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
+    
+            # Definimos todas las Deudas Disponibles
+            debt_ids = [d['Id_Deuda'] for d in deudas_info]
+    
+            # Creamos una Vista de Pills para definir las Deudas a Usar
+            selected_ids = st.pills(
+                "**Deudas y Addendums usados**",
+                options=debt_ids,
+                default=debt_ids,
+                help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
+                key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                selection_mode="multi",
+                width="stretch",
+            )
+
             bytes_acuerdo = st.file_uploader(
                 label="**Subir Acuerdo de Pago**",
                 type=["pdf"],
@@ -1027,7 +1046,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             # Obtenemos los bytes del archivo subido
             bytes_acuerdo = bytes_acuerdo.getvalue()
             # Generamos la Metadata de la Solicitud
-            metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta)
+            metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids)
             # Guardamos la Metadata en el PDF
             bytes_acuerdo = add_metadata_to_uploaded_pdf(pdf_bytes=bytes_acuerdo, metadata=metadata_to_add_acuerdo.to_dict())
 
@@ -1260,7 +1279,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud)
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
-        solicitud_ya_gestionada = es_solicitud_sin_responder(solicitud)
+        solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
 
         # Creamos Dos Columnas: Una para Informacion y otra para el Boton
         colInfo, colBoton = st.columns([4, 2], vertical_alignment="top")
@@ -1538,7 +1557,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
             hole=0.4,
             color_discrete_sequence=px.colors.qualitative.Set3
         )
-        st.plotly_chart(fig_pie_estados, use_container_width=True)
+        st.plotly_chart(fig_pie_estados, witdth = "stretch")
 
     with colKPIs:
         tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes)
@@ -1625,9 +1644,9 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
         fig_bancos = px.bar(
             df_bancos_sin_responder,
             x='Banco',
-            y='count',
+            y='Solicitudes Sin Responder',
             title='Solicitudes Sin Responder por Banco',
-            color='count',
+            color='Solicitudes Sin Responder',
             color_continuous_scale=px.colors.sequential.Viridis
         )
         # Ahora Renombramos los ejes para que sean más claros

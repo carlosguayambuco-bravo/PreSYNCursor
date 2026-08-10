@@ -98,7 +98,7 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
     headers = st.session_state.get("solicitudes_headers", [])
 
     # Organizamos los datos de las solicitudes en el orden de los headers
-    solicitudes_data = solicitudes_df[headers].applymap(convert_data_to_string).values.tolist()
+    solicitudes_data = solicitudes_df[headers].map(convert_data_to_string).values.tolist()
 
     # Ahora a cada lista le añadimos como elemento 0 la fila de sheets correspondiente a cada solicitud
     solicitudes_data = [[get_solicitud_row_in_google_sheets(row[0])] + row for row in solicitudes_data]

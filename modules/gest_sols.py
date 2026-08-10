@@ -125,7 +125,7 @@ def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité"
     maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
     banner_manager = get_banned_manager()
-    maskSinBan = not banner_manager.is_banned(solicitud["ID_Solicitud"])
+    maskSinBan = (not banner_manager.is_banned(solicitud["ID_Solicitud"]))
     return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan
 
 def es_solicitud_aprobacion_necesaria(solicitud: pd.Series) -> bool:
@@ -703,7 +703,7 @@ def obtener_df_bancos_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]
 
     return df_bancos_sin_responder
 
-def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series) -> pd.Series:
+def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str]) -> pd.Series:
     """
     Genera una plantilla de serie para un acuerdo de pago basado en la información de la solicitud.
 
@@ -727,12 +727,13 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series) -> pd.Series:
         "Ejecutivo": solicitud['Ejecutivo'],
         "JSON_Respuesta": [
             {
+                "Id_Deuda": deuda['Id_Deuda'],
                 "Banco": deuda['Banco'],
                 "Numero_Credito": deuda['Numero_Credito'],
                 "Monto_Propuesto": deuda.get('Monto_Propuesto', 0),
                 "Num_Cuotas": deuda.get('Num_Cuotas', 1)
             }
-            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", [])) if deuda.get('Monto_Propuesto', 0) > 0
+            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", [])) if (deuda.get('Monto_Propuesto', 0) > 0) and (deuda['Id_Deuda'] in deudas)
         ]
     }
 

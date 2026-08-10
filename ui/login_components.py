@@ -30,7 +30,7 @@ def show_user_info():
     )
 
     # Ahora añadimos Botón de Cerrar Sesión en el Sidebar
-    if st.sidebar.button("Cerrar Sesión", icon="🚪",use_container_width=True):
+    if st.sidebar.button("Cerrar Sesión", icon="🚪",witdth = "stretch"):
         # Limpiamos el estado de sesión
         st.session_state.clear()
         # Redirigimos al usuario a la página de login
@@ -52,7 +52,7 @@ def show_user_info():
         st.sidebar.divider()
 
     # Botón de Recarga de Solicitudes
-    if st.sidebar.button("Recargar Solicitudes", icon="🔄", use_container_width=True):
+    if st.sidebar.button("Recargar Solicitudes", icon="🔄", witdth = "stretch"):
         # Limpiamos el cache de la función load_current_month_solicitudes
         load_current_month_solicitudes.clear()
 
