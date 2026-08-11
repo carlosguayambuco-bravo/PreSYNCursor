@@ -41,7 +41,7 @@ tabVer, tabResumen = st.tabs(
 # Si no hay solicitudes, mostramos un mensaje
 if solicitudes_filtered.empty:
     st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
-    mostrar_boton_limpiar_filtros_negociador()
+    mostrar_boton_limpiar_filtros_negociador(key_extra="_vacio")
     st.stop()
 
 with tabVer:
@@ -65,7 +65,7 @@ with tabVer:
         )
 
     with colReiniciar:
-        mostrar_boton_limpiar_filtros_negociador()
+        mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_solicitudes")
 
     if mas_solicitudes:
         st.session_state['Cantidad_Solicitudes_Ver_Negociador'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar
@@ -122,4 +122,4 @@ with tabResumen:
                 st.session_state[key_expander] = True
 
     with colLimpiarBtt:
-        mostrar_boton_limpiar_filtros_negociador()
+        mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_resumen")

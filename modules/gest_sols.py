@@ -306,7 +306,8 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     # Si la Solicitud Inicial es Exitosa, Es Acuerdo de Pago u Oferta de Acuerdo y tenemos bytes del PDF
     # Se envia el correo correspondiente
     if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
-        send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes)
+        if not send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes):
+            st.error("No se pudo enviar el correo con el Acuerdo de Pago. Por favor, contacte al equipo de soporte.")
 
     # Por Último, devolvemos la actualización masiva
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)  
@@ -383,7 +384,6 @@ def upload_massive_addendums(*,solicitud: pd.Series) -> bool:
 
     return True
 
-
 def generar_nombre_acuerdo_pago(solicitud_info: pd.Series) -> str:
     """
     Genera un nombre de archivo para el Acuerdo de Pago basado en la información de la solicitud.
@@ -421,7 +421,10 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     google_drive_service: GoogleDriveService = st.session_state['google_drive_service']
     # Paso 3: Traer el Folder_ID de los Secretos de Streamlit
     folder_id = st.secrets['google_drive']['folder_id_acuerdos_pago']
-    # Paso 4: Subir el Archivo a Google Drive
+    # Paso 4: Convertir el PDF a bytes si esta en BytesIO
+    if isinstance(pdf_bytes, BytesIO):
+        pdf_bytes = pdf_bytes.getvalue()
+    # Paso 5: Subir el Archivo a Google Drive
     file_id = google_drive_service.upload_file(
         file_bytes=pdf_bytes,
         file_name=file_name,
@@ -577,15 +580,18 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
     """
     # Lista de claves a reiniciar del Session State
     keys_to_remove = [
-        "tipo_solicitud_gestion_input",
-        "aliado_solicitud_gestion_input",
-        "estado_solicitud_gestion_input",
-        "ejecutivo_solicitud_gestion_input",
-        "persona_solicitud_gestion_input",
-        "banco_solicitud_gestion_input",
-        "id_solicitud_gestion_input",
-        "cedula_solicitud_gestion_input",
-        "id_deuda_solicitud_gestion_input",
+        'id_deuda_solicitud_nego_input',
+        'banco_solicitud_nego_input',
+        'cliente_solicitud_nego_input',
+        'tipo_solicitud_nego_input',
+        'estado_solicitud_nego_input',
+        'aliado_solicitud_nego_input',
+        'id_solicitud_nego_input',
+        'persona_solicitud_nego_input',
+        'referencia_solicitud_nego_input',
+        'toggle_sin_responder_solicitud_nego_input',
+        'toggle_aprobacion_solicitud_nego_input',
+        'toggle_orden_fecha_solicitud_nego_input',
     ]
     keys_to_list = [
         'id_deuda_solicitud_nego_input',
@@ -857,7 +863,8 @@ def crear_plantilla_solicitud_acuerdo_pago(
                 'Banco': deuda['Banco'],
                 'Numero_Credito': deuda['Numero_Credito'],
                 'Monto_Propuesto': deuda.get('Monto_Propuesto', 0),
-                'Num_Cuotas': deuda.get('Num_Cuotas', 1)
+                'Num_Cuotas': deuda.get('Num_Cuotas', 1),
+                'Monto_Actual': deuda.get('Monto_Actual', 0)
             }
             for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", []))
             if (deuda.get('Monto_Propuesto', 0) > 0) and (deuda['Id_Deuda'] in selected_ids)

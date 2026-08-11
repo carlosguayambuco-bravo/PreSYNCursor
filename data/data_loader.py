@@ -50,6 +50,10 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     for col in ['Referencia', 'ID_Solicitud', 'Cedula']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    changeRefDict = load_reference_changes()
+    solicitudes_df['Referencia'] = solicitudes_df['Referencia'].apply(lambda s: changeRefDict.get(s,s))
+
     # Guardamos el Primer ID_Solicitud
     st.session_state["first_id_solicitud"] = solicitudes_df['ID_Solicitud'].iloc[0] if not solicitudes_df.empty else None
 
@@ -63,7 +67,7 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
         solicitudes_df = SolicitudesSchema.empty()
 
     # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
-    for col in ['Datos_Solicitud', 'Metadata_Solicitud']:
+    for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
 
     # Devolvemos el DataFrame

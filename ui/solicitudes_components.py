@@ -736,9 +736,9 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Siguiente: Expander para mostrar los Inputs por Deuda
     with st.expander("**💸 Respuesta por Deuda**", expanded=False):
         if cuotas_input == "Por Deuda":
-            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5, vertical_alignment="center")
+            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(5, border=True)
         else:
-            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto = st.columns(4, vertical_alignment="center")
+            colIdDeuda, colNumCredito, colSolicitado, colMontoPropuesto = st.columns(4, border=True)
 
         with colIdDeuda:
             st.markdown("**ID de Deuda**")
@@ -755,11 +755,29 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Iteramos por las Deudas de la Solicitud y Mostramos los Inputs correspondientes
         for d in solicitud["Datos_Solicitud"]:
             with colIdDeuda:
-                st.code(d['Id_Deuda'], language="text")
+                st.text_input(
+                    label="ID Deuda",
+                    value=d['Id_Deuda'],
+                    disabled=True,
+                    key="id_deuda_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
+                )
             with colNumCredito:
-                st.code(d['Numero_Credito'], language="text")
+                st.text_input(
+                    label="Número de Crédito",
+                    value=d['Numero_Credito'],
+                    disabled=True,
+                    key="numero_credito_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
+                )
             with colSolicitado:
-                st.code(d['Monto_Propuesto'], language="text")
+                st.text_input(
+                    label="$Solicitado",
+                    value="{:,.0f}".format(d['Monto_Propuesto']),
+                    disabled=True,
+                    key="monto_solicitado_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
+                )
             with colMontoPropuesto:
                 key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
                 st.text_input(
@@ -1098,6 +1116,9 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         disabled = solicitud['Metadata_Solicitud'].get("Pago_Total_Obligatorio", False)
     )
 
+    if solicitud['Metadata_Solicitud'].get("Pago_Total_Obligatorio", False):
+        st.warning('El Pago tiene que ser por todas las deudas y addendums.', icon="⚠️")
+
     if not selected_ids:
         st.warning("Debe seleccionar al menos una deuda o addendum para poder subir el acuerdo de pago.", icon="⚠️")
         st.stop()
@@ -1217,14 +1238,14 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
                 st.toast("Intenta de Nuevo subir la Solicitud",icon="❌")
 
 # Función Auxiliar para Mostrar los Detalles de los Solicitudes de Deuda
-def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False) -> None:
+def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False, origen: str) -> None:
     # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
     hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
     if hay_cuotas:
-        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
+        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto, colCuotas = st.columns([3,3,3,5,6,3], vertical_alignment="top")
     else:
-        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([3,3,3,6,6], vertical_alignment="top")
+        colIdDeuda, colBanco, colNumCredito, colActualizaciones, colMontoPropuesto = st.columns([3,3,3,5,6], vertical_alignment="top")
 
     with colIdDeuda:
         st.markdown("**ID de Deuda:**")
@@ -1243,27 +1264,36 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
     for d in solicitud["Datos_Solicitud"]:
         with colIdDeuda:
             st.text_input(
-                d['Id_Deuda'],
+                label = "**ID de Deuda**",
+                value = d['Id_Deuda'],
                 disabled=True,
                 help="ID de la deuda. No se puede modificar.",
-                key="id_deuda_{}_{}_show".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                key="id_deuda_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
             )
         with colBanco:
             st.text_input(
-                d['Banco'],
+                label = "**Banco**",
+                value = d['Banco'],
                 disabled=True,
                 help="Banco de la deuda. No se puede modificar.",
-                key="banco_{}_{}_show".format(solicitud['ID_Solicitud'], d['Id_Deuda'])            )
+                key="banco_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
+            )
         with colNumCredito:
             st.text_input(
-                d['Numero_Credito'],
+                label = "**Número Crédito**",
+                value = d['Numero_Credito'],
                 disabled=True,
                 help="Número de crédito de la deuda. No se puede modificar.",
-                key="numero_credito_{}_{}_show".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                key="numero_credito_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
             )
         with colActualizaciones:
             datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
-            with st.popover("**Descuentos en Base {}**".format(d['Id_Deuda']), icon="👌"):
+            st.space("small")
+            with st.popover(
+                "**Descuentos - {}**".format(d['Id_Deuda']),
+                icon="👌",
+                help = "Descuentos en base",
+            ):
                 if datos_act:
                     for descuento in datos_act:
                         st.markdown(descuento)
@@ -1271,18 +1301,20 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
                     st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
         with colMontoPropuesto:
             st.text_input(
-                "${:,.2f}".format(d['Monto_Propuesto']),
+                label = "**Monto Propuesto**",
+                value = "${:,.2f}".format(d['Monto_Propuesto']),
                 disabled=disable_inputs,
                 help="Monto propuesto para la deuda.",
-                key="monto_propuesto_{}_{}_show".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                key="monto_propuesto_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
             )
         if hay_cuotas:
             with colCuotas: # type: ignore
                 st.text_input(
-                    d['Num_Cuotas'],
+                    label = "**Número de Cuotas**",
+                    value = d['Num_Cuotas'],
                     disabled=disable_inputs,
                     help="Número de cuotas para la deuda.",
-                    key="num_cuotas_{}_{}_show".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                    key="num_cuotas_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
                     )
 
 # Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud por Deuda
@@ -1342,6 +1374,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main):
+        st.write(solicitud.to_dict())
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 
@@ -1445,7 +1478,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
-            mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=False)
+            mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="ejecutivo")
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
         solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
@@ -1510,8 +1543,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             )
         with colFechaSolicitud:
             dias_delta = getBDDaysDiffFloat(
-                                    solicitud["Timestamp"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
-                                )
+                solicitud["Timestamp"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+            )
             st.metric(
                 label="**Fecha de Solicitud:**",
                 value=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
@@ -1564,7 +1597,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Mostramos los Datos por Deuda de la Solicitud en un Expander
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
-            mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True)
+            mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
 
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
         if es_solicitud_sin_responder(solicitud):
@@ -1638,7 +1671,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         if solicitud["Estado_Solicitud"] == "Exitosa":
             with colMontoRespuesta: # type: ignore
-                deudas_respuesta = solicitud.get("JSON_Respuesta", [])
+                deudas_respuesta = solicitud.get("JSON_Respuesta", []) + solicitud.get("Metadata_Solicitud", {}).get("Addendums", [])
                 deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
                 monto_total_respuesta = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
                 monto_actual_respuesta = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
@@ -1664,9 +1697,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Siguiente: Mostrar Fecha_Limite_Pago, Pago Total Obligatorio y Metodo de Pago si no es Validación
         if solicitud["Tipo_Solicitud"] == "Validación":
-            colFechaLimite, colPagoTotal = st.columns([2, 2, 2], vertical_alignment="center")
+            colFechaLimite, colPagoTotal = st.columns([2, 2], border=True)
         else:
-            colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], vertical_alignment="center")
+            colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], border=True)
 
         with colFechaLimite:
             fecha_limite_pago = solicitud.get("Fecha_Limite_Pago", None)
@@ -1674,7 +1707,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 label="**Fecha Límite de Pago:**",
                 value=fecha_limite_pago.strftime("%Y-%m-%d") if pd.notnull(fecha_limite_pago) else "No Brindada",
                 help = "La Fecha Límite de Pago de la solicitud",
-                border=True,
             )
         with colPagoTotal:
             aplica_pto = solicitud.get("Metadata_Solicitud", {}).get("Pago_Total_Obligatorio", False)
@@ -1683,7 +1715,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 value="Sí" if aplica_pto else "No",
                 help = "El monto total obligatorio de la solicitud",
                 delta= "Necesitas pagar todas las deudas" if aplica_pto else "Puedes pagar deudas de forma individual",
-                border=True,
             )
         if solicitud["Tipo_Solicitud"] != "Validación":
             with colMetodoPago:  # type: ignore
@@ -1691,18 +1722,17 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     label="**Método de Pago:**",
                     value=solicitud.get("Metodo_Pago", "No Brindado"),
                     help = "El Método de Pago de la solicitud",
-                    border=True,
                 )
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
             file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
-            if file_id is None:
+            if file_id is None or file_id == "":
                 st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
             else:
                 url_acuerdo_pago = obtener_link_acuerdo_pago(file_id)
                 st.link_button(
-                    label="📄 Descargar Acuerdo de Pago",
+                    label="📄 Ver Acuerdo de Pago",
                     url=url_acuerdo_pago,
                     type="primary",
                     help="Haga clic para ver el Acuerdo de Pago en PDF.",
@@ -1997,13 +2027,11 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[Solicitudes
         st.plotly_chart(fig_aliados, width="stretch", key=f"aliados_solicitud_{nego_name}")
 
 # Función Auxiliar para mostrar el Botón que limpia los Filtros Versión Negociador
-def mostrar_boton_limpiar_filtros_negociador():
+def mostrar_boton_limpiar_filtros_negociador(key_extra: str):
     reiniciar_filtros = st.button(
         "Reiniciar Filtros",
-        key="reiniciar_filtros_button",
+        key="reiniciar_filtros_button" + key_extra,
         help="Haz clic para reiniciar los filtros de solicitudes",
+        on_click=reiniciar_filtros_solicitudes_negociadores,
         type="secondary"
     )
-    if reiniciar_filtros:
-        reiniciar_filtros_solicitudes_negociadores()
-        st.rerun()  # Recargamos la página para aplicar los filtros reiniciados
