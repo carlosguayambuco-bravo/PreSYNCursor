@@ -1374,7 +1374,6 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main):
-        st.write(solicitud.to_dict())
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 

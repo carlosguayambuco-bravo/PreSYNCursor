@@ -421,10 +421,7 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     google_drive_service: GoogleDriveService = st.session_state['google_drive_service']
     # Paso 3: Traer el Folder_ID de los Secretos de Streamlit
     folder_id = st.secrets['google_drive']['folder_id_acuerdos_pago']
-    # Paso 4: Convertir el PDF a bytes si esta en BytesIO
-    if isinstance(pdf_bytes, BytesIO):
-        pdf_bytes = pdf_bytes.getvalue()
-    # Paso 5: Subir el Archivo a Google Drive
+    # Paso 4: Subir el Archivo a Google Drive
     file_id = google_drive_service.upload_file(
         file_bytes=pdf_bytes,
         file_name=file_name,

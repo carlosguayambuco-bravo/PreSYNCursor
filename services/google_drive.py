@@ -32,8 +32,7 @@ class GoogleDriveService:
             str: ID del archivo subido en Google Drive.
         """
         try:
-            file_io = BytesIO(file_bytes)
-            media = MediaFileUpload(file_io, mimetype=mime_type)
+            media = MediaFileUpload(file_bytes, mimetype=mime_type)
             file_metadata = {
                 'name': file_name,
                 'parents': [folder_id]
