@@ -6,7 +6,7 @@ import streamlit as st
 from data.data_loader import load_current_month_solicitudes
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import filtrar_solicitudes_por_usuario_actual, obtener_correos_a_cargo_usuario_actual, reiniciar_filtros_solicitudes_negociadores
-from ui.solicitudes_components import mostrar_datos_solicitud_negociador, mostrar_filtros_generales_solicitud_negociador, mostrar_resumen_solicitudes_negociador
+from ui.solicitudes_components import mostrar_boton_limpiar_filtros_negociador, mostrar_datos_solicitud_negociador, mostrar_filtros_generales_solicitud_negociador, mostrar_resumen_solicitudes_negociador
 
 # Paso 1: Cargar el DataFrame de Solicitudes
 solicitudes_df = load_current_month_solicitudes()
@@ -41,6 +41,7 @@ tabVer, tabResumen = st.tabs(
 # Si no hay solicitudes, mostramos un mensaje
 if solicitudes_filtered.empty:
     st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
+    mostrar_boton_limpiar_filtros_negociador()
     st.stop()
 
 with tabVer:
@@ -64,19 +65,11 @@ with tabVer:
         )
 
     with colReiniciar:
-        reiniciar_filtros = st.button(
-            "Reiniciar Filtros",
-            key="reiniciar_filtros_button",
-            help="Haz clic para reiniciar los filtros de solicitudes",
-            type="secondary"
-        )
+        mostrar_boton_limpiar_filtros_negociador()
 
     if mas_solicitudes:
         st.session_state['Cantidad_Solicitudes_Ver_Negociador'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar
         st.rerun()  # Recargamos la página para mostrar más solicitudes
-    if reiniciar_filtros:
-        reiniciar_filtros_solicitudes_negociadores()
-        st.rerun()  # Recargamos la página para aplicar los filtros reiniciados
 
 with tabResumen:
     st.title("😎 Resumen de Solicitudes")
@@ -107,7 +100,7 @@ with tabResumen:
 
     st.divider()
     # Siguiente: Mostramos el toggle para ver todos a mi cargo y para expandir o no todos los expanders
-    colToggle, colExpand = st.columns([2, 2], gap="large")
+    colToggle, colExpand, colLimpiarBtt = st.columns([2, 2, 2], gap="large")
     with colToggle:
         ver_todos_a_mi_cargo = st.toggle(
             "Ver Todos a mi Cargo",
@@ -127,3 +120,6 @@ with tabResumen:
             for correo in correos_revisar:
                 key_expander = f"expander_{correo}"
                 st.session_state[key_expander] = True
+
+    with colLimpiarBtt:
+        mostrar_boton_limpiar_filtros_negociador()

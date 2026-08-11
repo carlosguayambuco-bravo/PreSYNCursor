@@ -4,6 +4,7 @@ from typing import Optional, Literal
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
+from pandas import col
 from pandera.typing import DataFrame
 import streamlit as st
 from st_copy import copy_button
@@ -11,11 +12,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 # Librerías Locales
 from data.data_models import SolicitudesSchema
+from data.data_uploader import upload_form_response_to_google_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -1093,6 +1095,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
         selection_mode="multi",
         width="stretch",
+        disabled = solicitud['Metadata_Solicitud'].get("Pago_Total_Obligatorio", False)
     )
 
     if not selected_ids:
@@ -1169,6 +1172,49 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
     if not tipo_pago:
         st.warning("Debe ingresar un Tipo de Pago para poder subir la solicitud de acuerdo de pago.", icon="⚠️")
         st.stop()
+
+    # Siguiente: Mostramos Input para Comentario dejando por defecto el Comentario actual
+    cm_final = st.text_area(
+        label="**Comentarios de la Solicitud**",
+        value=solicitud["Metadata_Solicitud"].get("Comentario_Negociador", ""),
+        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+        help="Ingrese cualquier comentario adicional sobre la solicitud.",
+    )
+
+    # Ahora Creamos el Diccionario
+    solicitud_respuesta = crear_plantilla_solicitud_acuerdo_pago(
+        solicitud=solicitud,
+        selected_ids=selected_ids,
+        fecha_pago=fecha_esperada_pago,
+        tipo_pago=tipo_pago,
+        comentario=cm_final or "",
+    )
+
+    # Vamos a Mostrar 2 Botones: Uno para salir del Dialog y otro para subir la Soliciutd
+    colSalir, colSubir = st.columns(2, vertical_alignment="center", gap="large")
+    with colSalir:
+        st.button(
+            label="**Salir**",
+            key="salir_subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para salir del diálogo de subir solicitud de acuerdo de pago.",
+            on_click=st.rerun,
+            type="secondary",
+        )
+
+    with colSubir:
+        if st.button(
+            label="**Subir Solicitud de Acuerdo de Pago**",
+            key="subir_solicitud_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para subir la solicitud de acuerdo de pago.",
+            type="primary",
+        ):
+            # Subimos la Solicitud de Acuerdo de Pago
+            success, new_id = upload_form_response_to_google_sheets(response_info=solicitud_respuesta)
+            if success:
+                st.toast(f"Solicitud de Acuerdo de Pago subida exitosamente. (ID: {new_id})", icon="✅")
+                st.rerun()
+            else:
+                st.toast("Intenta de Nuevo subir la Solicitud",icon="❌")
 
 # Función Auxiliar para Mostrar los Detalles de los Solicitudes de Deuda
 def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False) -> None:
@@ -1648,7 +1694,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     border=True,
                 )
 
-        # Siguiente: Mostrar el Botón al acuerdo de Pago
+        # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
             file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
             if file_id is None:
@@ -1661,6 +1707,26 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     type="primary",
                     help="Haga clic para ver el Acuerdo de Pago en PDF.",
                 )
+        else:
+
+            # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, Una de Explicación de botón copiar y otra de botón copiar
+            colBotonAbrir, colInfoBoton, colBotonCopiar = st.columns([1, 4, 1], vertical_alignment="center")
+
+            with colBotonAbrir:
+                if st.button(
+                    label="**Subir Solicitud de Acuerdo de Pago**",
+                    type="primary",
+                    key = "abrir_dialogo_ac_pago_{}".format(solicitud['ID_Solicitud']),
+                    help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago"
+                ):
+                    dialog_subir_acuerdo_pago(solicitud=solicitud)
+
+            with colInfoBoton:
+                st.info('Puedes copiar el resultado de la Solicitud', icon='ℹ️')
+
+            with colBotonCopiar:
+                txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
+                copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesSchema]) -> None:
@@ -1929,3 +1995,15 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[Solicitudes
         fig_aliados = go.Figure(data=[go.Pie(labels=aliados_counts.index, values=aliados_counts.values, hole=.4)])
         fig_aliados.update_layout(title_text='Distribución de Aliados Solicitados')
         st.plotly_chart(fig_aliados, width="stretch", key=f"aliados_solicitud_{nego_name}")
+
+# Función Auxiliar para mostrar el Botón que limpia los Filtros Versión Negociador
+def mostrar_boton_limpiar_filtros_negociador():
+    reiniciar_filtros = st.button(
+        "Reiniciar Filtros",
+        key="reiniciar_filtros_button",
+        help="Haz clic para reiniciar los filtros de solicitudes",
+        type="secondary"
+    )
+    if reiniciar_filtros:
+        reiniciar_filtros_solicitudes_negociadores()
+        st.rerun()  # Recargamos la página para aplicar los filtros reiniciados

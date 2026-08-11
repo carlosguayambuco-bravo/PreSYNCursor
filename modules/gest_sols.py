@@ -20,7 +20,7 @@ from modules.forms import obtener_nombre_negociador
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import getBDDaysDiffFloat_vectorized
 
-def get_solicitud_txt(solicitud: pd.Series) -> str:
+def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
     Genera un texto descriptivo para una solicitud específica.
 
@@ -42,7 +42,7 @@ def get_solicitud_txt(solicitud: pd.Series) -> str:
     solicitud_txt += f"**Relación de Deudas**:\n"
 
     # Paso 2: Iterar sobre cada deuda en la solicitud y añadir sus detalles
-    for deuda in solicitud['Datos_Solicitud']:
+    for deuda in solicitud[origen]:
         solicitud_txt += f"    - **Banco**: {deuda['Banco']}, **Numero_Credito**: {deuda['Numero_Credito']}, **Monto_Propuesto**: ${deuda['Monto_Propuesto']:,.2f}"
         if deuda.get('Num_Cuotas', 1) > 1:
             solicitud_txt += f", (**Num_Cuotas**: {deuda['Num_Cuotas']})"
@@ -832,7 +832,8 @@ def crear_plantilla_solicitud_acuerdo_pago(
         selected_ids: list[str],
         fecha_pago: pd.Timestamp,
         tipo_pago: str,
-    ) -> pd.Series:
+        comentario: str,
+    ) -> dict[str, Any]:
     """Crea la Plantilla de Solicitud a subir a partir de la validación exitosa
 
     Args:
@@ -867,10 +868,10 @@ def crear_plantilla_solicitud_acuerdo_pago(
         'Tipo_Pago': tipo_pago,
         'Metadata_Solicitud': json.dumps({
             'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
-            'Comentario_Negociador': solicitud['Metadata_Solicitud'].get('Comentario_Negociador', ''),
+            'Comentario_Negociador': comentario,
             'Origen_Solicitud': solicitud['ID_Solicitud'],
         }),
         'Estado_Solicitud': 'Sin Tocar',
     }
 
-    return pd.Series(solicitud_template)
+    return solicitud_template
