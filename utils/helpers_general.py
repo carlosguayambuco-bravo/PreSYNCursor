@@ -46,10 +46,10 @@ def cleanNumber(value, default_nan: float = np.nan) -> float:
     try:
         # Common in Latin America: 1,000.00 -> 1000.00
         if (',' in clean_val) and ('.' in clean_val) and (clean_val.index(',') > clean_val.index('.')):
-            clean_val = clean_val.replace(',', '')
-        elif (',' in clean_val) and ('.' in clean_val) and (clean_val.index(',') < clean_val.index('.')):
-            # Reemplzamos . con nada y luego , con .
             clean_val = clean_val.replace('.', '').replace(',', '.')
+        elif (',' in clean_val) and ('.' in clean_val) and (clean_val.index(',') < clean_val.index('.')):
+            # Reemplzamos , con nada 
+            clean_val = clean_val.replace(',', '')
         elif '.' in clean_val and clean_val.count('.') > 1:
             # Handle "666.666.666" as 666666666
             clean_val = clean_val.replace('.','')
@@ -72,12 +72,10 @@ def cleanNumber(value, default_nan: float = np.nan) -> float:
             if all([len(s) == 3 for s in clean_val.split('.')]):
                 clean_val = clean_val.replace('.', '')
             # Else it's decimal so its ignored
-
         return float(clean_val)
     except ValueError:
         clean_val = pd.to_numeric(clean_val, errors='coerce')
         return clean_val if pd.notna(clean_val) else default_nan  # Not a number? Return original text
-
 # Función Auxiliar para Obtener el Mes Operativo
 def getMesOperativo() -> pd.Timestamp:
     # Primero Obtenemos el Día de hoy

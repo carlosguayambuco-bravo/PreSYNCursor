@@ -11,7 +11,7 @@ from views.login_page import show_login_page
 
 # Definimos si estamos en Modo Debugging
 modo_debugging = st.secrets.get('debugging_mode',False)
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide",page_icon="🔱")
 
 initialize_services(modo_debugging)  # Inicializamos los servicios de la aplicación
 

@@ -3,7 +3,8 @@
 from io import BytesIO
 # Librerías de Terceros
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import MediaFileUpload, build
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 import streamlit as st
 
 # Clase de GoogleDriveService para interactuar con la API de Google Drive (usando googleapiclient)
@@ -32,10 +33,12 @@ class GoogleDriveService:
             str: ID del archivo subido en Google Drive.
         """
         try:
-            media = MediaFileUpload(file_bytes, mimetype=mime_type)
+            file_io = BytesIO(file_bytes)
+            media = MediaIoBaseUpload(file_io, mimetype=mime_type, resumable=True)
             file_metadata = {
                 'name': file_name,
-                'parents': [folder_id]
+                'parents': [folder_id],
+                'mimeType': mime_type
             }
             file = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
             return file.get('id')

@@ -973,6 +973,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.warning("Debe ingresar una Fecha Límite de Pago para poder finalizar la solicitud.")
         st.stop()
 
+    if fecha_limite_pago < pd.Timestamp.now(tz='America/Bogota').tz_localize(None).normalize():
+        st.warning("La Fecha Límite de Pago no puede ser menor a la fecha actual.", icon="⚠️"   )
+        st.stop()
+
     st.divider()
 
     # Siguiente: Añadir el Input de Pago Total Obligatorio (Checkbox), solo si existe más de una deuda
@@ -1364,12 +1368,13 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
-    expander_name = "**{tipo}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}` | 👤 **Ejecutivo:** {ejecutivo}".format(
+    expander_name = "`{id}` **{tipo}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}` | 👤 **Ejecutivo:** {ejecutivo}".format(
         tipo=solicitud["Tipo_Solicitud"],
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],
         ejecutivo=solicitud["Ejecutivo"],
-        aliado=solicitud["Casa_Cobro"]
+        aliado=solicitud["Casa_Cobro"],
+        id=solicitud["ID_Solicitud"]
     )
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
@@ -1504,11 +1509,12 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):
     # Definimos el Nombre del Expander
-    expander_name = "**{tipo}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
+    expander_name = "`{id}` **{tipo}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
         tipo=solicitud["Tipo_Solicitud"],
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],
-        aliado=solicitud["Casa_Cobro"]
+        aliado=solicitud["Casa_Cobro"],
+        id=solicitud["ID_Solicitud"]
     )
 
     with st.expander(expander_name, expanded=False):

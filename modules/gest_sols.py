@@ -868,7 +868,7 @@ def crear_plantilla_solicitud_acuerdo_pago(
         ]
         ),
         'Ejecutivo': solicitud['Ejecutivo'],
-        'Fecha_Pago': fecha_pago.strftime('%Y-%m-%d'),
+        'Fecha_Esperada_Pago': fecha_pago.strftime('%Y-%m-%d %H:%M:%S'),
         'Tipo_Pago': tipo_pago,
         'Metadata_Solicitud': json.dumps({
             'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],

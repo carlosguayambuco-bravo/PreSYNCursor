@@ -2,8 +2,11 @@
 # Librerías de Python
 import base64
 from typing import Optional
+from io import BytesIO
 # Librerías de Terceros
-from email.message import EmailMessage
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import streamlit as st
@@ -57,16 +60,20 @@ class GoogleMailService:
         Returns:
             str: Mensaje codificado en base64.
         """
-        message = EmailMessage()
-        message.set_content(body)
-        message['To'] = to
-        message['Subject'] = subject
+        message = MIMEMultipart()
+        message.attach(MIMEText(body, 'plain'))
+        message['to'] = to
+        message['subject'] = subject
 
         if cc_emails:
             message['Cc'] = ', '.join(cc_emails)
 
         if pdf_bytes and pdf_name:
+            if isinstance(pdf_bytes, BytesIO):
+                pdf_bytes = pdf_bytes.getvalue()
             # Agregar el archivo PDF como adjunto
-            message.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_name)
+            attachment = MIMEApplication(pdf_bytes, _subtype='pdf')
+            attachment.add_header('Content-Disposition', 'attachment', filename=pdf_name)
+            message.attach(attachment)
 
         return base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
