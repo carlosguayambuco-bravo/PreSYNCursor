@@ -313,4 +313,4 @@ def convert_data_to_string(obj: Any) -> str:
     try:
         return json.dumps(obj, ensure_ascii=False)
     except TypeError:
-        return str(obj)
+        return str(obj).replace('\'','"')
