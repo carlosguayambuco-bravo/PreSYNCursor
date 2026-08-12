@@ -26,7 +26,7 @@ def generate_jwt_token(cv: str) -> str:
     payload = {
         "cv": cv,
         "iat": time.time(),
-        "exp": time.time() + 600,  # Token expires in 10 minutes
+        "exp": time.time() + 60000,  # Token expires in 10 minutes
         "nonce": secrets.token_urlsafe(16)  # Random nonce for added security
     }
 
