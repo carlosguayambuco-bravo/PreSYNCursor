@@ -22,6 +22,8 @@ def show_login_page():
     else:
         auth_url = st.session_state["auth_url"]
 
+    st.markdown(f"({auth_url})")
+
     st.markdown(
     f"""
         <a href="{auth_url}" target="_self" style="text-decoration: none; display: block; width: 100%;">

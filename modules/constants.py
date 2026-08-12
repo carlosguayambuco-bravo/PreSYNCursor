@@ -169,7 +169,6 @@ Atentamente,
 """
 
 DEFAULT_CCS = [
-    "julio.delgado@gobravo.com.co",
     "alianzasco@gobravo.com.co",
 ]
 
