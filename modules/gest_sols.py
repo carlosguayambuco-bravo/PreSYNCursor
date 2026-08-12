@@ -50,12 +50,12 @@ def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','J
 
     return solicitud_txt
 
-def get_massive_solicitudes_txt(solicitudes_df: DataFrame[SolicitudesSchema]) -> str:
+def get_massive_solicitudes_txt(solicitudes_df: pd.DataFrame) -> str:
     """
     Genera un texto descriptivo para un conjunto de solicitudes.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
 
     Returns:
         str: Texto descriptivo de todas las solicitudes. Este str es bajo la Siguiente Plantilla:
@@ -121,7 +121,7 @@ def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     Returns:
         bool: True si la solicitud no ha sido respondida, False en caso contrario.
     """
-    maskSinTocar = solicitud["Estado_Solicitud"] == "Sin Tocar"
+    maskSinTocar = (solicitud["Estado_Solicitud"] == "Sin Tocar") | (solicitud["Estado_Solicitud"] == "Solicitado")
     maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 3 and solicitud["Estado_Solicitud"] == "Bajo Comité"
     maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 3 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
     banner_manager = get_banned_manager()
@@ -160,41 +160,41 @@ def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal[
     else:
         return None
 
-def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
+def obtener_mascara_sin_responder(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
     Filtra las solicitudes que no han sido respondidas.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con todas las solicitudes.
 
     Returns:
         pd.Series: Serie con las solicitudes sin responder.
     """
-    maskSinTocar = solicitudes_df["Estado_Solicitud"] == "Sin Tocar"
+    maskSinTocar = (solicitudes_df["Estado_Solicitud"] == "Sin Tocar") | (solicitudes_df["Estado_Solicitud"] == "Solicitado")
     maskBajoComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0)  == 1) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
     maskTitularIlocalizable = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
     banner_manager = get_banned_manager()
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
     return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
 
-def obtener_mascara_exitosas(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
+def obtener_mascara_exitosas(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
     Filtra las solicitudes que han sido respondidas exitosamente.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con todas las solicitudes.
 
     Returns:
         pd.Series: Serie con las solicitudes exitosas.
     """
     return solicitudes_df["Estado_Solicitud"] == "Exitosa"
 
-def obtener_mascara_aprobacion_necesaria(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
+def obtener_mascara_aprobacion_necesaria(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
     Filtra las solicitudes que requieren aprobación.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con todas las solicitudes.
 
     Returns:
         pd.Series: Serie con las solicitudes que requieren aprobación.
@@ -239,7 +239,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     """
 
     # Paso 2: Actualizar Solicitudes con mismas deudas, misma Casa_Cobro y mismo Tipo_Solicitud (Sin Responder)
-    solicitudes_df: DataFrame[SolicitudesSchema] = load_current_month_solicitudes()
+    solicitudes_df = load_current_month_solicitudes()
     idsFinal = ''.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
     maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
@@ -462,12 +462,12 @@ def obtener_link_acuerdo_pago(file_id: str) -> str:
     """
     return f"https://drive.google.com/open?id={file_id}"
 
-def generar_plantilla_masiva_solicitudes(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.DataFrame:
+def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
     """
     Genera una plantilla masiva de solicitudes a partir de un DataFrame de solicitudes.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
 
     Returns:
         pd.DataFrame: DataFrame con la plantilla masiva de solicitudes.
@@ -509,7 +509,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: DataFrame[SolicitudesSc
 
     return plantilla_df
 
-def generar_descarga_masiva_solicitudes(*,solicitudes_df: DataFrame[SolicitudesSchema]) -> bytes:
+def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes:
     """
     Genera un archivo CSV para la descarga masiva de solicitudes.
 
@@ -527,7 +527,7 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: DataFrame[SolicitudesS
 
     return csv_bytes
 
-def subir_masivo_plantilla_solicitudes(solicitudes_df: DataFrame[SolicitudesSchema]) -> bool:
+def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
     """
     Sube una plantilla masiva de solicitudes a Google Sheets.
 
@@ -641,12 +641,12 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         else:
             st.session_state[key] = None
 
-def obtener_promedio_tiempos_respuesta(solicitudes_df: DataFrame[SolicitudesSchema]) -> dict[str, float|dict]:
+def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str, float|dict]:
     """
     Calcula el promedio de tiempos de respuesta para las solicitudes.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
 
     Returns:
         dict[str, float]: Diccionario con los promedios de tiempos de respuesta.
@@ -672,12 +672,12 @@ def obtener_promedio_tiempos_respuesta(solicitudes_df: DataFrame[SolicitudesSche
         'promedio_por_tipo': promedio_por_tipo
     }
 
-def obtener_promedio_respuestas_dia(solicitudes_df: DataFrame[SolicitudesSchema]) -> dict[str, float|dict]:
+def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, float|dict]:
     """
     Calcula el promedio de respuestas por día para las solicitudes.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
 
     Returns:
         dict[str, float]: Diccionario con los promedios de respuestas por día.
@@ -901,3 +901,15 @@ def crear_plantilla_solicitud_acuerdo_pago(
     }
 
     return solicitud_template
+
+# Función Auxiliar para actualizar las Solicitudes a 'Solicitado'
+def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
+    # Paso 1: Actualizar el Estado de las Solicitudes a 'Solicitado'
+    solicitudes['Estado_Solicitud'] = 'Solicitado'
+    # Paso 2: Agregar Fecha_Solicitado a Metadata_Solicitud
+    fechaActual = pd.Timestamp.now('America/Bogota').strftime('%Y-%m-%d %H:%M:%S')
+    solicitudes['Metadata_Solicitud'] = solicitudes['Metadata_Solicitud'].apply(
+        lambda x: x.update({'Fecha_Solicitado': fechaActual}) or x
+    )
+    # Paso 3: Subir las Solicitudes Actualizadas a Google Sheets
+    return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)

@@ -22,6 +22,7 @@ ESTADOS_POSIBLES_SOLICITUD = [
     'Titular Ilocalizable', # Estado Transitorio: Significa que el titular de la deuda no se encuentra localizable, por lo que no se puede continuar con la gestión hasta que se logré localizar al titular
     'Validada por Fuera', # Signfica que hubó una validación y/o Pago por Fuera para las Deudas
     'Sin Tocar', # Estado Transitorio: # La Solicitud no ha sido tocada por un ejecutivo
+    'Solicitado', # Se escalo la solicitud al aliado.
 ]
 ESTADOS_RESPONDIBLES_SOLICITUD = [
     'Exitosa',
@@ -39,6 +40,7 @@ ESTADOS_PREFINALIZAR_SOLICITUD = [
     'Validada por Fuera',
     'No Exitosa',
     'Erronea',
+    'Solicitado',
 ]
 
 PAGOS_POSIBLES_SOLICITUD = [

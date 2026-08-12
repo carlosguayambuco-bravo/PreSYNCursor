@@ -9,7 +9,7 @@ import streamlit as st
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
 from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_df_bancos_sin_responder, obtener_mascara_sin_responder, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
-from ui.solicitudes_components import mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo
+from ui.solicitudes_components import dialog_confirmar_actualizacion_solicitudes, mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo
 
 # Paso 1: Inicializar el State Session de Cantidad_Solicitudes_Ver_Ejecutivo
 if not ('Cantidad_Solicitudes_Ver_Ejecutivo' in st.session_state):
@@ -48,8 +48,8 @@ with tabSolicitudes:
         mostrar_datos_solicitud_ejecutivo(solicitud=solicitud, is_main = principal_sol)
         principal_sol = False  # Solo la primera solicitud es la principal, las demás son secundarias
 
-    # Creamos 4 Botones: Cargar Más Solicitudes, Descargar Solicitudes, Subir Solicitudes a Sheets y Copiar Datos de Solicitudes
-    colMas, colDescargar, colSubir, colCopiar = st.columns([2, 2, 2, 1], gap = "large")
+    # Creamos 5 Botones: Cargar Más Solicitudes, Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
+    colMas, colDescargar, colSubir, colCopiar, colMarcar = st.columns([2, 2, 2, 1, 2], gap = "large")
 
     with colMas:
         mas_solicitudes =  st.button("Cargar Más Solicitudes",
@@ -84,6 +84,15 @@ with tabSolicitudes:
             key="copiar_solicitudes_masivas_button",
         ):
             st.toast("Datos de solicitudes copiados al portapapeles", icon="✅")
+
+    with colMarcar:
+        if st.button("Marcar como Solicitado",
+            key="marcar_solicitudes_button",
+            help="Haz clic para marcar las solicitudes filtradas como 'Solicitado'",
+            type="primary",
+            disabled = len(solicitudes_filtered) == 0,
+        ):
+            dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
 
     if subido_sheets:
         success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_filtered)

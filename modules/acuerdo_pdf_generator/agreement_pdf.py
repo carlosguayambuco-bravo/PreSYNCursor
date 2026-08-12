@@ -27,8 +27,9 @@ import pandas as pd
 
 
 DEFAULT_CONSIDERATIONS = (
-    "Realice el pago dentro de la fecha límite acordada.",
-    "Reporte cualquier novedad o error a su ejecutivo de cuenta.",
+    "Confirmar que el producto y valores están correctos (en caso de no confirmar se entiende que están correctos)",
+    "Tener en cuenta que en caso de pago si aplica debe tener en cuenta el valor de la transacción",
+    "Enviar Soporte de Pago a Post-Pagos para que el descuento quede aplicado.",
 )
 DEFAULT_COLORS = {"primary": "#5B3DB6", "border": "#D9D0F2", "text": "#27213E", "accent": "#16A971", "muted": "#756D8A", "card": "#FFFFFF"}
 

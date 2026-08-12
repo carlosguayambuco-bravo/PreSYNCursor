@@ -15,14 +15,14 @@ from data.data_models import SolicitudesSchema
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
-from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, ESTADOS_RESPONDIBLES_SOLICITUD
+from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
 # Función para Mostrar los Filtros Generales de una Solicitud (Versión Ejecutivo)
-def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFrame) -> pd.DataFrame:
 
     solicitudes_copy = solicitudes_df.copy()  # Creamos una copia del DataFrame para no modificar el original
 
@@ -208,7 +208,7 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: DataFrame[S
     return solicitudes_df
 
 # Función Auxiliar para mostrar filtros generales de Solicitudes (Versión Negociador)
-def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFrame) -> pd.DataFrame:
 
     # Si no hay Solicitudes, no hacemos nada
     if solicitudes_df.empty:
@@ -387,15 +387,14 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
     colCancelar, colBoton = st.columns([1, 1])
 
     with colCancelar:
-        st.button(
+        if st.button(
             label="Cancelar",
             key="cancelar_solicitud_{}".format(solicitud['ID_Solicitud']),
-            on_click=st.rerun,
-            kwargs={"scope": "app"},
             help="Haga clic para cancelar la actualización de la solicitud.",
             width="stretch",
             type="secondary",
-        )
+        ):
+            st.rerun()
 
     with colBoton:
         actualizar_solicitud = st.button(
@@ -527,6 +526,11 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                     disabled=False, # Este si se puede cambiar
                     key="numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                 )
+
+            # Actualizamos la Key de Monto Propuesto dejando el valor por si se actualiza
+            key_monto_propuesto = "monto_propuesto_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            st.session_state[key_monto_propuesto] = formatNumber(d['Monto_Propuesto'])
+
             with col3Info:
                 st.text_input(
                     label="**Monto Propuesto**",
@@ -646,11 +650,15 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     monto_propuesto_total = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
     key_monto_total = 'monto_total_{}_respuesta'.format(solicitud['ID_Solicitud'])
     key_usar_monto_total = 'usar_monto_total_{}'.format(solicitud['ID_Solicitud'])
+    key_deudas_dist_monto = 'deudas_dist_monto_{}'.format(solicitud['ID_Solicitud'])
+    deudas_posibles = [d['Id_Deuda'] for d in solicitud["Datos_Solicitud"]]
 
     if not (key_usar_monto_total in st.session_state):
         st.session_state[key_usar_monto_total] = True
     if not (key_monto_total in st.session_state):
         st.session_state[key_monto_total] = formatNumber(monto_propuesto_total)
+    if not (key_deudas_dist_monto in st.session_state):
+        st.session_state[key_deudas_dist_monto] = deudas_posibles
     for d in solicitud["Datos_Solicitud"]:
         key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
@@ -658,6 +666,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             st.session_state[key_monto] = formatNumber(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
             st.session_state[key_cuotas] = d['Num_Cuotas']
+
+    monto_propuesto_portafolio = sum(
+        cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
+    )
 
     # Paso 3: Aplicar Lógica de Recálculo basado en los Session States
     if st.session_state[key_usar_monto_total]:
@@ -667,8 +679,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.session_state[key_monto_total] = formatNumber(monto_total)
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
+            if not (d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]):
+                continue
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            porcentaje_propuesto_original = cleanNumber(d['Monto_Propuesto']) / monto_propuesto_total if monto_propuesto_total > 0 else 0
+            porcentaje_propuesto_original = cleanNumber(d['Monto_Propuesto']) / monto_propuesto_portafolio if monto_propuesto_portafolio > 0 else 0
             monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
@@ -721,9 +735,20 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             help="Seleccione si desea establecer el número de cuotas para todas las deudas o por deuda individual.",
         )
 
+    # Paso Siguiente: Mostrar el Pills de las deudas a escoger del Portafolio (Solo si se usa el monto total)
+    if st.session_state[key_usar_monto_total]:
+        st.pills(
+            "**💼 Deudas a Incluir en el Portafolio**",
+            options=deudas_posibles,
+            default=deudas_posibles,
+            help="Seleccione las deudas que desea incluir en el portafolio. Solo se distribuirá el monto total entre estas deudas.",
+            key=key_deudas_dist_monto,
+            selection_mode="multi",
+            width="stretch",
+        )
+
     # Paso Siguiente: Mostrar los Inputs por Deuda
     # Se va a Mostrar: Id_Deuda, Banco, Numero_Credito, Monto Propuesto y Cuotas (Si Hay)
-    st.markdown("### **Datos por Deuda 🏦**")
 
     num_coutas_global = 1
     if cuotas_input == "Para Todas las Deudas":
@@ -739,6 +764,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Expander para mostrar los Inputs por Deuda
     with st.expander("**💸 Respuesta por Deuda**", expanded=False):
+        st.markdown("### **Datos por Deuda 🏦**")
         if cuotas_input == "Por Deuda":
             colIdDeuda, colNumCredito, colMontoActual, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(6, border=True)
         else:
@@ -1260,6 +1286,80 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
             else:
                 st.toast("Intenta de Nuevo subir la Solicitud",icon="❌")
 
+# Diálogo para ContraOfertar una Solicitud de Validación (Sin Implementar)
+
+# Díalogo para Confirmar la Actualización de las Solicitudes a "Solicitado"
+@st.dialog("🫡 Confirmar Actualización de Solicitudes", dismissible=True, width="medium", on_dismiss="rerun")
+def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> None:
+    st.markdown("### **ℹ️ Información de la Actualización de Solicitudes**")
+    st.divider()
+
+    # Mostramos un Mensaje de Confirmación
+    st.warning(
+        "¿Está seguro que desea actualizar las solicitudes seleccionadas a 'Solicitado'? Esta acción no se puede deshacer.",
+        icon="⚠️",
+    )
+
+    # Mostramos un Resumen de las Solicitudes a Actualizar
+    st.markdown("### **Resumen de Solicitudes a Actualizar**")
+    # Creamos 3 Métricas: Número de Solicitudes, Número de Deudas y Monto Total Propuesto
+    num_solicitudes = len(solicitudes)
+    num_deudas = sum(len(s['Datos_Solicitud']) for _, s in solicitudes.iterrows())
+    monto_total_propuesto = sum(sum(cleanNumber(d['Monto_Propuesto']) for d in s['Datos_Solicitud']) for _, s in solicitudes.iterrows())
+
+    colNumSolicitudes, colNumDeudas, colMontoTotal = st.columns(3, vertical_alignment="center", border=True)
+    with colNumSolicitudes:
+        st.metric(
+            label="**🆔 Número de Solicitudes**",
+            value=num_solicitudes,
+            delta=None,
+            help="Número de solicitudes que se actualizarán a 'Solicitado'.",
+        )
+    with colNumDeudas:
+        st.metric(
+            label="**🔢 Número de Deudas**",
+            value=num_deudas,
+            delta=None,
+            help="Número de deudas que se actualizarán a 'Solicitado'.",
+        )
+    with colMontoTotal:
+        st.metric(
+            label="**💸 Monto Total Propuesto**",
+            value=formatNumber(monto_total_propuesto),
+            delta=None,
+            help="Monto total propuesto que se actualizará a 'Solicitado'.",
+        )
+
+    st.space("medium")
+
+    # Mostramos 2 Botones: Uno para Cancelar y Otro para Confirmar
+    colCancelar, colConfirmar = st.columns(2, vertical_alignment="center", gap="large")
+    with colCancelar:
+        if st.button(
+            label="**Cancelar**",
+            key="cancelar_actualizacion_solicitudes",
+            help="Haga clic para cancelar la actualización de solicitudes.",
+            type="secondary",
+            width="stretch",
+        ):
+            st.rerun()
+
+    with colConfirmar:
+        if st.button(
+            label="**Confirmar Actualización**",
+            key="confirmar_actualizacion_solicitudes",
+            help="Haga clic para confirmar la actualización de solicitudes.",
+            type="primary",
+            width="stretch",
+        ):
+            # Actualizamos las Solicitudes a "Solicitado"
+            success = update_solicitudes_to_solicitado(solicitudes=solicitudes)
+            if success:
+                st.toast("Solicitudes actualizadas exitosamente a 'Solicitado'.", icon="✅")
+                st.rerun()
+            else:
+                st.toast("Intenta de Nuevo actualizar las Solicitudes",icon="❌")
+
 # Función Auxiliar para Mostrar los Detalles de los Solicitudes de Deuda
 def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False, origen: str) -> None:
     # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
@@ -1496,9 +1596,6 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         
         with colInfoCopy:
             st.info("Haga clic en el botón para copiar todos los datos de la solicitud al portapapeles.", icon="ℹ️")
-
-        # Vamos a Crear 6 o 7 Columnas: Boton de Copiar, Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
-        hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="ejecutivo")
@@ -1783,7 +1880,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
-def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesSchema]) -> None:
+def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     st.title("😎 Resumen de Solicitudes")
     # Siguiente: Definición del Dashboard de Resumen de Solicitudes
     st.divider()
@@ -1880,25 +1977,6 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: DataFrame[SolicitudesS
                 color_discrete_sequence=px.colors.qualitative.Set3
             )
             st.plotly_chart(fig_ejecutivo, width='stretch', key="ejecutivo_no_response_ejecutivo")
-
-        # Ahora Mostramos un Gráfico de Barras para Bancos
-        st.subheader("🏦 Por Banco")
-        df_bancos_sin_responder = obtener_df_bancos_sin_responder(solicitudes)
-        fig_bancos = px.bar(
-            df_bancos_sin_responder,
-            x='Banco',
-            y='Solicitudes Sin Responder',
-            title='Solicitudes Sin Responder por Banco',
-            color='Solicitudes Sin Responder',
-            color_continuous_scale=px.colors.sequential.Viridis
-        )
-        # Ahora Renombramos los ejes para que sean más claros
-        fig_bancos.update_layout(
-            xaxis_title="Banco",
-            yaxis_title="Cantidad de Solicitudes Sin Responder",
-            coloraxis_colorbar=dict(title="Cantidad")
-        )
-        st.plotly_chart(fig_bancos, width='stretch', key="bancos_no_response_ejecutivo")
     else:
         st.success("No hay solicitudes sin responder en este momento.", icon="✅")
 
