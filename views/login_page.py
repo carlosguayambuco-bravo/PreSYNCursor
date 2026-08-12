@@ -52,4 +52,13 @@ def show_login_page():
         """,
         unsafe_allow_html=True,
     )
-    st.stop()  # Detenemos la ejecución del script hasta que el usuario se autentique
+
+    st.space("medium")
+    # Creamos un Botón para volver a generar el enlace de autenticación en caso de que el usuario no pueda iniciar sesión
+    if st.button("🔄 Volver a generar enlace de autenticación",type="secondary"):
+        auth_url = get_auth_url()
+        st.session_state["auth_url"] = auth_url
+        st.session_state["auth_url_generated"] = True
+        st.toast("Enlace de autenticación regenerado. Por favor, intenta iniciar sesión nuevamente.",icon="🔄")
+
+    st.stop()
