@@ -19,7 +19,7 @@ from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_S
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
-from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
+from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
 # Función para Mostrar los Filtros Generales de una Solicitud (Versión Ejecutivo)
 def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
@@ -529,7 +529,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
             with col3Info:
                 st.text_input(
                     label="**Monto Propuesto**",
-                    value="{:,.0f}".format(d['Monto_Propuesto']),
+                    value=formatNumber(d['Monto_Propuesto']),
                     disabled=True,
                     key="monto_propuesto_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                 )
@@ -642,19 +642,19 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([2, 2, 1, 1], vertical_alignment="center")
 
     # Paso 2: Inicializar Valores en el Session_State por Primera Vez
-    monto_propuesto_total = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
+    monto_propuesto_total = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
     key_monto_total = 'monto_total_{}_respuesta'.format(solicitud['ID_Solicitud'])
     key_usar_monto_total = 'usar_monto_total_{}'.format(solicitud['ID_Solicitud'])
 
     if not (key_usar_monto_total in st.session_state):
         st.session_state[key_usar_monto_total] = True
     if not (key_monto_total in st.session_state):
-        st.session_state[key_monto_total] = '{:,.0f}'.format(monto_propuesto_total) 
+        st.session_state[key_monto_total] = formatNumber(monto_propuesto_total)
     for d in solicitud["Datos_Solicitud"]:
         key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
         if not (key_monto in st.session_state):
-            st.session_state[key_monto] = '{:,.0f}'.format(d['Monto_Propuesto'])
+            st.session_state[key_monto] = formatNumber(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
             st.session_state[key_cuotas] = d['Num_Cuotas']
 
@@ -662,27 +662,28 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     if st.session_state[key_usar_monto_total]:
         # Actualizamos el Session State de Monto Propuesto por Deuda basado en el Monto Total
         monto_total = cleanNumber(st.session_state[key_monto_total], default_nan=0.0)
+        # Lo formateamos para que se vea bonito
+        st.session_state[key_monto_total] = formatNumber(monto_total)
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
-            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            porcentaje_propuesto_original = d['Monto_Propuesto'] / monto_propuesto_total if monto_propuesto_total > 0 else 0
+            porcentaje_propuesto_original = cleanNumber(d['Monto_Propuesto']) / monto_propuesto_total if monto_propuesto_total > 0 else 0
             monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo)
+            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            st.session_state[key_monto] = formatNumber(monto_propuesto_nuevo)
     else:
         # La Actualización del Monto Total se hace basado en la Suma de los Montos Propuestos por Deuda
         monto_total = sum(
             cleanNumber(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
             )
-        st.session_state[key_monto_total] = '{:,.0f}'.format(monto_total)
+        st.session_state[key_monto_total] = formatNumber(monto_total)
         # Actualizamos a cada Deuda el Monto Propuesto basado en el Session State
         for d in solicitud["Datos_Solicitud"]:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             estado_deuda = st.session_state[key_monto]
-            monto_propuesto_nuevo = cleanNumber(estado_deuda, default_nan=0.0)
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo) if monto_propuesto_nuevo > 0 else estado_deuda
+            st.session_state[key_monto] = formatNumber(estado_deuda)
 
     with colFechaLimite:
         fecha_limite_pago = st.date_input(
@@ -775,7 +776,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             with colSolicitado:
                 st.text_input(
                     label="$Solicitado",
-                    value="{:,.0f}".format(d['Monto_Propuesto']),
+                    value=formatNumber(d['Monto_Propuesto']),
                     disabled=True,
                     key="monto_solicitado_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                     label_visibility="collapsed",
@@ -1115,7 +1116,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         st.stop()
 
     # Creamos una Visualización Tipo Pills para seleccionar las Deudas y Addendums a Usar
-    debt_ids = [d['Id_Deuda'] for d in deudas_info if d['Monto_Propuesto'] > 0]
+    debt_ids = [d['Id_Deuda'] for d in deudas_info if cleanNumber(d['Monto_Propuesto']) > 0]
     selected_ids = st.pills(
         "**Deudas y Addendums usados**",
         options=debt_ids,
@@ -1164,7 +1165,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
             with colNumCredito:
                 st.code(d['Numero_Credito'], language="text")
             with colMontoPropuesto:
-                st.code("${:,.0f}".format(d['Monto_Propuesto']), language="text")
+                st.code(formatNumber(d['Monto_Propuesto']), language="text")
             if hay_cuotas:
                 with colCuotas: # type: ignore
                     st.code(d['Num_Cuotas'], language="text")
@@ -1313,7 +1314,7 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
         with colMontoPropuesto:
             st.text_input(
                 label = "**Monto Propuesto**",
-                value = "${:,.2f}".format(d['Monto_Propuesto']),
+                value = formatNumber(d['Monto_Propuesto']),
                 disabled=disable_inputs,
                 help="Monto propuesto para la deuda.",
                 key="monto_propuesto_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
@@ -1354,7 +1355,7 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
     
     for d in solicitud["Datos_Solicitud"]:
         # Definimos el Monto Solicitado Original de la Deuda
-        monto_respuesta = next((item['Monto_Propuesto'] for item in solicitud["JSON_Respuesta"] if item["Id_Deuda"] == d["Id_Deuda"]), "N/A")
+        monto_respuesta = next((cleanNumber(item['Monto_Propuesto']) for item in solicitud["JSON_Respuesta"] if item["Id_Deuda"] == d["Id_Deuda"]), "N/A")
         with colIdDeuda:
             st.code(d['Id_Deuda'], language="text")
         with colBanco:
@@ -1362,10 +1363,10 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
         with colNumCredito:
             st.code(d['Numero_Credito'], language="text")
         with colMontoSolicitado:
-            st.code("${:,.2f}".format(d['Monto_Propuesto']), language="text")
+            st.code(formatNumber(d['Monto_Propuesto']), language="text")
         with colMontoRespuesta:
             if monto_respuesta != "N/A":
-                st.code("${:,.2f}".format(monto_respuesta), language="text")
+                st.code(formatNumber(monto_respuesta), language="text")
             else:
                 st.code("No Brindado", language="text")
         if hay_cuotas:
@@ -1394,10 +1395,10 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         colMonto, colPersona, colBancos, colCedula = st.columns([2,2,2,2],vertical_alignment="center")
 
         with colMonto:
-            monto_total_solicitud = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
-            monto_actual_solicitud = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"])
+            monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
+            monto_actual_solicitud = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"])
             st.metric(
-                label="**Monto Total:**", value="${:,.0f}".format(monto_total_solicitud),
+                label="**Monto Total:**", value=formatNumber(monto_total_solicitud),
                 help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
                 delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
                 border=True,
@@ -1538,10 +1539,10 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 border=True,
             )
         with colMontoTotal:
-            monto_total_solicitud = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
-            monto_actual_solicitud = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"])
+            monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
+            monto_actual_solicitud = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"])
             st.metric(
-                label="**Monto Total:**", value="${:,.0f}".format(monto_total_solicitud),
+                label="**Monto Total:**", value=formatNumber(monto_total_solicitud),
                 help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
                 delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
                 border=True,
@@ -1685,10 +1686,10 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colMontoRespuesta: # type: ignore
                 deudas_respuesta = solicitud.get("JSON_Respuesta", []) + solicitud.get("Metadata_Solicitud", {}).get("Addendums", [])
                 deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
-                monto_total_respuesta = sum(d['Monto_Propuesto'] for d in solicitud["Datos_Solicitud"])
-                monto_actual_respuesta = sum(d['Monto_Actual'] for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
+                monto_total_respuesta = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
+                monto_actual_respuesta = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
                 st.metric(
-                    label="**Monto Respuesta:**", value="${:,.0f}".format(monto_total_respuesta),
+                    label="**Monto Respuesta:**", value=formatNumber(monto_total_respuesta),
                     help = "El monto total de la respuesta (La Suma de los Valores Propuestos por Deuda) que se envió al Aliado",
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
                     border=True,

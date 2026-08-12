@@ -8,6 +8,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_models import DeudasActivasSchema
 from modules.forms import obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
+from utils.helpers_general import cleanNumber, formatNumber
 
 def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[str]:
     st.subheader("Deudas Activas del Cliente")
@@ -62,7 +63,7 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
             st.text(row['Banco'])
 
         with colPaBOrigen:
-            st.text('${:,.0f}'.format(row['PaB_Origen']))
+            st.text(formatNumber(row['PaB_Origen']))
 
     # Definimos los Ids elegidos de las Deudas Seleccionadas
     deudas_seleccionadas = [deuda for deuda in deudas_activas_df['Id_Deuda'] if st.session_state.get(f"select_deuda_{deuda}", False)]
@@ -101,13 +102,15 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         st.session_state['usar_para_todos'] = True
 
     if 'pago_total' not in st.session_state:
-        st.session_state['pago_total'] = float(round(suma_pab * 0.7, 2))
+        st.session_state['pago_total'] = formatNumber(round(suma_pab * 0.7, 2))
+
+    pago_total = cleanNumber(st.session_state['pago_total'])
 
     for _, row in deudas_activas_df_copy.iterrows():
         key_monto = f"monto_propuesto_{row['Id_Deuda']}"
         key_cuotas = f"num_cuotas_{row['Id_Deuda']}"
         if key_monto not in st.session_state:
-            st.session_state[key_monto] = float(round(st.session_state['pago_total'] * row['%Total'],2))
+            st.session_state[key_monto] = formatNumber(pago_total * row['%Total'])
         if key_cuotas not in st.session_state:
             st.session_state[key_cuotas] = 1
 
@@ -115,24 +118,26 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
     if st.session_state['usar_para_todos']:
         # Si la opción "Distribuir" está activa, actualizamos el estado de cada deuda
         for _, row in deudas_activas_df_copy.iterrows():
-            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = float(
-                round(st.session_state['pago_total'] * row['%Total'],2)
-            )
+            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = formatNumber(pago_total * row['%Total'])
+        # Aplicamos el formateo para el pago_total
+        st.session_state['pago_total'] = formatNumber(pago_total)
     else:
         # Si se edita individualmente, recalculamos el total como la suma de las deudas
-        st.session_state['pago_total'] = float(round(sum(
-            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] for _, row in deudas_activas_df_copy.iterrows()
-        ),2))
+        pago_total_nuevo = sum(
+            cleanNumber(st.session_state[f"monto_propuesto_{row['Id_Deuda']}"]) for _, row in deudas_activas_df_copy.iterrows()
+        )
+        st.session_state['pago_total'] = formatNumber(pago_total_nuevo)
+        # Ahora Formateamos el monto_propuesto de cada deuda para que se vea bonito en pantalla
+        for _, row in deudas_activas_df_copy.iterrows():
+            key_monto = f"monto_propuesto_{row['Id_Deuda']}"
+            st.session_state[key_monto] = formatNumber(st.session_state[key_monto])
 
     # 4. Renderizado de Controles Principales
     colPagoTotal, colUsarParaTodos, colCuotas = st.columns([2, 1, 1], vertical_alignment="center")
 
     with colPagoTotal:
-        st.number_input(
+        st.text_input(
             "Monto Total a Pagar",
-            min_value=0.0,
-            step=100.0,
-            format="%.0f",
             key="pago_total",  # Vinculado directamente al Session State
             help="Ingresar el Monto a Pagar por todas las Deudas",
             disabled=not st.session_state['usar_para_todos']
@@ -194,28 +199,46 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto = st.columns([2, 2, 2, 1, 3], gap="small", vertical_alignment="center")
 
         with colIdDeuda:
-            st.text(id_deuda)
+            st.text_input(
+                "",
+                value=row['Id_Deuda'],
+                disabled=True,
+                label_visibility="collapsed",
+                key=f"id_deuda_{id_deuda}_forms_input"
+            )
 
         with colPaBOrigen:
-            st.text('${:,.0f}'.format(row['PaB_Origen']))
+            st.text_input(
+                "",
+                value=formatNumber(row['PaB_Origen']),
+                disabled=True,
+                label_visibility="collapsed",
+                key=f"pab_origen_{id_deuda}_forms_input"
+            )
 
         with colProp:
             descuento_base = obtener_descuento_base(deuda=id_deuda)
-            if not pd.isna(descuento_base):
-                st.text('${:,.0f}'.format(descuento_base))
-            else:
-                st.text("N/A")
+            st.text_input(
+                "",
+                value=formatNumber(descuento_base) if pd.notna(descuento_base) else "N/A",
+                disabled=True,
+                label_visibility="collapsed",
+                key=f"descuento_base_{id_deuda}_forms_input"
+            )
 
         with colPorcentaje:
-            st.text('{:.2%}'.format(row['%Total']))
+            st.text_input(
+                "",
+                value='{:.2%}'.format(row['%Total']),
+                disabled=True,
+                label_visibility="collapsed",
+                key=f"porcentaje_{id_deuda}_forms_input"
+            )
 
         with colMontoPropuesto:
             # Al no definir 'value', toma automáticamente el valor de st.session_state[key]
-            st.number_input(
+            st.text_input(
                 "",
-                min_value=0.0,
-                step=100.0,
-                format="%.0f",
                 disabled=st.session_state['usar_para_todos'],
                 label_visibility="collapsed",
                 key=f"monto_propuesto_{id_deuda}",
@@ -251,13 +274,13 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             "Banco": row['Banco'],
             "Numero_Credito": row['Numero_Credito'],
             "Monto_Actual": row['PaB_Origen'],
-            "Monto_Propuesto": st.session_state[f"monto_propuesto_{id_deuda}"],
+            "Monto_Propuesto": cleanNumber(st.session_state[f"monto_propuesto_{id_deuda}"]),
             "Num_Cuotas": cuotas_val
         })
 
     return info_completa_deudas
 
-def mostrar_alertas_masivas_deudas(*, deudas_info: dict[str, float]) -> bool:
+def mostrar_alertas_masivas_deudas(*, deudas_info_list: list[dict[str, Any]]) -> bool:
     """
     Muestra alertas en Streamlit si alguna de las deudas seleccionadas tiene un monto propuesto menor al descuento base.
     
@@ -268,20 +291,27 @@ def mostrar_alertas_masivas_deudas(*, deudas_info: dict[str, float]) -> bool:
     """
 
     alguna_deuda_cumple = False  # Variable para verificar si alguna deuda cumple con la condición
+    # Creamos deudas_info
+    deudas_info = {deuda['Id_Deuda']: cleanNumber(deuda['Monto_Propuesto']) for deuda in deudas_info_list}
     with st.expander("Verificación de Descuentos en Base"):
-        for deuda in deudas_info.keys():
-            cumple, mensaje = validar_descuento_base(deuda=deuda, deudas_info=deudas_info)
+        for deuda in deudas_info_list:
+            cumple, mensaje = validar_descuento_base(deuda=deuda['Id_Deuda'], deudas_info=deudas_info)
+
+            # Verificamos también que el monto propuesto no sea 0
+            if deuda['Monto_Propuesto'] == 0:
+                cumple = False
+                mensaje = "El monto propuesto para esta deuda es 0, lo cual no es válido."
 
             colDeuda, colMensaje = st.columns([1, 4])
 
             with colDeuda:
-                st.markdown(f"**Deuda**: {deuda}")
+                st.markdown(f"**Deuda**: {deuda['Id_Deuda']}")
 
             with colMensaje:
                 if cumple:
-                    st.success(mensaje)
+                    st.success(mensaje, icon="✅")
                 else:
-                    st.error(mensaje)
+                    st.error(mensaje, icon="❌")
 
             if cumple:
                 alguna_deuda_cumple = True  # Al menos una deuda cumple con la condición
@@ -300,10 +330,10 @@ def mostrar_resumen_solicitud(*,
     st.subheader("📄 Resumen de la Solicitud")
 
     # Creamos 2 Columnas: Una para mostrar la Referencia y los datos de deudas y Otra para mostrar el Monto, Descuento y Tipo de Solicitud
-    colResumen, colMonto = st.columns([5, 2], vertical_alignment="center")
+    colResumen, colMonto = st.columns([5, 3], vertical_alignment="center")
 
     # Calculamos el Monto de la Solicitud y el Descuento que se tendría con respecto al Monto Original de las Deudas Seleccionadas
-    montoTotal = sum(deuda['Monto_Propuesto'] for deuda in info_completa_deudas)
+    montoTotal = sum(cleanNumber(deuda['Monto_Propuesto']) for deuda in info_completa_deudas)
     montoTotalOriginal = deudas_seleccionadas_df['PaB_Origen'].sum()
     descuentoTotal = 1 - (montoTotal / montoTotalOriginal) if montoTotalOriginal > 0 else 0
 
@@ -325,7 +355,7 @@ def mostrar_resumen_solicitud(*,
             with colIdDeuda:
                 st.text(deuda['Id_Deuda'])
             with colMontoPropuesto:
-                st.text('${:,.0f}'.format(deuda['Monto_Propuesto']))
+                st.text('$'+formatNumber(deuda['Monto_Propuesto']))
             with colNumCuotas:
                 st.text(deuda['Num_Cuotas'])
 

@@ -18,7 +18,7 @@ from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_nombre_negociador
 from services import GoogleDriveService, GoogleMailService
-from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
+from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized
 
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
@@ -43,7 +43,7 @@ def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','J
 
     # Paso 2: Iterar sobre cada deuda en la solicitud y añadir sus detalles
     for deuda in solicitud[origen]:
-        solicitud_txt += f"    - **Banco**: {deuda['Banco']}, **Numero_Credito**: {deuda['Numero_Credito']}, **Monto_Propuesto**: ${deuda['Monto_Propuesto']:,.2f}"
+        solicitud_txt += f"    - **Banco**: {deuda['Banco']}, **Numero_Credito**: {deuda['Numero_Credito']}, **Monto_Propuesto**: ${formatNumber(deuda['Monto_Propuesto'])}"
         if deuda.get('Num_Cuotas', 1) > 1:
             solicitud_txt += f", (**Num_Cuotas**: {deuda['Num_Cuotas']})"
         solicitud_txt += "\n"
@@ -363,8 +363,8 @@ def upload_massive_addendums(*,solicitud: pd.Series) -> bool:
         if not all([
             addendum.get('Numero_Credito'),
             addendum.get('Banco'),
-            addendum.get('Monto_Actual', 0) > 0,
-            addendum.get('Monto_Propuesto', 0) > 0
+            cleanNumber(addendum.get('Monto_Actual', 0)) > 0,
+            cleanNumber(addendum.get('Monto_Propuesto', 0)) > 0
         ]):
             st.warning(f"El Addendum #{addendum.get('Id_Counter', 'N/A')} no se sube por falta de Datos.")
             continue  # Saltamos este Addendum y continuamos con el siguiente
@@ -376,8 +376,8 @@ def upload_massive_addendums(*,solicitud: pd.Series) -> bool:
             bank=addendum.get('Banco', ''),
             number_credit=addendum.get('Numero_Credito', ''),
             aliado=solicitud['Casa_Cobro'],
-            monto_inicial=addendum.get('Monto_Actual', 0),
-            monto_propuesto=addendum.get('Monto_Propuesto', None)
+            monto_inicial=cleanNumber(addendum.get('Monto_Actual', 0)),
+            monto_propuesto=cleanNumber(addendum.get('Monto_Propuesto', 0))
         ):
             st.warning(f"El Addendum #{addendum.get('Id_Counter', 'N/A')} no se sube por un error en la subida.")
             continue  # Saltamos este Addendum y continuamos con el siguiente
@@ -398,7 +398,7 @@ def generar_nombre_acuerdo_pago(solicitud_info: pd.Series) -> str:
     esqueleto_nombre = "Acuerdo_Pago_{ID_Solicitud}_{Ids_Deudas} - {Cedula}.pdf"
     return esqueleto_nombre.format(
         ID_Solicitud=solicitud_info['ID_Solicitud'],
-        Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in solicitud_info['JSON_Respuesta'] if d['Monto_Propuesto'] > 0),
+        Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in solicitud_info['JSON_Respuesta'] if cleanNumber(d['Monto_Propuesto']) > 0),
         Cedula=solicitud_info['Cedula']
     )
 
@@ -464,7 +464,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: DataFrame[SolicitudesSc
                 'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
                 'Numero_Obligacion': deuda['Numero_Credito'],
                 'Banco': deuda['Banco'],
-                'Propuesta': deuda.get('Monto_Propuesto', np.nan),
+                'Propuesta': cleanNumber(deuda.get('Monto_Propuesto', np.nan), default_nan=np.nan),
                 'Portafolio': '1' if len(solicitud['Datos_Solicitud']) > 1 else '',
                 'Plazos': deuda.get('Num_Cuotas', ''),
             }
@@ -859,12 +859,12 @@ def crear_plantilla_solicitud_acuerdo_pago(
                 'Id_Deuda': deuda['Id_Deuda'],
                 'Banco': deuda['Banco'],
                 'Numero_Credito': deuda['Numero_Credito'],
-                'Monto_Propuesto': deuda.get('Monto_Propuesto', 0),
+                'Monto_Propuesto': cleanNumber(deuda.get('Monto_Propuesto', 0)),
                 'Num_Cuotas': deuda.get('Num_Cuotas', 1),
-                'Monto_Actual': deuda.get('Monto_Actual', 0)
+                'Monto_Actual': cleanNumber(deuda.get('Monto_Actual', 0))
             }
             for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", []))
-            if (deuda.get('Monto_Propuesto', 0) > 0) and (deuda['Id_Deuda'] in selected_ids)
+            if (cleanNumber(deuda.get('Monto_Propuesto', 0)) > 0) and (deuda['Id_Deuda'] in selected_ids)
         ]
         ),
         'Ejecutivo': solicitud['Ejecutivo'],

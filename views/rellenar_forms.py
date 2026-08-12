@@ -8,6 +8,7 @@ import pandas as pd
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
+from utils.helpers_general import cleanNumber
 
 # Carga de Información Necesaria para el Formulario
 # Se Necesita:
@@ -232,7 +233,7 @@ if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
         deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
     )
 
-deudas_info = {deuda: st.session_state.get(f'monto_propuesto_{deuda}', 0) for deuda in deudas_seleccionadas}
+deudas_info = {deuda: cleanNumber(st.session_state.get(f'monto_propuesto_{deuda}', 0)) for deuda in deudas_seleccionadas}
 
 # --- Siguiente: Alertas y Verificaciones ---
 
@@ -261,7 +262,7 @@ if aliado_seleccionado != 'Directo Base':
 # Alerta 4: Verificacion de Descuentos en Base
 if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
     #  Verificamos por cada Deuda si se cumple
-    avanzar_proceso = mostrar_alertas_masivas_deudas(deudas_info=deudas_info)
+    avanzar_proceso = mostrar_alertas_masivas_deudas(deudas_info_list=info_completa_deudas)
 else:
     avanzar_proceso = True
 

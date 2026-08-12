@@ -33,7 +33,7 @@ def cleanText(txt) -> str:
     return txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
 
 # Función Auxiliar para Limpiar Números
-def cleanNumber(value, default_nan: float = np.nan) -> float:
+def cleanNumber(value, default_nan: float = 0.0) -> float:
     if not isinstance(value, str):
         return value
     # Reemplazamos X por ''
@@ -214,3 +214,18 @@ def clean_tildes(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text
+
+# Función Auxiliar para Mostrar un Número que actualmente es texto y manejando decimales adaptativos
+def formatNumber(num_str: str|float) -> str:
+    # Paso 1: Limpiar el Número usando cleanNumber
+    num = cleanNumber(num_str, default_nan=0.0)
+    # Si el Numero es <= 0, devolvemos el valor original
+    if num <= 0 and isinstance(num_str, str):
+        return num_str
+    # Paso 2: Determinar la Existencia de decimales
+    if num % 1 == 0:
+        # No hay decimales, devolvemos como entero
+        return f"{int(num):,}".replace(",", ".")
+    else:
+        # Hay decimales, devolvemos con 2 decimales
+        return f"{num:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
