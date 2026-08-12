@@ -125,21 +125,36 @@ def normalizar_banco(banco: str) -> str:
 def normalizar_bancos_vectorizado(bancos: pd.Series) -> pd.Series:
     # Paso 1: Aplicar .title y strip a toda la Serie
     bancos_limpios = bancos.str.title().str.strip()
-    # Paso 2: Crear Máscara para Patrones Únicos
+    # Paso 2: Crear una Máscara para tener un seguimiento de los Bancos Cambiados
+    mask_cambiados = pd.Series(False, index=bancos_limpios.index)
+    # Paso 3: Crear Máscara para Patrones Únicos
     mask_unicos = bancos_limpios.isin(PATRONES_UNICOS_BANCOS.keys())
+
+    # Paso 4: Normalizar Bancos Usando Diccionarios y Patrones
 
     # Procesamiento Únicos: Usar diccionario
     bancos_limpios.loc[mask_unicos] = bancos_limpios.loc[mask_unicos].map(PATRONES_UNICOS_BANCOS)
+    mask_cambiados = mask_cambiados | mask_unicos
+
+    if mask_cambiados.all():
+        return bancos_limpios
 
     # Procesamiento Diferentes: Usar diccionario completo
     for banco_normalizado, patrones in DICCIONARIO_BANCOS.items():
-        mask_patrones = bancos_limpios.isin(patrones)
+        mask_patrones = bancos_limpios.isin(patrones) & ~mask_cambiados
+        mask_cambiados = mask_cambiados | mask_patrones
         bancos_limpios.loc[mask_patrones] = banco_normalizado
+        if mask_cambiados.all():
+            return bancos_limpios
 
     # Procesamiento por Patrones: Usar diccionario de búsqueda
     for banco_normalizado, patron in DICCIONARIO_BUSQUEDA_PATRONES_BANCOS.items():
-        mask_patron = bancos_limpios.str.contains(patron, case=False, na=False)
+        mask_patron = bancos_limpios.str.contains(patron, case=False, na=False) & ~mask_cambiados
+        mask_cambiados = mask_cambiados | mask_patron
         bancos_limpios.loc[mask_patron] = banco_normalizado
 
-    # Paso 3: Devolver la Serie Normalizada
+        if mask_cambiados.all():
+            return bancos_limpios
+
+    # Paso 5: Devolver la Serie Normalizada
     return bancos_limpios

@@ -40,7 +40,7 @@ class GoogleDriveService:
                 'parents': [folder_id],
                 'mimeType': mime_type
             }
-            file = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            file = self.service.files().create(body=file_metadata, media_body=media, fields='id',supportsAllDrives=True).execute()
             return file.get('id')
         except Exception as e:
             st.error(f"Error al subir el archivo a Google Drive: {e}")

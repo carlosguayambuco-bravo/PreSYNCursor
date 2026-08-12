@@ -666,7 +666,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
             porcentaje_propuesto_original = d['Monto_Propuesto'] / monto_propuesto_total if monto_propuesto_total > 0 else 0
-            monto_propuesto_nuevo = monto_total * porcentaje_propuesto_original
+            monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
             st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo)
     else:
@@ -678,9 +678,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Actualizamos a cada Deuda el Monto Propuesto basado en el Session State
         for d in solicitud["Datos_Solicitud"]:
             key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-            monto_propuesto_nuevo = cleanNumber(st.session_state[key_monto], default_nan=0.0)
+            estado_deuda = st.session_state[key_monto]
+            monto_propuesto_nuevo = cleanNumber(estado_deuda, default_nan=0.0)
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo) if monto_propuesto_nuevo > 0 else ''
+            st.session_state[key_monto] = '{:,.0f}'.format(monto_propuesto_nuevo) if monto_propuesto_nuevo > 0 else estado_deuda
 
     with colFechaLimite:
         fecha_limite_pago = st.date_input(
