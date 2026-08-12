@@ -44,5 +44,6 @@ class GoogleDriveService:
             st.success(f"Archivo subido exitosamente a Google Drive.", icon="✅")
             return file.get('id')
         except Exception as e:
+            print(f"Error al subir el archivo a Google Drive: {e}")
             st.error(f"Error al subir el archivo a Google Drive: {e}", icon="❌")
             return ''

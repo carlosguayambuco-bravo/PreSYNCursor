@@ -46,6 +46,7 @@ class GoogleMailService:
             st.success("Correo enviado exitosamente a {}".format(to), icon="✅")
             return True
         except Exception as e:
+            print(f"Error al enviar el correo: {e}")
             st.error(f"Error al enviar el correo: {e}", icon="❌")
             return False
 
