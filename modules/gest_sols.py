@@ -269,6 +269,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         if 'Addendums' in solicitud['Metadata_Solicitud']:
             solicitud_to_update['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
 
+        if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
+            solicitud_to_update['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
+
         # Agregamos el ID de la Solicitud Actualizada al Set de IDs Actualizados
         updated_ids.add(solicitud_to_update['ID_Solicitud'])
         need_update_rows.append(solicitud_to_update)
@@ -276,7 +279,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     # Verificación Intermedia: Si la solicitud no es Exitosa, no hay posiblidad de Sub-Solicitudes, entonces se deja así
 
     # Paso 3: Actualizar Sub-Solicitdues si no es necesario el Pago Total Obligatorio y si es Exitosa y si es Validación
-    if solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] == 'Validación':
+    if (not solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', True)) and (solicitud['Estado_Solicitud'] == 'Exitosa') and (solicitud['Tipo_Solicitud'] == 'Validación'):
 
         # Paso 3.1 Obtener las Sub-Solicitudes de la Solicitud Actual
         # Estás son solicitudes que tienen un subconjunto de los IDs de Deuda de la Solicitud Actual
