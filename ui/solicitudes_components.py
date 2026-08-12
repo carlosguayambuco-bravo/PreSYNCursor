@@ -391,6 +391,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             label="Cancelar",
             key="cancelar_solicitud_{}".format(solicitud['ID_Solicitud']),
             on_click=st.rerun,
+            kwargs={"scope": "app"},
             help="Haga clic para cancelar la actualización de la solicitud.",
             width="stretch",
             type="secondary",
@@ -1387,7 +1388,6 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main):
-        st.json(solicitud.to_dict(), expanded=False)
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 

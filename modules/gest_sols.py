@@ -308,8 +308,6 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
         if not send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes):
             st.error("No se pudo enviar el correo con el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="❌")
-    elif pdf_bytes is not None:
-        st.warning("Se generó un PDF pero no se envió correo porque la solicitud no es de tipo Acuerdo de Pago u Oferta de Acuerdo.", icon="⚠️")
     elif pdf_bytes is None and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
         st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
 
@@ -330,6 +328,12 @@ def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     # Paso 4: Obtener el asunto del correo según el Tipo de Solicitud
     tipo_solicitud = solicitudes[0]['Tipo_Solicitud']
     asunto_correo = EMAIL_SUBJECT_MAPPER.get(tipo_solicitud, "Acuerdo de Pago")
+    # Agregamos al Asunto los datos especificos de la solicitud
+    asunto_correo = asunto_correo.format(
+        estado_solicitud=solicitudes[0]['Estado_Solicitud'],
+        referencia=solicitudes[0]['Referencia'],
+        nombre_cliente=solicitudes[0]['Metadata_Solicitud']['Nombre_Cliente']
+    )
     # Paso 5: Generar el Cuerpo del Correo
     string_solicitado = "por {}".format(obtener_nombre_negociador(email=solicitudes[0]['Correo'])) if len(solicitudes) > 1 else "por ti"
     body_correo = EMAIL_BODY_GENERAL.format(
