@@ -26,7 +26,7 @@ def show_login_page():
 
     st.space("medium")
     # Creamos un Botón para volver a generar el enlace de autenticación en caso de que el usuario no pueda iniciar sesión
-    if st.button("🔄 Volver a generar enlace de autenticación",type="secondary"):
+    if st.button("🔄 Volver a generar enlace de autenticación",type="secondary",width="stretch"):
         auth_url = get_auth_url()
         st.session_state["auth_url"] = auth_url
         st.session_state["auth_url_generated"] = True
