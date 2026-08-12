@@ -12,7 +12,7 @@ from pypdf.generic import NameObject, TextStringObject
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_masivas
-from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_to_google_sheets, upload_addendum_debt
+from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_filtered_plantilla, upload_addendum_debt
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
@@ -545,7 +545,7 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: DataFrame[SolicitudesSche
         detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets.")
 
     # Paso 3: Subir la Plantilla Masiva a Google Sheets
-    return upload_massive_solicitudes_to_google_sheets(plantilla_df)
+    return upload_massive_solicitudes_filtered_plantilla(plantilla_df)
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
 def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "reset") -> None:

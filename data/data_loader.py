@@ -31,7 +31,7 @@ CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
 
 #--> Carga de Solicitudes del Mes en Curso
 @st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=MIN_10_WAIT)
-def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
+def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
 
     # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -70,8 +70,54 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
 
+    # Por último, reiniciamos los cambios locales
+    st.session_state['local_changes'] = []
+
     # Devolvemos el DataFrame
     return solicitudes_df
+
+# --> Carga de Solicitudes del Mes en Curso (Aplicando los Cambios locales)
+def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
+    # 1: Cargamos las Solicitudes del Mes en Curso desde Google Sheets
+    solicitudes_df = load_solicitudes_mec()
+
+    sols_ajustadas = solicitudes_df.copy()
+
+    # 2: Aplicamos los Cambios Locales
+    if ('local_changes' in st.session_state) and len(st.session_state['local_changes']) > 0:
+
+        # Paso 1: Creamos un DF con todas las Series
+        local_changes_df = pd.DataFrame(st.session_state['local_changes'])
+        # Quitamos Duplicados dejando el último
+        local_changes_df = local_changes_df.drop_duplicates(subset='ID_Solicitud', keep='last')
+
+        # Paso 2: Preparamos Operaciones por Índices dejando ID_Solicitud
+        local_changes_df = local_changes_df.set_index('ID_Solicitud', drop=False)
+        sols_ajustadas = sols_ajustadas.set_index('ID_Solicitud', drop=False)
+
+        # Paso 3: Diferenciar nuevos de Existentes
+        indices_existentes = sols_ajustadas.index.intersection(local_changes_df.index)
+        indices_nuevos = local_changes_df.index.difference(sols_ajustadas.index)
+
+        # A) Actualizar los que ya existen
+        if not indices_existentes.empty:
+            sols_ajustadas.update(local_changes_df.loc[indices_existentes])
+        
+        # B) Añadir los Nuevos
+        if not indices_nuevos.empty:
+            sols_ajustadas = pd.concat([sols_ajustadas, local_changes_df.loc[indices_nuevos]], axis=0)
+
+        # Restauramos el Indice
+        sols_ajustadas = sols_ajustadas.reset_index(drop=True)
+
+        # Validamos el Esquema
+        if not sols_ajustadas.empty:
+            sols_ajustadas = SolicitudesSchema.validate(sols_ajustadas)
+        else:
+            sols_ajustadas = SolicitudesSchema.empty()
+
+    # 3: Devolver el Nuevo DF
+    return sols_ajustadas
 
 # --> Carga de Cambios de Referencias
 @st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=HOUR_WAIT)

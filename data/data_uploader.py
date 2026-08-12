@@ -23,6 +23,18 @@ def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
     # Paso 4: Calculamos la fila en Google Sheets
     return solicitud_id_int - first_id_int + 2  # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
 
+# Función Auxiliar para Añadir cambios locales
+def add_cambios_locales_to_session_state(cambios_locales: list[pd.Series] | pd.DataFrame):
+    # Paso 1: Inicializar el Session State si no esta inicializado
+    if not ('local_changes' in st.session_state):
+        st.session_state['local_changes'] = []
+
+    # Paso 2: Extender la lista
+    if isinstance(cambios_locales, pd.DataFrame):
+        st.session_state['local_changes'].extend([cambios_locales.iloc[i] for i in range(len(cambios_locales))])
+    else:
+        st.session_state['local_changes'].extend(cambios_locales)
+
 # Función para subir una respuesta de Formulario a Google Sheets
 def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, int]:
     # Volvemos la Respuesta a un DataFrame para poder subirla a Google Sheets
@@ -54,6 +66,8 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
     # Subimos la respuesta a Google Sheets
     try:
         appendDataFrameToEnd(responses_ws, response_df)
+        # Añadimos los Cambios a local
+        add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:
         st.error(f"Error al subir la respuesta a Google Sheets: {e}")
@@ -82,6 +96,9 @@ def update_solicitud_in_google_sheets(solicitud: pd.Series) -> bool:
         # Aplicamos la Actualización a la Worksheet (usando _retry para manejar posibles errores de red)
         _retry(lambda: solicitudes_ws.update(range_name=cell_range, values=[solicitud_data]), label="Update Solicitud")
 
+        # Agregamos la serie a los cambios locales
+        add_cambios_locales_to_session_state([solicitud])
+
         return True
     except Exception as e:
         st.error(f"Error al actualizar la solicitud en Google Sheets: {e}")
@@ -104,15 +121,21 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
     solicitudes_data = [[get_solicitud_row_in_google_sheets(row[0])] + row for row in solicitudes_data]
 
     # Usamos la función de actualización masiva
-    return update_sheet_data_batch(
+    succeded = update_sheet_data_batch(
         ws=solicitudes_ws,
         data=solicitudes_data,
         start_col_letter="A",
         cell_threshold=10000
     )
 
+    if succeded:
+        # Añadimos los Cambios a local
+        add_cambios_locales_to_session_state(solicitudes_df)
+    
+    return succeded
+
 # Función Auxiliar para Subir una plantilla masiva de Solicitudes a Sheets
-def upload_massive_solicitudes_to_google_sheets(plantilla_df: pd.DataFrame) -> bool:
+def upload_massive_solicitudes_filtered_plantilla(plantilla_df: pd.DataFrame) -> bool:
     # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
     sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
 
