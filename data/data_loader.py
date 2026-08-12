@@ -78,7 +78,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     return solicitudes_df
 
 # --> Carga de Solicitudes del Mes en Curso (Aplicando los Cambios locales)
-def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
+def load_current_month_solicitudes() -> pd.DataFrame:
     # 1: Cargamos las Solicitudes del Mes en Curso desde Google Sheets
     solicitudes_df = load_solicitudes_mec()
 

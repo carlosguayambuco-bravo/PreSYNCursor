@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 from typing import Optional
+import json
 # Librerías de Terceros
 from pandera.typing import DataFrame
 import pandas as pd
@@ -61,12 +62,15 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         new_id = SOLICITUDES_ID_DELAY
 
     # Agregamos el nuevo ID a la respuesta
-    response_df['ID_Solicitud'] = new_id
+    response_df['ID_Solicitud'] = str(new_id)
 
     # Subimos la respuesta a Google Sheets
     try:
         appendDataFrameToEnd(responses_ws, response_df)
         # Añadimos los Cambios a local
+        # A response_df le volvemos Datos_Solicitud y Metadata_Solicitud como diccionarios para que sean más fáciles de manejar en local
+        response_df['Datos_Solicitud'] = response_df['Datos_Solicitud'].apply(lambda x: x if isinstance(x, dict) else json.loads(x) if isinstance(x, str) else {})
+        response_df['Metadata_Solicitud'] = response_df['Metadata_Solicitud'].apply(lambda x: x if isinstance(x, dict) else json.loads(x) if isinstance(x, str) else {})
         add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:
@@ -115,10 +119,21 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
     headers = st.session_state.get("solicitudes_headers", [])
 
     # Organizamos los datos de las solicitudes en el orden de los headers
-    solicitudes_data = solicitudes_df[headers].map(convert_data_to_string).values.tolist()
+    solicitudes_matrix = solicitudes_df[headers].astype(str).values
 
-    # Ahora a cada lista le añadimos como elemento 0 la fila de sheets correspondiente a cada solicitud
-    solicitudes_data = [[get_solicitud_row_in_google_sheets(row[0])] + row for row in solicitudes_data]
+    # Si por alguna razón la estructura se volvió unidimensional, la forzamos a ser 2D
+    if solicitudes_matrix.ndim == 1:
+        solicitudes_matrix = [solicitudes_matrix.tolist()]
+    else:
+        solicitudes_matrix = solicitudes_matrix.tolist()
+
+    # 2. Construimos la nueva lista asegurando que row es una lista y que row[0] existe
+    solicitudes_data = []
+    for row in solicitudes_matrix:
+        if row: # Verifica que la fila no esté vacía
+            id_solicitud = row[0]
+            sheet_row = get_solicitud_row_in_google_sheets(id_solicitud)
+            solicitudes_data.append([sheet_row] + row)
 
     # Usamos la función de actualización masiva
     succeded = update_sheet_data_batch(
