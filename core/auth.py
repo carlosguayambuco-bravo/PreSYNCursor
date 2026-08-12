@@ -170,7 +170,7 @@ def authenticate_user():
         }
 
         # Guardamos el Session State de las Credenciales
-        st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"])
+        st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"], scopes=SCOPES)
         
         # Clear URL parameters to keep address bar clean
         st.query_params.clear()

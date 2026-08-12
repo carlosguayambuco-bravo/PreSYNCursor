@@ -2,11 +2,13 @@
 # Librerías de Python
 from io import StringIO
 import json
+import time
 # Librerías de Terceros
 import pandas as pd
 import requests
 
 MAX_QUERY_ATTEMPTS = 3
+SESSION_TIMEOUT_SECONDS = 900  # 15 minutos
 
 # Clase de MetabaseService para interactuar con la API de Metabase
 class MetabaseService:
@@ -17,6 +19,7 @@ class MetabaseService:
 
         # Inicializamos ayudas a Metabase con Valores por Defecto
         self.session_id = None
+        self.last_session_time = 0
         self.query_attempts = 0
 
     # Método para iniciar sesión en Metabase y obtener el Session ID
@@ -33,6 +36,7 @@ class MetabaseService:
             if authResponse.status_code == 200:
                 sessionID = authResponse.json()['id']
                 self.session_id = sessionID
+                self.last_session_time = time.time()
             else:
                 print('🚯Error en Obtener el JWT: HTTP {}: {}'.format(
                     authResponse.status_code,
@@ -44,7 +48,7 @@ class MetabaseService:
 
     # Método para obtener el Session ID, iniciando sesión si es necesario
     def get_session_id(self):
-        if not self.session_id:
+        if (not self.session_id) or not (self.last_session_time) or ((time.time() - self.last_session_time) > SESSION_TIMEOUT_SECONDS):  # Si no hay Session ID o ha pasado más de 1 hora
             self.login()
         return self.session_id
 
@@ -122,7 +126,7 @@ class MetabaseService:
         # Aplicamos la Petición
         try:
             # Hacemos una petición POST (o GET, Metabase acepta ambas en este endpoint, pero POST es más segura si añades filtros después)
-            response = requests.post(endpointURL, headers=headers)
+            response = requests.post(endpointURL, headers=headers) # type: ignore
             response.raise_for_status()
 
             # --- Creación del DF desde el CSV recibido ---

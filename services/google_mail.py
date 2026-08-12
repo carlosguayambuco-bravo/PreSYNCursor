@@ -13,15 +13,15 @@ import streamlit as st
 
 # Clase de GoogleMailService para interactuar con la API de Google Mail (usando googleapiclient)
 class GoogleMailService:
-    def __init__(self, credentials_json: dict):
+    def __init__(self, credentials_obj):
         """
         Inicializa la instancia de GoogleMailService con las credenciales proporcionadas.
 
         Args:
-            credentials_json (dict): Diccionario con las credenciales de Google Service Account.
+            credentials_obj (Credentials): Objeto de credenciales de Google Service Account.
         """
-        self.credentials = Credentials.from_service_account_info(credentials_json, scopes=['https://www.googleapis.com/auth/gmail.send'])
-        self.service = build('gmail', 'v1', credentials=self.credentials)
+        self.credentials = credentials_obj
+        self.service = build('gmail', 'v1', credentials=credentials_obj)
 
     def send_email(self, to: str, subject: str, body: str, cc_emails: Optional[list] = None, pdf_bytes: Optional[bytes] = None, pdf_name: Optional[str] = None) -> bool:
         """

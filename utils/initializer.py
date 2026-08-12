@@ -11,42 +11,41 @@ from services import MetabaseService, GoogleSheetsService, GoogleMailService, Go
 
 # Creamos el Servicio de Metabase y de GoogleSheets
 def initialize_services(debugging_mode: bool = False):
-    if "metabase_service" in st.session_state and "google_sheets_service" in st.session_state:
+    if ("metabase_service" in st.session_state) and ("google_sheets_service" in st.session_state) and ("google_mail_service" in st.session_state) and ("google_drive_service" in st.session_state):
         return  # Los servicios ya están inicializados
 
     # Inicializamos el Servicio de Metabase
-    metabase_username = st.secrets["metabase"]["username"]
-    metabase_password = st.secrets["metabase"]["password"]
-    metabase_mainDB_id = st.secrets["metabase"]["mainDB_id"]
-    metabase_service = MetabaseService(metabase_username, metabase_password, metabase_mainDB_id)
+    if not ("metabase_service" in st.session_state):
+        metabase_username = st.secrets["metabase"]["username"]
+        metabase_password = st.secrets["metabase"]["password"]
+        metabase_mainDB_id = st.secrets["metabase"]["mainDB_id"]
+        st.session_state["metabase_service"] = MetabaseService(metabase_username, metabase_password, metabase_mainDB_id)
 
-    if debugging_mode:
-        st.success("Metabase Service Initialized")
+        if debugging_mode:
+            st.success("Metabase Service Initialized")
+
+    # Cargamos las credenciales de la cuenta de servicio de Google desde los secretos
+    google_credentials = json.loads(st.secrets["google_credentials"]['json'])
 
     # Inicializamos el Servicio de GoogleSheets
-    google_credentials = json.loads(st.secrets["google_credentials"]['json'])
-    google_sheets_service = GoogleSheetsService(google_credentials)
+    if not ("google_sheets_service" in st.session_state):
+        st.session_state["google_sheets_service"] = GoogleSheetsService(google_credentials)
+        if debugging_mode:
+            st.success("Google Sheets Service Initialized")
 
-    if debugging_mode:
-        st.success("Google Sheets Service Initialized")
+    # Inicializamos el Servicio de GoogleMail (usando creds_google)
+    if "creds_google" in st.session_state and not ("google_mail_service" in st.session_state):
+        google_mail_service = GoogleMailService(st.session_state["creds_google"])
+        st.session_state["google_mail_service"] = google_mail_service
+        if debugging_mode:
+            st.success("Google Mail Service Initialized")
 
-    # Inicializamos el Servicio de GoogleMail
-    google_mail_service = GoogleMailService(google_credentials)
+    # Inicializamos el Servicio de GoogleDrive (usando google_credentials si no hay creds_google)
+    if not ("google_drive_service" in st.session_state):
+        st.session_state["google_drive_service"] = GoogleDriveService(google_credentials)
 
-    if debugging_mode:
-        st.success("Google Mail Service Initialized")
-
-    # Inicializamos el Servicio de GoogleDrive
-    google_drive_service = GoogleDriveService(google_credentials)
-
-    if debugging_mode:
-        st.success("Google Drive Service Initialized")
-
-    # Guardamos los servicios en el estado de la aplicación para que estén disponibles globalmente
-    st.session_state["metabase_service"] = metabase_service
-    st.session_state["google_sheets_service"] = google_sheets_service
-    st.session_state["google_mail_service"] = google_mail_service
-    st.session_state["google_drive_service"] = google_drive_service
+        if debugging_mode:
+            st.success("Google Drive Service Initialized")
 
 # Función Auxiliar para Inicializar los Datos
 def initialize_data(debugging_mode: bool = False):
