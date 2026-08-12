@@ -414,7 +414,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             else:
                 success = True  # No hay PDF para subir, consideramos que la subida fue exitosa
             # Actualizamos la Solicitud en Google Sheets
-            success = distribuir_resultado_solicitud(solicitud)
+            success = distribuir_resultado_solicitud(solicitud, pdf_bytes=pdf_bytes) and success
             # Actualizamos los Datos de Addendums
             upload_massive_addendums(solicitud=solicitud)
         if success:
@@ -437,7 +437,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         deudas_info = solicitud["JSON_Respuesta"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
 
         # Definimos todas las Deudas Disponibles
-        debt_ids = [d['Id_Deuda'] for d in deudas_info]
+        debt_ids = [d['Id_Deuda'] for d in deudas_info if cleanNumber(d['Monto_Propuesto'], default_nan=0) > 0]
 
         # Creamos una Vista de Pills para definir las Deudas a Usar
         selected_ids = st.pills(
@@ -1340,7 +1340,7 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
         colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta = st.columns([3,3,3,6,6], vertical_alignment="top")
 
     with colIdDeuda:
-        st.markdown("**ID de Deuda:**")
+        st.markdown("**Id Deuda:**")
     with colBanco:
         st.markdown("**Banco:**")
     with colNumCredito:
@@ -1387,6 +1387,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main):
+        st.json(solicitud.to_dict(), expanded=False)
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 

@@ -270,6 +270,12 @@ if not avanzar_proceso:
     st.error("La(s) Deuda(s) seleccionada(s) ya tienen una oferta de pago menor a la Solicitada")
     st.stop()
 
+# Alerta 5: Verificar que los Montos Propuestos no sean 0 en alguna de las Deudas
+for deuda_info in info_completa_deudas:
+    if deuda_info['Monto_Propuesto'] <= 0:
+        st.error(f"El monto propuesto para la deuda {deuda_info['Id_Deuda']} es menor o igual a 0, lo cual no es válido. Por favor, ingrese un monto válido para continuar.")
+        st.stop()
+
 # --- Siguiente: Si es Acuerdo o Oferta de Pago dar Especificaciones
 if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
     st.divider()
@@ -305,7 +311,10 @@ if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
 
     # Verificamos que ambos tengan una selección válida
     if not fecha_esperada_pago or not tipo_pago:
-        st.warning("Selecciona ambas opciones para continuar con el formulario 😁")
+        st.warning("Selecciona ambas opciones para continuar con el formulario", icon="😁")
+        st.stop()
+    elif fecha_esperada_pago < pd.Timestamp.now('America/Bogota').tz_localize(None).normalize():
+        st.error("La fecha esperada de pago no puede ser menor a la fecha actual. Por favor, seleccione una fecha válida.", icon="❌")
         st.stop()
 else:
     fecha_esperada_pago = None
@@ -355,7 +364,8 @@ response_info = {
 # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
 colBoton, colMensaje = st.columns([1, 2])
 
-ya_enviado = (referencia_cliente != '') and (referencia_cliente == st.session_state.get('ultima_referencia_enviada'))
+ref_enviar_completa = referencia_cliente + ''.join((d['Id_Deuda'] for d in info_completa_deudas))
+ya_enviado = (ref_enviar_completa != '') and (ref_enviar_completa == st.session_state.get('ultima_referencia_enviada'))
 
 with colBoton:
     enviar_formulario = st.button(
@@ -369,22 +379,22 @@ with colBoton:
 with colMensaje:
     if enviar_formulario and not ya_enviado:
         # 1. Bloqueamos inmediatamente para evitar dobles clics en cola
-        st.session_state['ultima_referencia_enviada'] = referencia_cliente
+        st.session_state['ultima_referencia_enviada'] = ref_enviar_completa
 
         # 2. Ejecutamos el proceso a Google Sheets
         with st.spinner("Enviando formulario..."):
             success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
 
         if success_response:
-            st.success(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}")
+            st.toast(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}", icon="✅")
             # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
             st.rerun()
         else:
             # Si hubo error, liberamos el candado para que el usuario pueda reintentar
             st.session_state['ultima_referencia_enviada'] = None
-            st.toast("Error al enviar el formulario. Por favor, intente nuevamente.")
+            st.toast("Error al enviar el formulario. Por favor, intente nuevamente.", icon="❌")
 
     elif ya_enviado:
-        st.info("Esta referencia ya fue enviada previamente.")
+        st.info("Esta referencia ya fue enviada previamente con esas deudas.")
     else:
         st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")

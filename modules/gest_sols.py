@@ -122,8 +122,8 @@ def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
         bool: True si la solicitud no ha sido respondida, False en caso contrario.
     """
     maskSinTocar = solicitud["Estado_Solicitud"] == "Sin Tocar"
-    maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité"
-    maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
+    maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 3 and solicitud["Estado_Solicitud"] == "Bajo Comité"
+    maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 3 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
     banner_manager = get_banned_manager()
     maskSinBan = (not banner_manager.is_banned(solicitud["ID_Solicitud"]))
     return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan
@@ -307,7 +307,11 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     # Se envia el correo correspondiente
     if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
         if not send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes):
-            st.error("No se pudo enviar el correo con el Acuerdo de Pago. Por favor, contacte al equipo de soporte.")
+            st.error("No se pudo enviar el correo con el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="❌")
+    elif pdf_bytes is not None:
+        st.warning("Se generó un PDF pero no se envió correo porque la solicitud no es de tipo Acuerdo de Pago u Oferta de Acuerdo.", icon="⚠️")
+    elif pdf_bytes is None and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
+        st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
 
     # Por Último, devolvemos la actualización masiva
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)  

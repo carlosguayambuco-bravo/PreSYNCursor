@@ -49,7 +49,7 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
 
     for _, row in deudas_activas_df.iterrows():
         with colCH:
-            selected = st.checkbox("", key=f"select_deuda_{row['Id_Deuda']}", value=True)
+            selected = st.toggle("", key=f"select_deuda_{row['Id_Deuda']}", value=True)
             if selected:
                 st.session_state['deudas_seleccionadas'].append(row['Id_Deuda'])
             else:
@@ -373,7 +373,7 @@ def mostrar_resumen_solicitud(*,
             label="Monto Total de la Solicitud",
             value=f"${montoTotal:,.0f}",
             delta=f"Descuento Total: {descuentoTotal:.2%}",
-            delta_color="green" if descuentoTotal < 0.85 else "yellow" if descuentoTotal < 0.90 else "red"
+            delta_color="green" if descuentoTotal < 0.7 else "yellow" if descuentoTotal < 0.90 else "red"
         )
 
     # Ahora, si existe Fecha esperada de Pago y Tipo de Pago los Mostramos

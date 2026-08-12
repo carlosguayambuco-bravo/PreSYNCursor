@@ -46,7 +46,7 @@ class GoogleMailService:
             st.success("Correo enviado exitosamente a {}".format(to), icon="✅")
             return True
         except Exception as e:
-            st.error(f"Error al enviar el correo: {e}")
+            st.error(f"Error al enviar el correo: {e}", icon="❌")
             return False
 
     def _create_message(self, to: str, subject: str, body: str, cc_emails: Optional[list[str]] = None, pdf_bytes: Optional[bytes] = None, pdf_name: Optional[str] = None) -> str:
