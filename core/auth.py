@@ -18,6 +18,7 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/drive.file",  # Grants access to read and write files created or opened by the app
     "https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
 ]
 
