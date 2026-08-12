@@ -18,7 +18,7 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
+    #"https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
 ]
 
 def generate_jwt_token(cv: str) -> str:
