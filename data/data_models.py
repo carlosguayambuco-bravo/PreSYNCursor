@@ -1,8 +1,10 @@
 # Estándar usando Pep8
 # Librerías de Python
+from typing import Any, Union
 # Librerías de Terceros
 import pandas as pd
 import pandera.pandas as pa
+from pandera.typing import Series
 # Librerías Locales
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD
 
@@ -18,11 +20,11 @@ class SolicitudesSchema(pa.DataFrameModel):
     Ids_Deuda: str  # Lista de Ids de Deuda como cadena separada por -
     Casa_Cobro: str
     Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
-    Datos_Solicitud: str|dict # Es un JSON que contiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas y Monto_Actual
+    Datos_Solicitud: str # Es un JSON que contiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas y Monto_Actual
     Fecha_Esperada_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha esperada de pago
     Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
     Ejecutivo: str = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
-    Metadata_Solicitud: str|dict  # Es un JSON que contiene:
+    Metadata_Solicitud: str  # Es un JSON que contiene:
     # - Estado_Comite: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
     # - Estado_Titular_Ilocalizable: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
     # - Pago_Total_Obligatorio: bool
@@ -35,7 +37,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
     Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
     Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
-    JSON_Respuesta: str|dict = pa.Field(nullable=True)  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
+    JSON_Respuesta: str = pa.Field(nullable=True)  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
     # Tiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas
 
     class Config:

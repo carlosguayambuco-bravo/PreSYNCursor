@@ -59,7 +59,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
 
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
-    
+
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
         solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
@@ -69,6 +69,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
     for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
+    
 
     # Por último, reiniciamos los cambios locales
     st.session_state['local_changes'] = []
@@ -109,12 +110,6 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
 
         # Restauramos el Indice
         sols_ajustadas = sols_ajustadas.reset_index(drop=True)
-
-        # Validamos el Esquema
-        if not sols_ajustadas.empty:
-            sols_ajustadas = SolicitudesSchema.validate(sols_ajustadas)
-        else:
-            sols_ajustadas = SolicitudesSchema.empty()
 
     # 3: Devolver el Nuevo DF
     return sols_ajustadas
@@ -461,7 +456,7 @@ def load_liquidaciones() -> set[str]:
     liquidacionesDF = liquidacionesDF.dropna(subset=['Id_Deuda'])
 
     # Dejamos solo la Columna Id_Deuda
-    liquidacionesDF = liquidacionesDF[['Id_Deuda']]
+    liquidacionesDF = liquidacionesDF[['Id_Deuda']].drop_duplicates()
 
     # Volvemos la Id_Deuda a String
     liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
