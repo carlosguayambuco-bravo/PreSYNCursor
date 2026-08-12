@@ -147,8 +147,8 @@ DEFAULT_DISCOUNT_PL = 0.15
 LIMITE_MEC = 5 # El Día límite para Considerar el Día como mes operativo
 
 # --- Constantes de Correos Electrónicos ---
-EMAIL_SUBJECT_ACUERDO = "Acuerdo de Pago ({estado_solicitud}) - REF: {referencia} - {nombre_cliente}"
-EMAIL_SUBJECT_OFERTA_ACUERDO = "Oferta de Acuerdo ({estado_solicitud}) - REF: {referencia} - {nombre_cliente}"
+EMAIL_SUBJECT_ACUERDO = "Acuerdo de Pago - REF: {referencia} - {nombre_cliente}"
+EMAIL_SUBJECT_OFERTA_ACUERDO = "Oferta de Acuerdo - REF: {referencia} - {nombre_cliente}"
 EMAIL_SUBJECT_MAPPER ={
     "Acuerdo de Pago": EMAIL_SUBJECT_ACUERDO,
     "Oferta de Acuerdo": EMAIL_SUBJECT_OFERTA_ACUERDO,

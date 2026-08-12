@@ -177,6 +177,18 @@ def obtener_mascara_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) 
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
     return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
 
+def obtener_mascara_exitosas(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
+    """
+    Filtra las solicitudes que han sido respondidas exitosamente.
+
+    Args:
+        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+
+    Returns:
+        pd.Series: Serie con las solicitudes exitosas.
+    """
+    return solicitudes_df["Estado_Solicitud"] == "Exitosa"
+
 def obtener_mascara_aprobacion_necesaria(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.Series:
     """
     Filtra las solicitudes que requieren aprobación.
@@ -330,7 +342,6 @@ def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     asunto_correo = EMAIL_SUBJECT_MAPPER.get(tipo_solicitud, "Acuerdo de Pago")
     # Agregamos al Asunto los datos especificos de la solicitud
     asunto_correo = asunto_correo.format(
-        estado_solicitud=solicitudes[0]['Estado_Solicitud'],
         referencia=solicitudes[0]['Referencia'],
         nombre_cliente=solicitudes[0]['Metadata_Solicitud']['Nombre_Cliente']
     )
@@ -574,6 +585,9 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
             st.session_state[key] = "Todos"
         else:
             st.session_state[key] = None
+
+    # Reiniciamos también filtros_recomendados_solicitudes a False
+    st.session_state['filtros_recomendados_solicitudes'] = False
     # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
     if method == 'basic':
         st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"
@@ -594,7 +608,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         'id_solicitud_nego_input',
         'persona_solicitud_nego_input',
         'referencia_solicitud_nego_input',
-        'toggle_sin_responder_solicitud_nego_input',
+        'toggle_exitosas_solicitud_nego_input',
         'toggle_aprobacion_solicitud_nego_input',
         'toggle_orden_fecha_solicitud_nego_input',
     ]
@@ -612,7 +626,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         'referencia_solicitud_nego_input',
     ]
     keys_to_False = [
-        'toggle_sin_responder_solicitud_nego_input',
+        'toggle_exitosas_solicitud_nego_input',
         'toggle_aprobacion_solicitud_nego_input',
         'toggle_orden_fecha_solicitud_nego_input',
     ]
