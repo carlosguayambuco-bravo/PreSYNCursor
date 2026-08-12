@@ -18,7 +18,7 @@ from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_nombre_negociador
 from services import GoogleDriveService, GoogleMailService
-from utils.helpers_general import getBDDaysDiffFloat_vectorized
+from utils.helpers_general import cleanNumber, getBDDaysDiffFloat_vectorized
 
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
@@ -732,11 +732,11 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
             {
                 "Id_Deuda": deuda['Id_Deuda'],
                 "Banco": deuda['Banco'],
-                "Numero_Credito": deuda['Numero_Credito'],
-                "Monto_Propuesto": deuda.get('Monto_Propuesto', 0),
-                "Num_Cuotas": deuda.get('Num_Cuotas', 1)
+                "Numero_Credito": st.session_state["numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], deuda['Id_Deuda'])],
+                "Monto_Propuesto": cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0),
+                "Num_Cuotas": cleanNumber(deuda.get('Num_Cuotas', 1), default_nan=1.0)
             }
-            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", [])) if (deuda.get('Monto_Propuesto', 0) > 0) and (deuda['Id_Deuda'] in deudas)
+            for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", [])) if (cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0) > 0) and (deuda['Id_Deuda'] in deudas)
         ]
     }
 

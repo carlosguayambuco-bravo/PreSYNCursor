@@ -41,6 +41,7 @@ class GoogleDriveService:
                 'mimeType': mime_type
             }
             file = self.service.files().create(body=file_metadata, media_body=media, fields='id',supportsAllDrives=True).execute()
+            st.success(f"Archivo '{file_name}' subido exitosamente a Google Drive.", icon="✅")
             return file.get('id')
         except Exception as e:
             st.error(f"Error al subir el archivo a Google Drive: {e}")

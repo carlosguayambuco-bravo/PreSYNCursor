@@ -434,7 +434,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         st.markdown("### **ℹ️ Información de la Solicitud**")
 
         # Reunimos la Información de las Deudas y los Addendums en uno Solo
-        deudas_info = solicitud["Datos_Solicitud"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
+        deudas_info = solicitud["JSON_Respuesta"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
 
         # Definimos todas las Deudas Disponibles
         debt_ids = [d['Id_Deuda'] for d in deudas_info]
@@ -455,7 +455,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
             st.stop()
 
         selected_deudas_info = [d for d in deudas_info if (d['Id_Deuda'] in selected_ids)]
-        monto_total = sum(d['Monto_Propuesto'] for d in selected_deudas_info)
+        monto_total = sum(cleanNumber(d['Monto_Propuesto'], default_nan=0.0) for d in selected_deudas_info)
 
         # Creamos 3 Columnas para ayudar con la Organización de la Información
         col1Info, col2Info, col3Info = st.columns([2, 2, 2], vertical_alignment="center", gap="small")
@@ -496,20 +496,22 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         with col2Info:
             st.text_input(
                 label="**💳 Método de Pago**",
-                value=solicitud["Tipo_Pago"],
+                value=solicitud["Metadata_Solicitud"].get("Metodo_Pago", "Desconocido"),
                 disabled=True,
                 key="metodo_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
             )
         with col3Info:
             st.text_input(
                 label="**📅 Fecha Límite de Pago**",
-                value=solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notna(solicitud["Fecha_Esperada_Pago"]) else "",
+                value=solicitud["Fecha_Limite_Pago"].strftime("%Y-%m-%d") if pd.notna(solicitud["Fecha_Limite_Pago"]) else "",
                 disabled=True,
                 key="fecha_limite_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
             )
 
         # Ahora vamos a presentar por cada deuda seleccionada: Id_Deuda, Numero_Credito y Monto Propuesto
         for d in selected_deudas_info:
+            if cleanNumber(d['Monto_Propuesto'], default_nan=0) <= 0:
+                continue
             with col1Info:
                 st.text_input(
                     label="**Id Deuda**",
@@ -545,7 +547,6 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
             key=key_acuerdo + '_button',
             type="primary",
             help="Haga clic para generar el acuerdo de pago en formato PDF.",
-            disabled = len(st.session_state.get(key_acuerdo, bytes())) > 0,
         )
         if generar_pdf:
             with st.spinner("⚙️ Generando Acuerdo de Pago en PDF..."):
@@ -1013,12 +1014,12 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Especificaciones de Acuerdo de Pago u Oferta de Pago
     with st.expander("**💸 Especificaciones de Acuerdo de Pago u Oferta de Pago**", expanded=True):
 
-        # Creamos 2 Columnas: Una para Tipo de Pago y la Otra para Formato de Pago
-        colTipoPago, colFormatoPago = st.columns(2, vertical_alignment="top")
+        # Creamos 2 Columnas: Una para Metodo de Pago y la Otra para Formato de Pago
+        colMetodoPago, colFormatoPago = st.columns(2, vertical_alignment="top")
 
-        # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Tipo de Pago (Efectivo-Cheque, PSE, Transferencia)
-        with colTipoPago:
-            tipo_pago = st.radio(
+        # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Metodo de Pago (Efectivo-Cheque, PSE, Transferencia)
+        with colMetodoPago:
+            metodo_pago = st.radio(
                 label="**Método de Pago**",
                 options=["Efectivo-Cheque", "PSE", "Transferencia"],
                 index=0,
@@ -1026,8 +1027,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 help="Seleccione el método de pago para la solicitud.",
             )
 
-            # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
-            solicitud_respuesta["Metadata_Solicitud"]["Metodo_Pago"] = tipo_pago
+        # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
+        solicitud_respuesta["Metadata_Solicitud"]["Metodo_Pago"] = metodo_pago
 
         with colFormatoPago:
             formato_pago = st.radio(
@@ -1042,7 +1043,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         if formato_pago == "Subir Archivo":
 
             # Reunimos la Información de las Deudas y los Addendums en uno Solo
-            deudas_info = solicitud["Datos_Solicitud"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
+            deudas_info = solicitud_respuesta["JSON_Respuesta"] + solicitud_respuesta["Metadata_Solicitud"].get("Addendums",[])
     
             # Definimos todas las Deudas Disponibles
             debt_ids = [d['Id_Deuda'] for d in deudas_info]
@@ -1090,6 +1091,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             else:
                 st.warning("No hay un acuerdo de pago disponible para mostrar. Hay que subir o generar el acuerdo de pago en PDF.", icon="⚠️")
                 st.stop()
+
+    # Verificamos que exista el metodo de Pago
+    if not metodo_pago:
+        st.warning("Debe seleccionar un método de pago para poder finalizar la solicitud.", icon="⚠️")
+        st.stop()
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)

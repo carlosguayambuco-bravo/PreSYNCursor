@@ -43,6 +43,7 @@ class GoogleMailService:
                 'raw': self._create_message(to, subject, body, cc_emails, pdf_bytes, pdf_name)
             }
             self.service.users().messages().send(userId='me', body=message).execute()
+            st.success("Correo enviado exitosamente a {}".format(to), icon="✅")
             return True
         except Exception as e:
             st.error(f"Error al enviar el correo: {e}")
