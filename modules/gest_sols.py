@@ -984,7 +984,7 @@ def check_if_acuerdo_pago_uploaded(*, solicitud: dict[str, Any]) -> bool:
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
     maskNoExitosa = (solicitudes_df['Estado_Solicitud'] == 'No Exitosa')
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == 'Acuerdo de Pago')
-    maskCorreo = (solicitudes_df['Correo'] == solicitud['Correo'])
+    maskCorreo = (solicitudes_df['Correo'] == st.session_state.get('user_email', 'Desconocido'))
     maskIds = (solicitudes_df['Ids_Deuda'] == solicitud['Ids_Deuda'])
     # Paso 3: Combinamos las máscaras para obtener la máscara final
     mask_final = maskCasa & maskTipo & maskCorreo & maskIds
@@ -1007,7 +1007,7 @@ def check_if_validacion_uploaded(*, solicitud: dict[str, Any]) -> bool:
     # Las máscaras son: maskCasa, maskTipo, maskCorreo, maskIds y Mascara de Origen Solicitud
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == 'Validación')
-    maskCorreo = (solicitudes_df['Correo'] == solicitud['Correo'])
+    maskCorreo = (solicitudes_df['Correo'] == st.session_state.get('user_email', 'Desconocido'))
     maskIds = (solicitudes_df['Ids_Deuda'] == solicitud['Ids_Deuda'])
     maskOrigen = (solicitudes_df['Metadata_Solicitud'].apply(lambda x: x.get('Origen_Solicitud', None)) == solicitud['ID_Solicitud'])
     # Paso 3: Combinamos las máscaras para obtener la máscara final
