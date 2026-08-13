@@ -17,7 +17,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -683,13 +683,15 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.session_state[key_monto_total] = formatNumber(monto_total)
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
+            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             if not (d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]):
+                # Actualizamos el Session State dejando el Monto Propuesto como "Sin Oferta"
+                st.session_state[key_monto] = "Sin Oferta"
                 continue
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
             porcentaje_propuesto_original = cleanNumber(d['Monto_Propuesto']) / monto_propuesto_portafolio if monto_propuesto_portafolio > 0 else 0
             monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
-            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
             st.session_state[key_monto] = formatNumber(monto_propuesto_nuevo)
     else:
         # La Actualización del Monto Total se hace basado en la Suma de los Montos Propuestos por Deuda
@@ -1389,6 +1391,10 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
         disabled = solicitud['Metadata_Solicitud'].get("Pago_Total_Obligatorio", False)
     )
 
+    if not selected_deudas:
+        st.warning("Debe seleccionar al menos una deuda para poder realizar la contraoferta.", icon="⚠️")
+        st.stop()
+
     # Paso 5: Mostramos los Inputs de Monto Propuesto y Cuotas por Deuda
     with st.expander("**💸 Montos Propuestos y Cuotas por Deuda**", expanded=True):
         # Creamos 4 o 5 Columnas: Id_Deuda, Numero_Credito, Monto Actual, Monto Respuesta y Monto Contraoferta (y Cuotas si hay)
@@ -1495,8 +1501,43 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             "Num_Cuotas": num_cuotas,
         })
 
-    st.warning("Falta acabar esto", icon="⚠️")
+    # Creamos la Posibilidad de Agregar un Comentario Final
+    cm_final = st.text_area(
+        label="**Comentarios de la ContraOferta**",
+        value=solicitud["Metadata_Solicitud"].get("Comentario_Negociador", ""),
+        key="comentario_contraoferta_input_{}".format(solicitud['ID_Solicitud']),
+        help="Ingrese cualquier comentario adicional sobre la contraoferta.",
+    )
 
+    # Creamos la nueva solicitud
+    nueva_solicitud = crear_plantilla_solicitud_validacion(
+        solicitud=solicitud,
+        selected_ids_info=datos,
+        comentario=cm_final or "",
+    )
+
+    # Ahora Creamos los 2 Botones: Uno para Cancelar y Otro para ContraOfertar
+    colCancelar, colContraOfertar = st.columns(2, vertical_alignment="center", gap="large")
+    with colCancelar:
+        if st.button(
+            label="**Cancelar**",
+            key="cancelar_contraoferta_solicitud_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para cancelar la contraoferta de la solicitud.",
+            type="secondary",
+        ):
+            st.rerun()
+
+    with colContraOfertar:
+        if st.button(
+            label="**ContraOfertar**",
+            key="contraofertar_solicitud_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para realizar la contraoferta de la solicitud.",
+            type="primary",
+        ):
+            success = upload_form_response_to_google_sheets(response_info=nueva_solicitud)
+            if success:
+                st.toast("ContraOferta de Solicitud de Validación subida exitosamente.", icon="✅")
+                st.rerun()
 
 # Díalogo para Confirmar la Actualización de las Solicitudes a "Solicitado"
 @st.dialog("🫡 Confirmar Actualización de Solicitudes", dismissible=True, width="large", on_dismiss="rerun")

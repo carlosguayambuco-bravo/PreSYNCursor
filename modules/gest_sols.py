@@ -905,6 +905,43 @@ def crear_plantilla_solicitud_acuerdo_pago(
 
     return solicitud_template
 
+# Función Auxiliar para crear la plantilla de solicitud de validación
+def crear_plantilla_solicitud_validacion(
+        *,
+        solicitud: pd.Series,
+        selected_ids_info: list[dict[str, Any]],
+        comentario: str,
+    ) -> dict[str, Any]:
+    """Crea la Plantilla de Solicitud a subir a partir de la validación exitosa
+
+    Args:
+        solicitud (pd.Series): Los Datos de la Solicitud actual
+        selected_ids_info (list[dict[str, Any]]): Lista de diccionarios con la información de las deudas seleccionadas
+
+    Returns:
+        pd.Series: La plantilla de la nueva solicitud de validación.
+    """
+    # Paso 1: Definir los Valores Iniciales
+    solicitud_template = {
+        'Referencia': solicitud['Referencia'],
+        'Cedula': solicitud['Cedula'],
+        'Ids_Deuda': '-'.join([str(deuda['Id_Deuda']) for deuda in selected_ids_info]),
+        'Casa_Cobro': solicitud['Casa_Cobro'],
+        'Tipo_Solicitud': 'Validación',
+        'Datos_Solicitud': json.dumps(
+            selected_ids_info
+        ),
+        'Ejecutivo': solicitud['Ejecutivo'],
+        'Metadata_Solicitud': json.dumps({
+            'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
+            'Comentario_Negociador': comentario,
+            'Origen_Solicitud': solicitud['ID_Solicitud'],
+        }),
+        'Estado_Solicitud': 'Sin Tocar',
+    }
+
+    return solicitud_template
+
 # Función Auxiliar para actualizar las Solicitudes a 'Solicitado'
 def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     # Paso 1: Actualizar el Estado de las Solicitudes a 'Solicitado'
