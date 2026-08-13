@@ -4,7 +4,7 @@
 import streamlit as st
 # Librerías Locales
 from core.users import User
-from data.data_loader import load_current_month_solicitudes
+from data.data_loader import load_solicitudes_mec
 
 def show_user_info():
     # Primero Cargamos la Información del Usuario desde el estado de sesión
@@ -54,7 +54,7 @@ def show_user_info():
     # Botón de Recarga de Solicitudes
     if st.sidebar.button("Recargar Solicitudes", icon="🔄",width= "stretch"):
         # Limpiamos el cache de la función load_current_month_solicitudes
-        load_current_month_solicitudes.clear()
+        load_solicitudes_mec.clear()
 
         # Recargamos la Información
         st.rerun()
