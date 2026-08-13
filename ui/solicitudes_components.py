@@ -388,7 +388,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
 
     with colCancelar:
         if st.button(
-            label="Cancelar",
+            label="**Cancelar**",
             key="cancelar_solicitud_{}".format(solicitud['ID_Solicitud']),
             help="Haga clic para cancelar la actualización de la solicitud.",
             width="stretch",
@@ -398,7 +398,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
 
     with colBoton:
         actualizar_solicitud = st.button(
-            label="Finalizar Solicitud",
+            label="**Finalizar Solicitud**",
             key="finalizar_solicitud_{}".format(solicitud['ID_Solicitud']),
             width="stretch",
             type="primary",
@@ -1533,7 +1533,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
     )
 
     # Verificamos que esta solicitud no exista ya
-    ya_existe_contraoferta = check_if_validacion_uploaded(solicitud = nueva_solicitud)
+    ya_existe_contraoferta = check_if_validacion_uploaded(solicitud = nueva_solicitud, old_id = solicitud['ID_Solicitud'])
 
     # Ahora Creamos los 2 Botones: Uno para Cancelar y Otro para ContraOfertar
     colCancelar, colContraOfertar = st.columns(2, vertical_alignment="center", gap="large")
