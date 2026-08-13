@@ -1353,7 +1353,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             st.session_state[key_monto] = formatNumber(st.session_state[key_monto])
 
     # Paso 3: Crear las Columnas de: Monto Total, usar Monto Total y Cuotas
-    colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([3, 1], vertical_alignment="center", gap="large")
+    colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([3, 1,3], vertical_alignment="center", gap="large")
     with colMontoTotal:
         st.text_input(
             label="**Monto Total de la ContraOferta**",
@@ -1889,7 +1889,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):
     # Definimos el Nombre del Expander
-    expander_name = "`{id}` **{tipo:<15}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
+    expander_name = "`{id}` {tipo:<15} • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
         tipo='**{}**'.format(solicitud["Tipo_Solicitud"]),
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],

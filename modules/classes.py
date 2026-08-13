@@ -97,4 +97,8 @@ def get_banned_manager():
             with self.lock:
                 return item_id in self.banned
 
+        def reset(self):
+            with self.lock:
+                self.banned.clear()
+
     return BannedManager()

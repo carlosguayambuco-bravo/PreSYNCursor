@@ -5,6 +5,7 @@ import streamlit as st
 # Librerías Locales
 from core.users import User
 from data.data_loader import load_solicitudes_mec
+from modules.classes import get_banned_manager
 
 def show_user_info():
     # Primero Cargamos la Información del Usuario desde el estado de sesión
@@ -55,6 +56,10 @@ def show_user_info():
     if st.sidebar.button("Recargar Solicitudes", icon="🔄",width= "stretch"):
         # Limpiamos el cache de la función load_current_month_solicitudes
         load_solicitudes_mec.clear()
+
+        # Limpiamos los Ids Banneados
+        banner_manager = get_banned_manager()
+        banner_manager.reset()
 
         # Recargamos la Información
         st.rerun()
