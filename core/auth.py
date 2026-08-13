@@ -140,41 +140,45 @@ def authenticate_user():
 
     # 1. Check if returning from Google Auth with code
     if "code" in params and "credentials" not in st.session_state:
-        code = params["code"]
-        flow = create_flow()
+        try:
+            code = params["code"]
+            flow = create_flow()
 
-        # Obtain the cv from the state parameter and decode it
-        state = params.get("state",'')
-        payload = jwt.decode(state, st.secrets["google_oauth"]["jwt_auth"], algorithms=["HS256"])
-        code_verifier = payload.get("cv")
+            # Obtain the cv from the state parameter and decode it
+            state = params.get("state",'')
+            payload = jwt.decode(state, st.secrets["google_oauth"]["jwt_auth"], algorithms=["HS256"])
+            code_verifier = payload.get("cv")
 
-        # Validamos la Expiración del Token
-        current_time = time.time()
-        if current_time > payload.get("exp", 0):
-            error_page_view("El token de autenticación ha expirado. Por favor, intenta iniciar sesión nuevamente.")
+            # Validamos la Expiración del Token
+            current_time = time.time()
+            if current_time > payload.get("exp", 0):
+                error_page_view("El token de autenticación ha expirado. Por favor, intenta iniciar sesión nuevamente.")
 
-        flow.code_verifier = code_verifier  # Set the code_verifier for PKCE
+            flow.code_verifier = code_verifier  # Set the code_verifier for PKCE
 
-        flow.fetch_token(code=code)
-        
-        # Save OAuth credentials (Access token, Refresh token, Scopes) into Session State
-        creds = flow.credentials
-        st.session_state["credentials"] = {
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "token_uri": creds.token_uri, # type: ignore
-            "client_id": creds.client_id,
-            "client_secret": creds.client_secret,
-            "scopes": creds.scopes
-        }
+            flow.fetch_token(code=code)
+            
+            # Save OAuth credentials (Access token, Refresh token, Scopes) into Session State
+            creds = flow.credentials
+            st.session_state["credentials"] = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri, # type: ignore
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": creds.scopes
+            }
 
-        # Guardamos el Session State de las Credenciales
-        st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"], scopes=SCOPES)
-        
-        # Clear URL parameters to keep address bar clean
-        st.query_params.clear()
+            # Guardamos el Session State de las Credenciales
+            st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"], scopes=SCOPES)
+            
+            # Clear URL parameters to keep address bar clean
+            st.query_params.clear()
 
-        # Guardamos el Usuario
-        st.session_state["user_obj"] = create_user_from_session()
+            # Guardamos el Usuario
+            st.session_state["user_obj"] = create_user_from_session()
 
-        st.rerun()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error durante la autenticación: {e}", icon="🚨")
+            st.info("Por favor, intenta iniciar sesión nuevamente.", icon="ℹ️")
