@@ -15,6 +15,10 @@ from services.google_sheets import GoogleSheetsService
 
 # Función Auxiliar para Obtener la Fila de Sheets basado en el ID de Solicitud
 def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
+    if not isinstance(solicitud_id, str):
+        raise ValueError("El ID de Solicitud debe ser una cadena de texto (str)., se encontro: {} ({})".format(
+            type(solicitud_id), solicitud_id
+        ))
     # Paso 1: Convertir el ID de Solicitud a int
     solicitud_id_int = int(solicitud_id)
     # Paso 2: Buscar en el Session State el primer id, si no esta se usa el delay
@@ -71,6 +75,8 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         # A response_df le volvemos Datos_Solicitud y Metadata_Solicitud como diccionarios para que sean más fáciles de manejar en local
         response_df['Datos_Solicitud'] = response_df['Datos_Solicitud'].apply(lambda x: x if isinstance(x, dict) else json.loads(x) if isinstance(x, str) else {})
         response_df['Metadata_Solicitud'] = response_df['Metadata_Solicitud'].apply(lambda x: x if isinstance(x, dict) else json.loads(x) if isinstance(x, str) else {})
+        # Devolvemos Timestamp a Datetime
+        response_df['Timestamp'] = pd.to_datetime(response_df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
         add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:
@@ -121,11 +127,8 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
     # Organizamos los datos de las solicitudes en el orden de los headers
     solicitudes_matrix = solicitudes_df[headers].values
 
-    # Si por alguna razón la estructura se volvió unidimensional, la forzamos a ser 2D
-    if len(solicitudes_df) == 1:
-        solicitudes_matrix = [solicitudes_matrix.tolist()]  # Convertimos a lista de listas
-    else:
-        solicitudes_matrix = solicitudes_matrix.tolist()  # Convertimos a lista de listas
+    # Convertimos el array a una lista de listas
+    solicitudes_matrix = solicitudes_matrix.tolist()
 
     # 2. Construimos la nueva lista asegurando que row es una lista y que row[0] existe
     solicitudes_data = []
