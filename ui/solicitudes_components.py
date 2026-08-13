@@ -1371,7 +1371,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             value=st.session_state[key_monto_total_co],
             key=key_monto_total_co,
             help="Ingrese el monto total de la contraoferta.",
-            label_visibility="collapsed",
+            disabled = not st.session_state[key_usar_monto_total_co],
         )
     with colUsarMontoTotal:
         st.toggle(
@@ -1484,6 +1484,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     key='monto_propuesto_co_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                     help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
                     label_visibility="collapsed",
+                    disabled = st.session_state[key_usar_monto_total_co]
                 )
             if tipo_cuotas == "Por Deuda":
                 with colCuotas: # type: ignore
