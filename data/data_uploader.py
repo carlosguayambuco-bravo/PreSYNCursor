@@ -77,6 +77,9 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         response_df['Metadata_Solicitud'] = response_df['Metadata_Solicitud'].apply(lambda x: x if isinstance(x, dict) else json.loads(x) if isinstance(x, str) else {})
         # Devolvemos Timestamp a Datetime
         response_df['Timestamp'] = pd.to_datetime(response_df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
+        # Si Fecha_Esperada_Pago no es nula, la convertimos a Datetime
+        if 'Fecha_Esperada_Pago' in response_df.columns:
+            response_df['Fecha_Esperada_Pago'] = pd.to_datetime(response_df['Fecha_Esperada_Pago'], errors='coerce', format='%Y-%m-%d %H:%M:%S')
         add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:

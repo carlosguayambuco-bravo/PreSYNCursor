@@ -1448,9 +1448,10 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     key="numero_credito_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                 )
             with colMontoActual:
+                monto_actual = next((cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] == d['Id_Deuda']), 0.0)
                 st.text_input(
                     label = "",
-                    value = formatNumber(d['Monto_Actual']),
+                    value = formatNumber(monto_actual),
                     disabled=True,
                     key="monto_actual_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                 )
