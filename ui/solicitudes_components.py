@@ -569,8 +569,8 @@ def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecut
         user_email = solicitud["Correo"],
     )
     # Paso 2: Calcular la Diferencia en Días entre la Última Actualización y la Fecha de Subida
-    diff_dias = getBDDaysDiffFloat(ultima_upd, solicitud["Timestamp"])
-    fue_antes = ultima_upd < solicitud["Timestamp"]
+    diff_dias = getBDDaysDiffFloat(ultima_upd.tz_localize(None), solicitud["Timestamp"].tz_localize(None))
+    fue_antes = ultima_upd.tz_localize(None) < solicitud["Timestamp"].tz_localize(None)
     # Cargamos la Configuración del App
     app_config = load_app_config()
     # Paso 3: Mostrar el Mensaje de Advertencia o Éxito según corresponda

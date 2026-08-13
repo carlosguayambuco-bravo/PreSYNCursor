@@ -109,6 +109,7 @@ cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ulti
 user = st.session_state['user_obj']
 es_admin = (user.role == 'admin')
 
+
 st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} días hábiles)'.format(
     ultima_actualizacion.strftime('%Y-%m-%d') if ultima_actualizacion else 'No Disponible',
     dias_habiles_diff,

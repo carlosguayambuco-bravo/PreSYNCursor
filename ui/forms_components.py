@@ -45,8 +45,6 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     with colPaBOrigen:
         st.markdown("**Deuda Bravo**")
 
-    st.divider()
-
     for _, row in deudas_activas_df.iterrows():
         with colCH:
             selected = st.toggle("", key=f"select_deuda_{row['Id_Deuda']}", value=True)
