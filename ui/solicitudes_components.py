@@ -1304,7 +1304,9 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
 # Diálogo para ContraOfertar una Solicitud de Validación (Sin Implementar)
 @st.dialog("🫡 ContraOfertar Solicitud de Validación", dismissible=True, width="large", on_dismiss="rerun")
 def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
-    st.markdown("### **ℹ️ Información de la ContraOferta de Solicitud de Validación**")
+    st.markdown("### **ℹ️ Información de la ContraOferta de Solicitud de Validación (`{}`)**".format(
+        solicitud['ID_Solicitud']
+    ))
     st.divider()
 
     st.success("Para seguir, ingresa los montos que deseas proponer para cada deuda")

@@ -1009,7 +1009,7 @@ def check_if_validacion_uploaded(*, solicitud: dict[str, Any], old_id: str) -> b
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == 'Validación')
     maskCorreo = (solicitudes_df['Correo'] == st.session_state.get('user_email', 'Desconocido'))
     maskIds = (solicitudes_df['Ids_Deuda'] == solicitud['Ids_Deuda'])
-    maskOrigen = (solicitudes_df['Metadata_Solicitud'].apply(lambda x: x.get('Origen_Solicitud', None)) == old_id)
+    maskOrigen = (solicitudes_df['Metadata_Solicitud'].apply(lambda x: x.get('Origen_Solicitud', None) == old_id))
     # Paso 3: Combinamos las máscaras para obtener la máscara final
     mask_final = maskCasa & maskTipo & maskCorreo & maskIds & maskOrigen
     return mask_final.any()
