@@ -82,6 +82,8 @@ def load_current_month_solicitudes() -> pd.DataFrame:
     # 1: Cargamos las Solicitudes del Mes en Curso desde Google Sheets
     solicitudes_df = load_solicitudes_mec()
 
+    st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
+
     sols_ajustadas = solicitudes_df.copy()
 
     # 2: Aplicamos los Cambios Locales
