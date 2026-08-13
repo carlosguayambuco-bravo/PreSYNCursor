@@ -104,11 +104,25 @@ ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activ
 cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
 user = st.session_state['user_obj']
 es_admin = (user.role == 'admin')
-if (not cumple_condicion) and (not es_admin):
+st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} días hábiles)'.format(
+    ultima_actualizacion.strftime('%Y-%m-%d') if ultima_actualizacion else 'No Disponible',
+    dias_habiles_diff,
+))
+if (not cumple_condicion) and (not es_admin) or st.secrets.get('LET_WITHOUT_UPDATE', False):
     st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
         dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
     ))
     st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
+    # Añadimos un Botón de Reintentar
+    if st.button("**Reintentar**",
+            key="reintentar_actualizacion_deudas",
+            help="Presione este botón para reintentar la actualización de las deudas activas",
+            icon="🔄",
+            type="primary",
+            width="stretch",
+        ):
+        obtener_ultima_actualizacion_deudas.clear()
+        st.rerun()
     st.stop()
 
 # Verificamos si tiene algún Addendum Activo
