@@ -767,7 +767,7 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
             {
                 "Id_Deuda": deuda['Id_Deuda'],
                 "Banco": deuda['Banco'],
-                "Numero_Credito": st.session_state["numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], deuda['Id_Deuda'])],
+                "Numero_Credito": deuda.get('Numero_Credito','N/A'),
                 "Monto_Propuesto": cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0),
                 "Num_Cuotas": cleanNumber(deuda.get('Num_Cuotas', 1), default_nan=1.0)
             }
@@ -1013,3 +1013,14 @@ def check_if_validacion_uploaded(*, solicitud: dict[str, Any], old_id: str) -> b
     # Paso 3: Combinamos las máscaras para obtener la máscara final
     mask_final = maskCasa & maskTipo & maskCorreo & maskIds & maskOrigen
     return mask_final.any()
+
+def obtener_casas_cobro_base(*, deudas: list[str]) -> list[str]:
+    # Paso 1: Cargar las Actualizaciones Masivas
+    massive_df = load_masivas()
+    # Paso 2: Filtrar por Id_Deuda las Deudas Brindadas
+    massive_debts = massive_df[massive_df['Id_Deuda'].isin(deudas)]
+    # Paso 3: Devolver la lista de Casas
+    if not massive_debts.empty:
+        return massive_debts['Casa_Cobro'].tolist()
+    else:
+        return []
