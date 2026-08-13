@@ -945,7 +945,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
                 with colBancoAdd:
                     st.selectbox(
-                        label="",
+                        label="Banco",
                         options=BANCOS_UNICOS,
                         key='addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i),
                         help="Ingrese el banco para el addendum {}.".format(i+1),
@@ -954,21 +954,21 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     )
                 with colNumCreditoAdd:
                     st.text_input(
-                        "",
+                        "Número de Crédito",
                         key='addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i),
                         help="Ingrese el número de crédito para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                     )
                 with colMontoActualAdd:
                     st.text_input(
-                        "",
+                        "Monto Actual",
                         key='addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i),
                         help="Ingrese el monto actual para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                     )
                 with colMontoPropuestoAdd:
                     st.text_input(
-                        "",
+                        "Monto Propuesto",
                         key='addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i),
                         help="Ingrese el monto propuesto para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
@@ -1498,7 +1498,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
 
             with colIdDeuda:
                 st.text_input(
-                    label = "",
+                    label = "ID Deuda",
                     value = d['Id_Deuda'],
                     disabled=True,
                     key="id_deuda_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
@@ -1506,7 +1506,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                 )
             with colNumCredito:
                 st.text_input(
-                    label = "",
+                    label = "Número de Crédito",
                     value = d['Numero_Credito'],
                     disabled=True,
                     key="numero_credito_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
@@ -1515,7 +1515,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             with colMontoActual:
                 monto_actual = next((cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] == d['Id_Deuda']), 0.0)
                 st.text_input(
-                    label = "",
+                    label = "Monto Actual",
                     value = formatNumber(monto_actual),
                     disabled=True,
                     key="monto_actual_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
@@ -1523,7 +1523,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                 )
             with colMontoRespuesta:
                 st.text_input(
-                    label = "",
+                    label = "Monto Respuesta",
                     value = formatNumber(d['Monto_Propuesto']),
                     disabled=True,
                     key="monto_respuesta_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
@@ -1531,7 +1531,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                 )
             with colMontoContraOferta:
                 st.text_input(
-                    label = "",
+                    label = "Monto Propuesto",
                     value = st.session_state['monto_propuesto_co_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])],
                     key='monto_propuesto_co_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda']),
                     help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),

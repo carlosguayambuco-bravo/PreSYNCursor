@@ -47,7 +47,7 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
 
     for _, row in deudas_activas_df.iterrows():
         with colCH:
-            selected = st.toggle("", key=f"select_deuda_{row['Id_Deuda']}", value=True)
+            selected = st.toggle("Seleccionar Deuda", key=f"select_deuda_{row['Id_Deuda']}", value=True, label_visibility="collapsed")
             if selected:
                 st.session_state['deudas_seleccionadas'].append(row['Id_Deuda'])
             else:
@@ -198,7 +198,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
         with colIdDeuda:
             st.text_input(
-                "",
+                "Id Deuda",
                 value=row['Id_Deuda'],
                 disabled=True,
                 label_visibility="collapsed",
@@ -207,7 +207,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
         with colPaBOrigen:
             st.text_input(
-                "",
+                "Deuda Bravo",
                 value=formatNumber(row['PaB_Origen']),
                 disabled=True,
                 label_visibility="collapsed",
@@ -217,7 +217,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         with colProp:
             descuento_base = obtener_descuento_base(deuda=id_deuda)
             st.text_input(
-                "",
+                "Descuento en Base",
                 value=formatNumber(descuento_base) if pd.notna(descuento_base) else "N/A",
                 disabled=True,
                 label_visibility="collapsed",
@@ -226,7 +226,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
         with colPorcentaje:
             st.text_input(
-                "",
+                "% Total",
                 value='{:.2%}'.format(row['%Total']),
                 disabled=True,
                 label_visibility="collapsed",
@@ -236,7 +236,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         with colMontoPropuesto:
             # Al no definir 'value', toma automáticamente el valor de st.session_state[key]
             st.text_input(
-                "",
+                "Monto Propuesto",
                 disabled=st.session_state['usar_para_todos'],
                 label_visibility="collapsed",
                 key=f"monto_propuesto_{id_deuda}",
@@ -246,7 +246,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         if tipo_cuotas == 'Por Deuda':
             with colCuotasCol: # type: ignore
                 st.number_input(
-                    "",
+                    "Número de Cuotas",
                     min_value=1,
                     max_value=60,
                     step=1,
