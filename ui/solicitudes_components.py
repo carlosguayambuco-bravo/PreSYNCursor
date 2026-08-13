@@ -419,7 +419,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             upload_massive_addendums(solicitud=solicitud)
         if success:
             st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
-            sleep(2)
+            sleep(1)
             st.rerun()
         else:
             st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
@@ -1293,7 +1293,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
                 success, new_id = upload_form_response_to_google_sheets(response_info=solicitud_respuesta)
             if success:
                 st.toast(f"Solicitud de Acuerdo de Pago subida exitosamente. (ID: {new_id})", icon="✅")
-                sleep(2)
+                sleep(1)
                 st.rerun()
             else:
                 st.toast("Intenta de Nuevo subir la Solicitud",icon="❌")
@@ -1563,7 +1563,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                 success = upload_form_response_to_google_sheets(response_info=nueva_solicitud)
             if success:
                 st.toast("ContraOferta de Solicitud de Validación subida exitosamente.", icon="✅")
-                sleep(2)
+                sleep(1)
                 st.rerun()
             else:
                 st.error("Intenta de Nuevo subir la ContraOferta de Solicitud de Validación", icon="❌")
