@@ -1377,7 +1377,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
         st.toggle(
             label="**Usar Monto Total**",
             value=True,
-            key=f"usar_monto_total_co_{solicitud['ID_Solicitud']}",
+            key=key_usar_monto_total_co,
             help="Marque esta opción para usar el monto total de la contraoferta.",
         )
 
