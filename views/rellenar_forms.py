@@ -112,7 +112,7 @@ st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} dí
     ultima_actualizacion.strftime('%Y-%m-%d') if ultima_actualizacion else 'No Disponible',
     dias_habiles_diff,
 ))
-if ((not cumple_condicion) and (not es_admin)) or not (st.secrets.get('LET_WITHOUT_UPDATE', False)):
+if ((not cumple_condicion) and (not es_admin)) and not (st.secrets.get('LET_WITHOUT_UPDATE', False)):
     st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
         dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
     ))
