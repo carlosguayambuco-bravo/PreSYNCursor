@@ -760,7 +760,8 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
             "Metodo_Pago": solicitud['Metadata_Solicitud'].get('Metodo_Pago', ''),
             "Comentario_Ejecutivo": solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', ''),
         },
-        "Fecha_Limite_Pago": solicitud['Fecha_Limite_Pago'],
+        "Fecha_Esperada_Pago": solicitud['Fecha_Esperada_Pago'].strftime("%Y-%m-%d") if pd.notna(solicitud['Fecha_Esperada_Pago']) else '',
+        "Fecha_Limite_Pago": solicitud['Fecha_Limite_Pago'].strftime("%Y-%m-%d"),
         "Casa_Cobro": solicitud['Casa_Cobro'],
         "Ejecutivo": solicitud['Ejecutivo'],
         "JSON_Respuesta": [
