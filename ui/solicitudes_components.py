@@ -202,6 +202,13 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
     else:
         # Ordenamos los más antiguos primero
         solicitudes_df = solicitudes_df.sort_values(by="Timestamp", ascending=True)
+        # Creamos la Máscara de solicitudes sin responder
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
+        # Ordenamos los Datos para que la mascara quede de ultimas
+        solicitudes_df = pd.concat([
+            solicitudes_df.loc[mask_sin_responder],  # Respondidas (No máscara)
+            solicitudes_df.loc[~mask_sin_responder]   # Sin responder (Máscara)
+        ])
 
     # Por Último devolvemos el DataFrame de Solicitudes filtrado
     return solicitudes_df
