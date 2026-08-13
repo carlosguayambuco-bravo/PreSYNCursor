@@ -102,7 +102,9 @@ if deudas_activas_df.empty:
 ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))
 # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
 cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
-if not cumple_condicion:
+user = st.session_state['user_obj']
+es_admin = (user.role == 'admin')
+if (not cumple_condicion) and (not es_admin):
     st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
         dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
     ))

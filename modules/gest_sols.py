@@ -951,5 +951,7 @@ def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     solicitudes['Metadata_Solicitud'] = solicitudes['Metadata_Solicitud'].apply(
         lambda x: x.update({'Fecha_Solicitado': fechaActual}) or x
     )
-    # Paso 3: Subir las Solicitudes Actualizadas a Google Sheets
+    # Paso 3: Actualizamos el Ejecutivo
+    solicitudes['Ejecutivo'] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
+    # Paso 4: Subir las Solicitudes Actualizadas a Google Sheets
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)

@@ -1738,8 +1738,8 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
-    expander_name = "`{id}` **{tipo:<15}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}` | 👤 **Ejecutivo:** {ejecutivo}".format(
-        tipo=solicitud["Tipo_Solicitud"],
+    expander_name = "`{id}` {tipo:<15} • {aliado} | 📅 `{fecha}` | 📌 `{estado}` | 👤 **Ejecutivo:** {ejecutivo}".format(
+        tipo='**{}**'.format(solicitud["Tipo_Solicitud"]),
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],
         ejecutivo=solicitud["Ejecutivo"],
@@ -1890,7 +1890,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 def mostrar_datos_solicitud_negociador(*,solicitud):
     # Definimos el Nombre del Expander
     expander_name = "`{id}` **{tipo:<15}** • {aliado} | 📅 `{fecha}` | 📌 `{estado}`".format(
-        tipo=solicitud["Tipo_Solicitud"],
+        tipo='**{}**'.format(solicitud["Tipo_Solicitud"]),
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],
         aliado=solicitud["Casa_Cobro"],

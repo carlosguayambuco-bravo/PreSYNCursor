@@ -119,13 +119,13 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
     headers = st.session_state.get("solicitudes_headers", [])
 
     # Organizamos los datos de las solicitudes en el orden de los headers
-    solicitudes_matrix = solicitudes_df[headers].astype(str).values
+    solicitudes_matrix = solicitudes_df[headers].values
 
     # Si por alguna razón la estructura se volvió unidimensional, la forzamos a ser 2D
-    if solicitudes_matrix.ndim == 1:
-        solicitudes_matrix = [solicitudes_matrix.tolist()]
+    if len(solicitudes_df) == 1:
+        solicitudes_matrix = [solicitudes_matrix.tolist()]  # Convertimos a lista de listas
     else:
-        solicitudes_matrix = solicitudes_matrix.tolist()
+        solicitudes_matrix = solicitudes_matrix.tolist()  # Convertimos a lista de listas
 
     # 2. Construimos la nueva lista asegurando que row es una lista y que row[0] existe
     solicitudes_data = []
@@ -133,7 +133,8 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
         if row: # Verifica que la fila no esté vacía
             id_solicitud = row[0]
             sheet_row = get_solicitud_row_in_google_sheets(id_solicitud)
-            solicitudes_data.append([sheet_row] + row)
+            row_cleaned = [convert_data_to_string(cell) for cell in row]
+            solicitudes_data.append([sheet_row] + row_cleaned)
 
     # Usamos la función de actualización masiva
     succeded = update_sheet_data_batch(
