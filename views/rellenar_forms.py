@@ -68,9 +68,13 @@ deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
 # Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
 if deudas_activas_df.empty:
     # Si el Id_Deuda es Vácio entonces no podemos hacer nada
-    if not id_deuda:
+    if not id_deuda and not st.session_state.get('id_rep_needed', False):
         st.session_state['id_rep_needed'] = True
         st.info("No se encontraron deudas activas para la referencia proporcionada. Por favor, ingrese algún Id Deuda de la Referencia para continuar.")
+        st.rerun()
+
+    if not id_deuda:
+        st.info("Ingresa una deuda activa para buscar la Referencia del cliente. (La otorgada no tiene deudas activas)", icon = "ℹ️")
         st.stop()
 
     # Obtenemos la Referencia por Id_Deuda

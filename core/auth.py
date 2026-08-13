@@ -182,3 +182,5 @@ def authenticate_user():
         except Exception as e:
             st.error(f"Error durante la autenticación: {e}", icon="🚨")
             st.info("Por favor, intenta iniciar sesión nuevamente.", icon="ℹ️")
+            # Volvemos a generar la URL guardandola en auth_url
+            st.session_state["auth_url"] = get_auth_url()

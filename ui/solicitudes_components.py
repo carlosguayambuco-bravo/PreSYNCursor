@@ -586,9 +586,13 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         aliado_final = st.selectbox(
             label="**🥸 Aliado - Casa de Cobro**",
             options=list(st.session_state["aliados_dict"].keys()),
-            index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]),
+            index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]) if solicitud["Casa_Cobro"] in st.session_state["aliados_dict"] else 0,
             key="aliado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
         )
+        if not solicitud["Casa_Cobro"] in st.session_state["aliados_dict"]:
+            st.warning("El aliado original (**{}**) no se encuentra en la lista de aliados disponibles. Se ha seleccionado el primer aliado por defecto.".format(
+                solicitud["Casa_Cobro"]
+            ), icon="⚠️")
 
     with colEstado:
         estado_final = st.selectbox(
