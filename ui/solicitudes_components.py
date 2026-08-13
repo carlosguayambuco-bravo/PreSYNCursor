@@ -67,6 +67,9 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             disabled = usar_recomendado,
         )
 
+    if tipo_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Tipo_Solicitud"].isin(tipo_solicitud)]
+
     with colAliado:
         aliado_solicitud = st.multiselect(
             label="**Aliado - Casa de Cobro**",
@@ -84,6 +87,9 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             help="Seleccione el estado de la solicitud que desea filtrar",
             disabled = usar_recomendado,
         )
+
+    if estado_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"].isin(estado_solicitud)]
 
     with colEjecutivo:
         ejecutivo_solicitud = st.multiselect(
@@ -148,14 +154,9 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             )
 
     # Paso 3: Aplicar ls filtros seleccionados al DataFrame de Solicitudes
-    if tipo_solicitud:
-        solicitudes_df = solicitudes_df[solicitudes_df["Tipo_Solicitud"].isin(tipo_solicitud)]
 
     if aliado_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"].isin(aliado_solicitud)]
-
-    if estado_solicitud:
-        solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"].isin(estado_solicitud)]
 
     if ejecutivo_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Ejecutivo"].isin(ejecutivo_solicitud)]
@@ -271,7 +272,7 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
     with colToggles:
         toggle_exitosas = st.toggle(
             label="**✅ Exitosas**",
-            value=True,
+            value=False,
             key="toggle_exitosas_solicitud_nego_input",
             help="Filtra las solicitudes que aún no han sido respondidas.",
         )
@@ -1939,11 +1940,11 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         casas_en_base = ["**{}**".format(casa) for casa in casas_en_base]
 
         if casas_en_base:
-            st.markdown("💼 Casas que Registran en Base")
+            st.markdown("### 💼 Casas que Registran en Base")
             mensaje_casas = ' | '.join(
                 casas_en_base
             )
-            st.write("-> "+mensaje_casas)
+            st.markdown("## -> "+mensaje_casas)
         else:
             st.warning("No Registran Descuentos en Base", icon="❌")
             
