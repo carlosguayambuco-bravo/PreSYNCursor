@@ -48,7 +48,7 @@ def cleanNumber(value, default_nan: float = 0.0) -> float:
         if (',' in clean_val) and ('.' in clean_val) and (clean_val.index(',') > clean_val.index('.')):
             clean_val = clean_val.replace('.', '').replace(',', '.')
         elif (',' in clean_val) and ('.' in clean_val) and (clean_val.index(',') < clean_val.index('.')):
-            # Reemplzamos , con nada 
+            # Reemplzamos , con nada
             clean_val = clean_val.replace(',', '')
         elif '.' in clean_val and clean_val.count('.') > 1:
             # Handle "666.666.666" as 666666666
@@ -76,6 +76,7 @@ def cleanNumber(value, default_nan: float = 0.0) -> float:
     except ValueError:
         clean_val = pd.to_numeric(clean_val, errors='coerce')
         return clean_val if pd.notna(clean_val) else default_nan  # Not a number? Return original text
+
 # Función Auxiliar para Obtener el Mes Operativo
 def getMesOperativo() -> pd.Timestamp:
     # Primero Obtenemos el Día de hoy

@@ -1,22 +1,21 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Optional
+from typing import Literal, Optional
 from time import sleep
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
-from pandas import col
-from pandera.typing import DataFrame
 import streamlit as st
 from st_copy import copy_button
 import plotly.graph_objects as go
 import plotly.express as px
 # Librerías Locales
+from data.data_loader import load_app_config
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
-from modules.forms import obtener_nombre_negociador
+from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
 from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
@@ -562,6 +561,42 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
 
     return st.session_state.get(key_acuerdo, bytes())
 
+# Función Auxiliar para Mostrar el Mensaje de Cliente Actualizado/No Act 
+def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecutivo", "nego"]) -> None:
+    # Paso 1: Obtener la última Actualización
+    ultima_upd = obtener_ultima_actualizacion_deudas(
+        debt_ids = solicitud["Ids_Deuda"].split("-"),
+        user_email = solicitud["Correo"],
+    )
+    # Paso 2: Calcular la Diferencia en Días entre la Última Actualización y la Fecha de Subida
+    diff_dias = getBDDaysDiffFloat(ultima_upd, solicitud["Timestamp"])
+    fue_antes = ultima_upd < solicitud["Timestamp"]
+    # Cargamos la Configuración del App
+    app_config = load_app_config()
+    # Paso 3: Mostrar el Mensaje de Advertencia o Éxito según corresponda
+    if fue_antes and (diff_dias > float(app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE'])):
+        if origen == "ejecutivo":
+            st.warning(
+                "El cliente ha actualizado sus deudas hace {:.2f} días hábiles, lo cual es mayor al mínimo de {} días requerido para considerar la actualización.".format(
+                    diff_dias,
+                    app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+                ),
+                icon="⚠️"
+            )
+        elif origen == "nego":
+            st.warning(
+                "No has actualizado las deudas del cliente hace {:.2f} días hábiles, lo cual es mayor al mínimo de {} días requerido para considerar la actualización.".format(
+                    diff_dias,
+                    app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+                ),
+                icon="⚠️"
+            )
+    else:
+        if origen == "ejecutivo":
+            st.success("El Cliente fue actualizado por el Negociador", icon="✅")
+        elif origen == "nego":
+            st.success("Actualizaste el Cliente 😁", icon="✅")
+
 # Función para Abrir el Dialogo de Respuesta de una Solicitud
 @st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large",on_dismiss="rerun")
 def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
@@ -579,6 +614,10 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     solicitud_respuesta["Ejecutivo"] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
 
     st.markdown("### **ℹ️ Información de la Solicitud**")
+
+    # Mostramos el Mensaje de Actualización
+    mostrar_mensaje_actualizado(solicitud=solicitud, origen='ejecutivo')
+
     # Paso 1: Escogencia de Aliado, Estado de Solicitud y (Llamada )
     colAliado, colEstado, colLlamada = st.columns([2,2,1], vertical_alignment="center", border=True)
 
@@ -588,6 +627,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             options=list(st.session_state["aliados_dict"].keys()),
             index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]) if solicitud["Casa_Cobro"] in st.session_state["aliados_dict"] else 0,
             key="aliado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            accept_new_options=True,
         )
         if not solicitud["Casa_Cobro"] in st.session_state["aliados_dict"]:
             st.warning("El aliado original (**{}**) no se encuentra en la lista de aliados disponibles. Se ha seleccionado el primer aliado por defecto.".format(
@@ -615,7 +655,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.stop()
 
     # Siguiente: Actualizamos la solicitud_respuesta con los valores seleccionados
-    solicitud_respuesta["Casa_Cobro"] = aliado_final
+    solicitud_respuesta["Casa_Cobro"] = aliado_final.upper() if aliado_final else solicitud_respuesta["Casa_Cobro"]
     solicitud_respuesta["Estado_Solicitud"] = estado_final
     solicitud_respuesta["Metadata_Solicitud"]["Fue_Llamada"] = llamada_final
 
@@ -1900,6 +1940,8 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="ejecutivo")
 
+        mostrar_mensaje_actualizado(solicitud=solicitud, origen="ejecutivo")
+
         # Por Último: Mostramos el Botón para Responder la Solicitud
         solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
 
@@ -2168,6 +2210,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     help = "El Método de Pago de la solicitud",
                     width="stretch",
                 )
+
+        mostrar_mensaje_actualizado(solicitud=solicitud, origen="nego")
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
