@@ -76,18 +76,43 @@ DEFAULT_PERMISSIONS = {
 }
 
 PAGES_ROUTE_MAPPING = {
-    "subida_formulario": st.Page("views/rellenar_forms.py",title="Formulario Alianzas",icon="📝",default=False),
-    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="💼",default=False),
-    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="🛠️",default=False),
-    "ver_mis_solicitudes": st.Page("views/ver_solicitudes.py",title="Ver Mis Solicitudes",icon="📋",default=False),
-    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="💸",default=False),
-    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="🤔",default=False),
+    "subida_formulario": {"page": "views/rellenar_forms.py", "title": "Formulario Alianzas", "icon": "📝"},
+    "agregar_cartera": {"page": "views/agregar_cartera.py", "title": "Agregar Cartera", "icon": "💼"},
+    "gestionar_solicitudes": {"page": "views/gestionar_solicitudes.py", "title": "Gestionar Solicitudes", "icon": "🛠️"},
+    "ver_mis_solicitudes": {"page": "views/ver_solicitudes.py", "title": "Ver Mis Solicitudes", "icon": "📋"},
+    "ver_cartera_total": {"page": "views/ver_cartera_total.py", "title": "Ver Cartera Total", "icon": "💸"},
+    "ver_logs": {"page": "views/ver_logs.py", "title": "Ver Logs", "icon": "🤔"},
 }
 
-def get_permit_pages(user_role: Literal['admin', 'leader','nego', 'executive']) -> list[st.Page]: # type: ignore
+def get_permit_pages(user_role: Literal['admin', 'leader', 'nego', 'executive']) -> list[st.Page]:
     """
-    Función para obtener las páginas permitidas para un rol de usuario específico.
+    Función para obtener las páginas permitidas e instanciar st.Page dinámicamente.
     """
     allowed_permits = DEFAULT_PERMISSIONS.get(user_role, [])
-    allowed_pages = [PAGES_ROUTE_MAPPING[permit.name] for permit in allowed_permits if permit.name in PAGES_ROUTE_MAPPING]
+    
+    # Eliminamos duplicados si los hubiera
+    seen_permits = set()
+    allowed_pages = []
+
+    for permit in allowed_permits:
+        if permit.name in PAGES_ROUTE_MAPPING and permit.name not in seen_permits:
+            seen_permits.add(permit.name)
+            config = PAGES_ROUTE_MAPPING[permit.name]
+            
+            # Instanciamos la página de forma fresca
+            # Establecemos default=True únicamente en la primera página de la lista
+            is_default = (len(allowed_pages) == 0)
+            
+            page_obj = st.Page(
+                page=config["page"],
+                title=config["title"],
+                icon=config["icon"],
+                default=is_default
+            )
+            allowed_pages.append(page_obj)
+
+    # Opcional: Página por defecto si el usuario no tiene ninguna página permitida
+    if not allowed_pages:
+        allowed_pages = [st.Page("views/no_access.py", title="Sin Acceso", icon="🚫", default=True)]
+
     return allowed_pages
