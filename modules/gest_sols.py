@@ -955,3 +955,51 @@ def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     solicitudes['Ejecutivo'] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
     # Paso 4: Subir las Solicitudes Actualizadas a Google Sheets
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)
+
+# Función Auxiliar para verificar si no se ha subido un Acuerdo de Pago para la Solicitud
+def check_if_acuerdo_pago_uploaded(*, solicitud: pd.Series) -> bool:
+    """
+    Verifica si ya se ha subido un Acuerdo de Pago para la solicitud dada.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        bool: True si ya se ha subido un Acuerdo de Pago, False en caso contrario.
+    """
+    # Paso 1: Traer datos de solicitudes de Google Sheets
+    solicitudes_df = load_current_month_solicitudes()
+    # Paso 2: Crear las Máscaras para filtrar
+    # Las máscaras son: maskCasa, maskTipo, maskNoExitosa, maskCorreo, maskIds
+    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
+    maskNoExitosa = (solicitudes_df['Estado_Solicitud'] == 'No Exitosa')
+    maskTipo = (solicitudes_df['Tipo_Solicitud'] == 'Acuerdo de Pago')
+    maskCorreo = (solicitudes_df['Correo'] == solicitud['Correo'])
+    maskIds = (solicitudes_df['Ids_Deuda'] == solicitud['Ids_Deuda'])
+    # Paso 3: Combinamos las máscaras para obtener la máscara final
+    mask_final = maskCasa & maskTipo & maskCorreo & maskIds
+    return mask_final.any()
+
+# Función Auxiliar para verificar si ya se subio una solicitud de Validación para la Solicitud
+def check_if_validacion_uploaded(*, solicitud: pd.Series) -> bool:
+    """
+    Verifica si ya se ha subido una solicitud de Validación para la solicitud dada.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        bool: True si ya se ha subido una solicitud de Validación, False en caso contrario.
+    """
+    # Paso 1: Traer datos de solicitudes de Google Sheets
+    solicitudes_df = load_current_month_solicitudes()
+    # Paso 2: Crear las Máscaras para filtrar
+    # Las máscaras son: maskCasa, maskTipo, maskCorreo, maskIds y Mascara de Origen Solicitud
+    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
+    maskTipo = (solicitudes_df['Tipo_Solicitud'] == 'Validación')
+    maskCorreo = (solicitudes_df['Correo'] == solicitud['Correo'])
+    maskIds = (solicitudes_df['Ids_Deuda'] == solicitud['Ids_Deuda'])
+    maskOrigen = (solicitudes_df['Metadata_Solicitud'].apply(lambda x: x.get('Origen_Solicitud', None)) == solicitud['ID_Solicitud'])
+    # Paso 3: Combinamos las máscaras para obtener la máscara final
+    mask_final = maskCasa & maskTipo & maskCorreo & maskIds & maskOrigen
+    return mask_final.any()

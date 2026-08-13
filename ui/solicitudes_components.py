@@ -17,7 +17,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -1285,7 +1285,8 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
             type="primary",
         ):
             # Subimos la Solicitud de Acuerdo de Pago
-            success, new_id = upload_form_response_to_google_sheets(response_info=solicitud_respuesta)
+            with st.spinner("Subiendo Solicitud de Acuerdo de Pago..."):
+                success, new_id = upload_form_response_to_google_sheets(response_info=solicitud_respuesta)
             if success:
                 st.toast(f"Solicitud de Acuerdo de Pago subida exitosamente. (ID: {new_id})", icon="✅")
                 st.rerun()
@@ -1541,10 +1542,13 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             help="Haga clic para realizar la contraoferta de la solicitud.",
             type="primary",
         ):
-            success = upload_form_response_to_google_sheets(response_info=nueva_solicitud)
+            with st.spinner("Subiendo ContraOferta de Solicitud de Validación..."):
+                success = upload_form_response_to_google_sheets(response_info=nueva_solicitud)
             if success:
                 st.toast("ContraOferta de Solicitud de Validación subida exitosamente.", icon="✅")
                 st.rerun()
+            else:
+                st.error("Intenta de Nuevo subir la ContraOferta de Solicitud de Validación", icon="❌")
 
 # Díalogo para Confirmar la Actualización de las Solicitudes a "Solicitado"
 @st.dialog("🫡 Confirmar Actualización de Solicitudes", dismissible=True, width="large", on_dismiss="rerun")
@@ -2146,18 +2150,28 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             if file_id is None or file_id == "":
                 st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
             else:
-                url_acuerdo_pago = obtener_link_acuerdo_pago(file_id)
-                st.link_button(
-                    label="📄 Ver Acuerdo de Pago",
-                    url=url_acuerdo_pago,
-                    width="stretch",
-                    type="primary",
-                    help="Haga clic para ver el Acuerdo de Pago en PDF.",
-                )
+                # Creamos 2 Botonos: Link al Acuerdo de Pago y Botón para Copiar datos de la solicitud
+                colLinkAcuerdo, colBotonCopiar = st.columns([4, 1], vertical_alignment="center")
+                with colLinkAcuerdo:
+                    url_acuerdo_pago = obtener_link_acuerdo_pago(file_id)
+                    st.link_button(
+                        label="📄 Ver Acuerdo de Pago",
+                        url=url_acuerdo_pago,
+                        width="stretch",
+                        type="primary",
+                        help="Haga clic para ver el Acuerdo de Pago en PDF.",
+                    )
+                with colBotonCopiar:
+                    txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
+                    copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
         else:
 
             # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
             colBotonAbrir, colInfoBoton, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
+
+            # Verificamos si ya tiene acuerdo subido y validación subida
+            ya_tiene_acuerdo = check_if_acuerdo_pago_uploaded(solicitud=solicitud)
+            ya_tiene_validacion = check_if_validacion_uploaded(solicitud=solicitud)
 
             with colBotonAbrir:
                 if st.button(
@@ -2165,7 +2179,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     width="stretch",
                     type="primary",
                     key = "abrir_dialogo_ac_pago_{}".format(solicitud['ID_Solicitud']),
-                    help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago"
+                    help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago",
+                    disabled = ya_tiene_acuerdo,
+                    icon="📄"
                 ):
                     dialog_subir_acuerdo_pago(solicitud=solicitud)
 
@@ -2177,12 +2193,18 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
                     help = "Botón para ajustar la oferta de pago de la solicitud",
                     icon="🔄",
+                    disabled = ya_tiene_validacion,
                 ):
                     ajustar_contraoferta_solicitud(solicitud=solicitud)
 
             with colBotonCopiar:
                 txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
+
+            if ya_tiene_acuerdo:
+                st.info("Ya has subido un Acuerdo de Pago para esta solicitud. No es posible subir otro.", icon="ℹ️")
+            if ya_tiene_validacion:
+                st.info("Ya has subido una Contraoferta para esta solicitud. No es posible subir otra.", icon="ℹ️")
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
