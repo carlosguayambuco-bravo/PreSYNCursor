@@ -886,7 +886,7 @@ def crear_plantilla_solicitud_acuerdo_pago(
                 'Numero_Credito': deuda['Numero_Credito'],
                 'Monto_Propuesto': cleanNumber(deuda.get('Monto_Propuesto', 0)),
                 'Num_Cuotas': deuda.get('Num_Cuotas', 1),
-                'Monto_Actual': cleanNumber(deuda.get('Monto_Actual', 0))
+                'Monto_Actual': cleanNumber(next((d.get('Monto_Actual',0) for d in solicitud['Datos_Solicitud'] if d['Id_Deuda'] == deuda['Id_Deuda']), 0)),
             }
             for deuda in (solicitud['JSON_Respuesta'] + solicitud["Metadata_Solicitud"].get("Addendums", []))
             if (cleanNumber(deuda.get('Monto_Propuesto', 0)) > 0) and (deuda['Id_Deuda'] in selected_ids)

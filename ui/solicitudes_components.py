@@ -1439,6 +1439,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     value = d['Id_Deuda'],
                     disabled=True,
                     key="id_deuda_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
                 )
             with colNumCredito:
                 st.text_input(
@@ -1446,6 +1447,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     value = d['Numero_Credito'],
                     disabled=True,
                     key="numero_credito_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
                 )
             with colMontoActual:
                 monto_actual = next((cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] == d['Id_Deuda']), 0.0)
@@ -1454,6 +1456,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     value = formatNumber(monto_actual),
                     disabled=True,
                     key="monto_actual_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
                 )
             with colMontoRespuesta:
                 st.text_input(
@@ -1461,6 +1464,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
                     value = formatNumber(d['Monto_Propuesto']),
                     disabled=True,
                     key="monto_respuesta_co_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    label_visibility="collapsed",
                 )
             with colMontoContraOferta:
                 st.text_input(
@@ -1488,6 +1492,8 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
     for d in solicitud["JSON_Respuesta"]:
         if not (d['Id_Deuda'] in selected_deudas):
             continue
+        monto_actual = next((cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] == d['Id_Deuda']), 0.0)
+
         monto_propuesto = cleanNumber(st.session_state['monto_propuesto_co_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0)
         if tipo_cuotas == "Por Deuda":
             num_cuotas = int(st.session_state['cuotas_co_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])])
@@ -1497,7 +1503,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             "Id_Deuda": d['Id_Deuda'],
             "Banco": d['Banco'],
             "Numero_Credito": d['Numero_Credito'],
-            "Monto_Actual": cleanNumber(d['Monto_Actual']),
+            "Monto_Actual": monto_actual,
             "Monto_Propuesto": monto_propuesto,
             "Num_Cuotas": num_cuotas,
         })
