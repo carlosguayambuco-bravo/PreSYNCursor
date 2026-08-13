@@ -240,7 +240,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
 
     # Paso 2: Actualizar Solicitudes con mismas deudas, misma Casa_Cobro y mismo Tipo_Solicitud (Sin Responder)
     solicitudes_df = load_current_month_solicitudes()
-    idsFinal = ''.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
+    idsFinal = '-'.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
     maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
@@ -315,8 +315,11 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             # Agregamos la Sub-Solicitud a la lista de filas que necesitan ser actualizadas
             need_update_rows.append(sub_solicitud)
 
-    # Volvemos todas las que necesitan actualizaciones un DF
-    need_update_df = pd.DataFrame(need_update_rows)
+    # Volvemos todas las que necesitan actualizaciones un DF (concatenar preservando tipos de datos)
+    if need_update_rows:
+        need_update_df = pd.concat(need_update_rows, axis=1).T.reset_index(drop=True)
+    else:
+        need_update_df = pd.DataFrame()
 
     # Si la Solicitud Inicial es Exitosa, Es Acuerdo de Pago u Oferta de Acuerdo y tenemos bytes del PDF
     # Se envia el correo correspondiente

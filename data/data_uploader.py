@@ -128,9 +128,25 @@ def update_massive_solicitudes_in_google_sheets(solicitudes_df: pd.DataFrame) ->
 
     # Obtenemos los Headers de la Worksheet guardados en el Session State
     headers = st.session_state.get("solicitudes_headers", [])
+    
+    # Validación: verificar que headers no esté vacío
+    if not headers:
+        st.error("No se encontraron headers de Solicitudes. Intente recargar la página.")
+        return False
+    
+    # Validación: verificar que el DataFrame no esté vacío
+    if solicitudes_df.empty:
+        st.error("No hay solicitudes para actualizar.")
+        return False
+    
+    # Seleccionar solo las columnas que existen en el DataFrame
+    headers_disponibles = [h for h in headers if h in solicitudes_df.columns]
+    if not headers_disponibles:
+        st.error(f"No se encontraron columnas válidas para actualizar. Esperado: {headers}. Recibido: {list(solicitudes_df.columns)}")
+        return False
 
     # Organizamos los datos de las solicitudes en el orden de los headers
-    solicitudes_matrix = solicitudes_df[headers].values
+    solicitudes_matrix = solicitudes_df[headers_disponibles].values
 
     # Convertimos el array a una lista de listas
     solicitudes_matrix = solicitudes_matrix.tolist()
