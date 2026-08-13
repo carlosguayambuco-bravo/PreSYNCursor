@@ -13,20 +13,67 @@ from modules.constants import SOLICITUDES_ID_DELAY
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
 
+# Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
+@st.cache_data(ttl=180, show_spinner="Cargando mapeo de IDs de Solicitud desde Google Sheets...")
+def get_solicitud_id_to_row_mapping() -> dict[str, int]:
+    """
+    Obtiene un diccionario que mapea ID_Solicitud -> Fila en Google Sheets
+    Se cachea por 3 minutos (180 segundos) para evitar lecturas constantes
+    
+    Returns:
+        dict[str, int]: Diccionario con ID_Solicitud como clave y fila de sheets como valor
+    """
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    solicitudes_ws = sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
+    
+    # Obtener todos los valores de la primera columna (ID_Solicitud)
+    id_column = _retry(lambda: solicitudes_ws.col_values(1), label="Get ID_Solicitud column")
+    
+    # Crear el mapeo: ID_Solicitud (desde fila 2) -> número de fila
+    # Fila 1 es el header, así que empezamos desde fila 2
+    mapping = {}
+    for row_num, solicitud_id in enumerate(id_column[1:], start=2):
+        if solicitud_id:  # Si no está vacío
+            mapping[str(solicitud_id).replace('.0','').strip()] = row_num
+    
+    return mapping
+
 # Función Auxiliar para Obtener la Fila de Sheets basado en el ID de Solicitud
 def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
+    """
+    Obtiene la fila de Google Sheets para una solicitud específica
+    usando el mapeo de IDs cacheado. Si el ID no se encuentra,
+    resetea el cache y reintenta una vez.
+    
+    Args:
+        solicitud_id (str): ID de la solicitud
+        
+    Returns:
+        int: Número de fila en Google Sheets
+        
+    Raises:
+        ValueError: Si el ID no es string o no se encuentra en Google Sheets
+    """
     if not isinstance(solicitud_id, str):
         raise ValueError("El ID de Solicitud debe ser una cadena de texto (str)., se encontro: {} ({})".format(
             type(solicitud_id), solicitud_id
         ))
-    # Paso 1: Convertir el ID de Solicitud a int
-    solicitud_id_int = int(solicitud_id)
-    # Paso 2: Buscar en el Session State el primer id, si no esta se usa el delay
-    first_id = st.session_state.get("first_id_solicitud", SOLICITUDES_ID_DELAY)
-    # Paso 3: Convertimos los Datos a int
-    first_id_int = int(first_id)
-    # Paso 4: Calculamos la fila en Google Sheets
-    return solicitud_id_int - first_id_int + 2  # +2 porque la primera fila es el header y la segunda fila es el primer ID (1)
+    
+    solicitud_id_clean = str(solicitud_id).replace('.0','').strip()
+    
+    # Obtener el mapeo cacheado
+    mapping = get_solicitud_id_to_row_mapping()
+    
+    # Si el ID no está en el mapeo, resetear cache y recargar
+    if solicitud_id_clean not in mapping:
+        st.cache_data.clear()
+        mapping = get_solicitud_id_to_row_mapping()
+    
+    # Si aún no está, lanzar error
+    if solicitud_id_clean not in mapping:
+        raise ValueError(f"No se encontró ID de Solicitud '{solicitud_id}' en Google Sheets")
+    
+    return mapping[solicitud_id_clean]
 
 # Función Auxiliar para Añadir cambios locales
 def add_cambios_locales_to_session_state(cambios_locales: list[pd.Series] | pd.DataFrame):
