@@ -76,12 +76,12 @@ DEFAULT_PERMISSIONS = {
 }
 
 PAGES_ROUTE_MAPPING = {
-    "subida_formulario": st.Page("views/rellenar_forms.py",title="Formulario Alianzas",icon="📝"),
-    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="💼"),
-    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="🛠️"),
-    "ver_mis_solicitudes": st.Page("views/ver_solicitudes.py",title="Ver Mis Solicitudes",icon="📋"),
-    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="💸"),
-    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="🤔"),
+    "subida_formulario": st.Page("views/rellenar_forms.py",title="Formulario Alianzas",icon="📝",default=False),
+    "agregar_cartera": st.Page("views/agregar_cartera.py",title="Agregar Cartera",icon="💼",default=False),
+    "gestionar_solicitudes": st.Page("views/gestionar_solicitudes.py",title="Gestionar Solicitudes",icon="🛠️",default=False),
+    "ver_mis_solicitudes": st.Page("views/ver_solicitudes.py",title="Ver Mis Solicitudes",icon="📋",default=False),
+    "ver_cartera_total": st.Page("views/ver_cartera_total.py",title="Ver Cartera Total",icon="💸",default=False),
+    "ver_logs": st.Page("views/ver_logs.py",title="Ver Logs",icon="🤔",default=False),
 }
 
 def get_permit_pages(user_role: Literal['admin', 'leader','nego', 'executive']) -> list[st.Page]: # type: ignore
