@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Optional, Literal
+from typing import Optional
+from time import sleep
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -11,7 +12,6 @@ from st_copy import copy_button
 import plotly.graph_objects as go
 import plotly.express as px
 # Librerías Locales
-from data.data_models import SolicitudesSchema
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
@@ -419,9 +419,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             upload_massive_addendums(solicitud=solicitud)
         if success:
             st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
-            # Agregamos el ID de la Solicitud al BannedManager para que no se pueda volver a responder
-            banned_manager = get_banned_manager()
-            banned_manager.ban(solicitud["ID_Solicitud"])
+            sleep(2)
             st.rerun()
         else:
             st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
@@ -1266,6 +1264,9 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         comentario=cm_final or "",
     )
 
+    # Verificamos que esta solicitud no exista ya
+    ya_existe_acuerdo = check_if_acuerdo_pago_uploaded(solicitud = solicitud_respuesta)
+
     # Vamos a Mostrar 2 Botones: Uno para salir del Dialog y otro para subir la Soliciutd
     colSalir, colSubir = st.columns(2, vertical_alignment="center", gap="large")
     with colSalir:
@@ -1275,6 +1276,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
             help="Haga clic para salir del diálogo de subir solicitud de acuerdo de pago.",
             on_click=st.rerun,
             type="secondary",
+            width="stretch",
         )
 
     with colSubir:
@@ -1283,15 +1285,21 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
             key="subir_solicitud_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
             help="Haga clic para subir la solicitud de acuerdo de pago.",
             type="primary",
+            width="stretch",
+            disabled=ya_existe_acuerdo,
         ):
             # Subimos la Solicitud de Acuerdo de Pago
             with st.spinner("Subiendo Solicitud de Acuerdo de Pago..."):
                 success, new_id = upload_form_response_to_google_sheets(response_info=solicitud_respuesta)
             if success:
                 st.toast(f"Solicitud de Acuerdo de Pago subida exitosamente. (ID: {new_id})", icon="✅")
+                sleep(2)
                 st.rerun()
             else:
                 st.toast("Intenta de Nuevo subir la Solicitud",icon="❌")
+
+    if ya_existe_acuerdo:
+        st.warning("Ya existe una solicitud de acuerdo de pago para esta solicitud. No se puede subir otra.", icon="⚠️")
 
 # Diálogo para ContraOfertar una Solicitud de Validación (Sin Implementar)
 @st.dialog("🫡 ContraOfertar Solicitud de Validación", dismissible=True, width="large", on_dismiss="rerun")
@@ -1524,6 +1532,9 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
         comentario=cm_final or "",
     )
 
+    # Verificamos que esta solicitud no exista ya
+    ya_existe_contraoferta = check_if_validacion_uploaded(solicitud = nueva_solicitud)
+
     # Ahora Creamos los 2 Botones: Uno para Cancelar y Otro para ContraOfertar
     colCancelar, colContraOfertar = st.columns(2, vertical_alignment="center", gap="large")
     with colCancelar:
@@ -1532,6 +1543,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             key="cancelar_contraoferta_solicitud_{}".format(solicitud['ID_Solicitud']),
             help="Haga clic para cancelar la contraoferta de la solicitud.",
             type="secondary",
+            width="stretch",
         ):
             st.rerun()
 
@@ -1541,14 +1553,20 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             key="contraofertar_solicitud_{}".format(solicitud['ID_Solicitud']),
             help="Haga clic para realizar la contraoferta de la solicitud.",
             type="primary",
+            width="stretch",
+            disabled=ya_existe_contraoferta,
         ):
             with st.spinner("Subiendo ContraOferta de Solicitud de Validación..."):
                 success = upload_form_response_to_google_sheets(response_info=nueva_solicitud)
             if success:
                 st.toast("ContraOferta de Solicitud de Validación subida exitosamente.", icon="✅")
+                sleep(2)
                 st.rerun()
             else:
                 st.error("Intenta de Nuevo subir la ContraOferta de Solicitud de Validación", icon="❌")
+
+    if ya_existe_contraoferta:
+        st.warning("Ya existe una contraoferta para esta solicitud. No se puede subir otra.", icon="⚠️")
 
 # Díalogo para Confirmar la Actualización de las Solicitudes a "Solicitado"
 @st.dialog("🫡 Confirmar Actualización de Solicitudes", dismissible=True, width="large", on_dismiss="rerun")
@@ -2169,10 +2187,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
             colBotonAbrir, colInfoBoton, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
 
-            # Verificamos si ya tiene acuerdo subido y validación subida
-            ya_tiene_acuerdo = check_if_acuerdo_pago_uploaded(solicitud=solicitud)
-            ya_tiene_validacion = check_if_validacion_uploaded(solicitud=solicitud)
-
             with colBotonAbrir:
                 if st.button(
                     label="**Subir Solicitud de Acuerdo de Pago**",
@@ -2180,7 +2194,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     type="primary",
                     key = "abrir_dialogo_ac_pago_{}".format(solicitud['ID_Solicitud']),
                     help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago",
-                    disabled = ya_tiene_acuerdo,
                     icon="📄"
                 ):
                     dialog_subir_acuerdo_pago(solicitud=solicitud)
@@ -2193,18 +2206,12 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
                     help = "Botón para ajustar la oferta de pago de la solicitud",
                     icon="🔄",
-                    disabled = ya_tiene_validacion,
                 ):
                     ajustar_contraoferta_solicitud(solicitud=solicitud)
 
             with colBotonCopiar:
                 txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
-
-            if ya_tiene_acuerdo:
-                st.info("Ya has subido un Acuerdo de Pago para esta solicitud. No es posible subir otro.", icon="ℹ️")
-            if ya_tiene_validacion:
-                st.info("Ya has subido una Contraoferta para esta solicitud. No es posible subir otra.", icon="ℹ️")
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
@@ -2308,7 +2315,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         st.success("No hay solicitudes sin responder en este momento.", icon="✅")
 
 # Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
-def mostrar_resumen_solicitudes_negociador(*, solicitudes: DataFrame[SolicitudesSchema], nego_name: str, show_header: bool = True) -> None:
+def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True) -> None:
     # Paso 1: Verificar si hay solicitudes
     if solicitudes.empty:
         st.info("No hay solicitudes disponibles para mostrar.", icon="ℹ️")

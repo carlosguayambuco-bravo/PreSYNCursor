@@ -327,7 +327,17 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
 
     # Por Último, devolvemos la actualización masiva
-    return update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)  
+    success = update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)
+
+    # Si se ejecutó la actualización y el estado es exitoso, se añaden los ids al banned_manager
+    if success and solicitud['Estado_Solicitud'] == 'Exitosa':
+        banned_manager = get_banned_manager()
+        for id_solicitud in updated_ids:
+            banned_manager.ban(id_solicitud)
+        # Añadimos el ID de la solicitud original
+        banned_manager.ban(solicitud['ID_Solicitud'])
+
+    return success
 
 def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     # Paso 1: Definir todos los Destinatarios Principales
@@ -835,15 +845,15 @@ def obtener_correos_a_cargo_usuario_actual() -> list[str]:
     return lider_emails
 
 # Función Auxiliar para obtener el DF de las Solicitudes del Usario Actual
-def filtrar_solicitudes_por_usuario_actual(solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+def filtrar_solicitudes_por_usuario_actual(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
     """
     Filtra las solicitudes para obtener solo aquellas que pertenecen al usuario actual.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con todas las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con todas las solicitudes.
 
     Returns:
-        DataFrame[SolicitudesSchema]: DataFrame filtrado con las solicitudes del usuario actual.
+        pd.DataFrame: DataFrame filtrado con las solicitudes del usuario actual.
     """
     # Paso 1: Obtener los Correos a Cargo del Usuario Actual
     correos_a_cargo = obtener_correos_a_cargo_usuario_actual()
@@ -957,12 +967,12 @@ def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)
 
 # Función Auxiliar para verificar si no se ha subido un Acuerdo de Pago para la Solicitud
-def check_if_acuerdo_pago_uploaded(*, solicitud: pd.Series) -> bool:
+def check_if_acuerdo_pago_uploaded(*, solicitud: dict[str, Any]) -> bool:
     """
     Verifica si ya se ha subido un Acuerdo de Pago para la solicitud dada.
 
     Args:
-        solicitud (pd.Series): Información de la solicitud.
+        solicitud (dict[str, Any]): Información de la solicitud.
 
     Returns:
         bool: True si ya se ha subido un Acuerdo de Pago, False en caso contrario.
@@ -981,12 +991,12 @@ def check_if_acuerdo_pago_uploaded(*, solicitud: pd.Series) -> bool:
     return mask_final.any()
 
 # Función Auxiliar para verificar si ya se subio una solicitud de Validación para la Solicitud
-def check_if_validacion_uploaded(*, solicitud: pd.Series) -> bool:
+def check_if_validacion_uploaded(*, solicitud: dict[str, Any]) -> bool:
     """
     Verifica si ya se ha subido una solicitud de Validación para la solicitud dada.
 
     Args:
-        solicitud (pd.Series): Información de la solicitud.
+        solicitud (dict[str, Any]): Información de la solicitud.
 
     Returns:
         bool: True si ya se ha subido una solicitud de Validación, False en caso contrario.

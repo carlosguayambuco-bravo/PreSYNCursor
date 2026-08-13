@@ -40,6 +40,8 @@ def add_cambios_locales_to_session_state(cambios_locales: list[pd.Series] | pd.D
     else:
         st.session_state['local_changes'].extend(cambios_locales)
 
+    print('✅Añadidos Cambios Locales: {}'.format(len(cambios_locales)))
+
 # Función para subir una respuesta de Formulario a Google Sheets
 def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, int]:
     # Volvemos la Respuesta a un DataFrame para poder subirla a Google Sheets
