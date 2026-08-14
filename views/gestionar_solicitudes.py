@@ -48,6 +48,15 @@ with tabSolicitudes:
         mostrar_datos_solicitud_ejecutivo(solicitud=solicitud, is_main = principal_sol)
         principal_sol = False  # Solo la primera solicitud es la principal, las demás son secundarias
 
+    # Creamos una Caption de cuantas soilicitudes estamos mostrando
+    st.caption(
+        "Mostrando {} de {} Solicitudes. ({:.1%})".format(
+            min(st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'], len(solicitudes_filtered)),
+            len(solicitudes_filtered),
+            min(st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'], len(solicitudes_filtered)) / len(solicitudes_filtered) if len(solicitudes_filtered) > 0 else 0
+        )
+    )
+
     # Creamos 5 Botones: Cargar Más Solicitudes, Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
     colMas, colDescargar, colSubir, colCopiar, colMarcar = st.columns([2, 2, 2, 1, 2], gap = "large")
 

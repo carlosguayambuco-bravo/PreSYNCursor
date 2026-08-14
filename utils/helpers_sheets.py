@@ -306,7 +306,7 @@ def convert_data_to_string(obj: Any) -> str:
     if isinstance(obj, pd.Timestamp) and pd.isna(obj):
         return ''
     if isinstance(obj, pd.Timestamp):
-        return obj.strftime("%Y-%m-%d %H:%M:%S")
+        return obj.strftime("%Y-%m-%d %H:%M:%S").replace("NaT","")
     if isinstance(obj, float) and np.isnan(obj):
         return ""
     if isinstance(obj, (int, float)):

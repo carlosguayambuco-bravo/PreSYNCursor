@@ -17,7 +17,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -92,6 +92,9 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
     if estado_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Estado_Solicitud"].isin(estado_solicitud)]
 
+    if aliado_solicitud:
+        solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"].isin(aliado_solicitud)]
+
     with colEjecutivo:
         ejecutivo_solicitud = st.multiselect(
             label="**Ejecutivo**",
@@ -155,9 +158,6 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             )
 
     # Paso 3: Aplicar ls filtros seleccionados al DataFrame de Solicitudes
-
-    if aliado_solicitud:
-        solicitudes_df = solicitudes_df[solicitudes_df["Casa_Cobro"].isin(aliado_solicitud)]
 
     if ejecutivo_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Ejecutivo"].isin(ejecutivo_solicitud)]
@@ -1154,25 +1154,31 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 width="stretch",
             )
 
-            bytes_acuerdo = st.file_uploader(
-                label="**Subir Acuerdo de Pago**",
+            acuerdo_pdf_list = st.file_uploader(
+                label="**Subir Acuerdo(s) de Pago**",
                 type=["pdf"],
                 key="subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
                 help="Suba el archivo PDF del acuerdo de pago.",
+                accept_multiple_files=True,
             )
-            if bytes_acuerdo is None:
+            if acuerdo_pdf_list is None or not acuerdo_pdf_list or len(acuerdo_pdf_list) == 0:
                 st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
                 st.stop()
-            # Obtenemos los bytes del archivo subido
-            bytes_acuerdo = bytes_acuerdo.getvalue()
+
             # Generamos la Metadata de la Solicitud
             metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids)
+
             # Guardamos la Metadata en el PDF
             try:
+                # Obtenemos los bytes del archivo subido
+                bytes_acuerdo = unir_pdfs(
+                    archivos_pdf = acuerdo_pdf_list,
+                    contrasenia_inicial = st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula'])
+                )
                 bytes_acuerdo = add_metadata_to_uploaded_pdf(
                     pdf_bytes=bytes_acuerdo,
                     metadata=metadata_to_add_acuerdo.to_dict(),
-                    password=st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), None)
+                    password=st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula'])
                 )
             except Exception as e:
                 st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
@@ -1188,8 +1194,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
                 st.stop()
 
-            if st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), None):
-                st.success("El PDF se ha guardado correctamente con la contraseña ingresada.", icon="✅")
+            if st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula']) != solicitud['Cedula']:
+                st.success("El PDF se ha guardado correctamente con la contraseña ingresada. (Por Defecto es la Cedula del Cliente)", icon="✅")
 
         elif formato_pago == "Generar PDF":
             bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
@@ -2330,6 +2336,102 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     st.title("😎 Resumen de Solicitudes")
     # Siguiente: Definición del Dashboard de Resumen de Solicitudes
     st.divider()
+
+    # --- Nueva Versión ---
+    # Paso 1: Expander de KPIs (expandido) - Se muestra:
+    # Resumen General de Solicitudes: Sin Tocar, Solicitados y Respondidos
+    # Solicitudes sin Responder por Tipo de Solicitud
+    # Días de Respuesta Promedio y Máximo por Tipo de Solicitud
+    # Respuestas por Día Promedio por Tipo de Solicitud
+    
+    with st.expander("📊 **KPIs de Solicitudes del Negociador**", expanded=True):
+        # Creamos las 4 Columnas
+        colGeneral, colNoRep, colRepDias, colDiasProm = st.columns(4, border=True, gap="small")
+    
+        # 1.1 Resumen General de Solicitudes: Sin Tocar, Solicitados y Respondidos
+        num_solicitudes = len(solicitudes)
+        sols_sin_tocar = (solicitudes['Estado_Solicitud'] == 'Sin Tocar').sum()
+        sols_solicitados = (solicitudes['Estado_Solicitud'] == 'Solicitado').sum()
+        sols_respondidos = (~solicitudes['Estado_Solicitud'].isin(['Sin Tocar','Solicitado'])).sum()
+    
+        with colGeneral:
+            st.metric(
+                label="**Resumen General de Solicitudes**",
+                value=f"{num_solicitudes} Solicitudes",
+                help="Resumen general de solicitudes del negociador.",
+                delta = None,  # Sin Delta
+            )
+            percentage_sin_tocar = sols_sin_tocar / num_solicitudes if num_solicitudes > 0 else 0
+            percentage_solicitados = sols_solicitados / num_solicitudes if num_solicitudes > 0 else 0
+            percentage_respondidos = sols_respondidos / num_solicitudes if num_solicitudes > 0 else 0
+    
+            st.caption("**Sin Tocar**: {} (:{}[{:.1%}])".format(
+                sols_sin_tocar,
+                "red" if percentage_sin_tocar < 0.2 else "yellow" if percentage_sin_tocar < 0.5 else "green",
+                percentage_sin_tocar
+            ))
+            st.caption("**Solicitados**: {} (:{}[{:.1%}])".format(
+                sols_solicitados,
+                "green" if percentage_solicitados > 0.3 else "yellow" if percentage_solicitados > 0.15 else "red",
+                percentage_solicitados
+            ))
+            st.caption("**Respondidos**: {} (:{}[{:.1%}])".format(
+                sols_respondidos,
+                "green" if percentage_respondidos > 0.3 else "yellow" if percentage_respondidos > 0.15 else "red",
+                percentage_respondidos
+            ))
+
+        # 1.2 Solicitudes sin Responder por Tipo de Solicitud
+        solicitudes_sin_responder_por_tipo = solicitudes[solicitudes['Estado_Solicitud'].isin(['Sin Tocar','Solicitado'])]
+        resumen_por_tipo = solicitudes_sin_responder_por_tipo.groupby('Tipo_Solicitud').size().reset_index(name='count')
+        with colNoRep:
+            st.metric(
+                label="**Solicitudes Sin Responder**",
+                value=f"{len(solicitudes_sin_responder_por_tipo)} Solicitudes",
+                help="Cantidad de solicitudes sin responder por tipo de solicitud.",
+            )
+            for _, row in resumen_por_tipo.iterrows():
+                st.caption("**{}**: : {} Solicitudes ({:.1%})".format(
+                    row['Tipo_Solicitud'], 
+                    row['count'],
+                    row['count'] / len(solicitudes_sin_responder_por_tipo) if len(solicitudes_sin_responder_por_tipo) > 0 else 0
+                ))
+
+        # 1.3 Días de Respuesta Promedio y Máximo por Tipo de Solicitud
+        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes)
+
+        with colRepDias:
+            st.metric(
+                label="**Días de Respuesta Promedio**",
+                value="{} días".format(
+                    '{:.2f}'.format(tiempos_respuesta['promedio_general']) if pd.notna(tiempos_respuesta['promedio_general']) else "N/A"
+                ),
+                help="Promedio de días de respuesta por tipo de solicitud.",
+                delta="Promedio General",
+                delta_color="green" if tiempos_respuesta['promedio_general'] <= 3 else "red",
+                delta_arrow="up" if tiempos_respuesta['promedio_general'] <= 3 else "down"
+            )
+            for tipo, tiempo in tiempos_respuesta['promedio_por_tipo'].items():
+                st.caption("**{}**: {} días".format(tipo, "{:.2f}".format(tiempo) if pd.notna(tiempo) else "N/A"))
+
+        # 1.4 Respuestas por Día Promedio por Tipo de Solicitud
+        respuestas_por_dia = obtener_promedio_respuestas_dia(solicitudes)
+
+        with colDiasProm:
+            st.metric(
+                label="**Respuestas por Día Promedio**",
+                value="{} R/día".format('{:.2f}'.format(respuestas_por_dia['promedio_general']) if pd.notna(respuestas_por_dia['promedio_general']) else "N/A"),
+                help="Promedio de respuestas por día por tipo de solicitud.",
+                delta="Promedio General",
+                delta_color="green" if respuestas_por_dia['promedio_general'] >= 10 else "red",
+                delta_arrow="up" if respuestas_por_dia['promedio_general'] >= 10 else "down"
+            )
+            for tipo, respuestas in respuestas_por_dia['promedio_por_tipo'].items():
+                st.caption("**{}**: {} respuestas/día".format(tipo, "{:.2f}".format(respuestas) if pd.notna(respuestas) else "N/A"))
+
+            if not respuestas_por_dia['promedio_por_tipo']:
+                st.info("No hay Respuestas", icon="ℹ️")
+
     # Creamos 2 Columnas: 1 para Pie Graph de Estados de Solicitudes y otra para KPIs
     colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center", border=True,)
 

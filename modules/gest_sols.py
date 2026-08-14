@@ -658,7 +658,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         else:
             st.session_state[key] = None
 
-def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str, float|dict]:
+def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
     """
     Calcula el promedio de tiempos de respuesta para las solicitudes.
 
@@ -689,7 +689,7 @@ def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str
         'promedio_por_tipo': promedio_por_tipo
     }
 
-def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, float|dict]:
+def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
     """
     Calcula el promedio de respuestas por día para las solicitudes.
 
@@ -790,34 +790,35 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
         password = None
 
     try:
-        reader = PdfReader(BytesIO(pdf_bytes), password=password)
-        
-        # Forzar la desencriptación verificando si está encriptado
-        if reader.is_encrypted and not password:
-            raise FileNotDecryptedError("El archivo requiere contraseña.")
+        reader = PdfReader(BytesIO(pdf_bytes))
+
+        if reader.is_encrypted:
+            if password is None:
+                raise FileNotDecryptedError("El archivo requiere contraseña.")
+
+            resultado = reader.decrypt(password)
+            if resultado == 0:
+                raise WrongPasswordError("La contraseña del PDF es incorrecta.")
 
         writer = PdfWriter()
 
-        # Copiar páginas (aquí suele saltar el error real)
         for page in reader.pages:
             writer.add_page(page)
 
-        # Agregar metadatos
         hidden_key = NameObject("/Acuerdo_Info_Metadata")
         hidden_value = TextStringObject(json.dumps({
-            "agreement": metadata, 
+            "agreement": metadata,
             "generated_at": pd.Timestamp.now('America/Bogota').isoformat()
         }, ensure_ascii=False))
-        
+
         writer.add_metadata({hidden_key: hidden_value})
 
         output_pdf_bytes = BytesIO()
         writer.write(output_pdf_bytes)
         return output_pdf_bytes.getvalue()
 
-    except (WrongPasswordError, FileNotDecryptedError) as e:
-        # Re-lanzamos para que la interfaz lo capture
-        raise e
+    except (WrongPasswordError, FileNotDecryptedError):
+        raise
 
 # Función Auxiliar para obtener los Correos a Cargo del Usuario Actual
 def obtener_correos_a_cargo_usuario_actual() -> list[str]:
@@ -1032,3 +1033,44 @@ def obtener_casas_cobro_base(*, deudas: list[str]) -> list[str]:
         return massive_debts['Casa_Cobro'].tolist()
     else:
         return []
+
+def unir_pdfs(*,archivos_pdf, contrasenia_inicial: str|None =None) -> bytes:
+    """
+    Une múltiples archivos PDF (provenientes de st.file_uploader) en un solo buffer en memoria.
+    Soporta PDFs encriptados con una misma contraseña usando la versión moderna de pypdf.
+    """
+    if not isinstance(archivos_pdf, list):
+        archivos_pdf = [archivos_pdf]
+
+    writer = PdfWriter()
+
+    for archivo in archivos_pdf:
+        try:
+            archivo.seek(0)
+            reader = PdfReader(archivo)
+
+            if reader.is_encrypted:
+                if not contrasenia_inicial:
+                    raise ValueError(f"El archivo '{archivo.name}' está protegido y no se envió contraseña.")
+
+                resultado = reader.decrypt(contrasenia_inicial)
+                if resultado == 0:
+                    raise WrongPasswordError(f"La contraseña no es correcta para el archivo: {archivo.name}")
+
+            writer.append(reader)
+
+        except (FileNotDecryptedError, WrongPasswordError, ValueError):
+            raise
+        except Exception as e:
+            if "password" in str(e).lower() or "decrypt" in str(e).lower():
+                raise ValueError(f"Error de contraseña con el archivo: {archivo.name}") from e
+            raise
+
+    pdf_buffer = BytesIO()
+    writer.write(pdf_buffer)
+    writer.close()
+
+    bytes_resultado = pdf_buffer.getvalue()
+    pdf_buffer.close()
+
+    return bytes_resultado
