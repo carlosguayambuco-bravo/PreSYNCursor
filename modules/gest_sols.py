@@ -9,6 +9,7 @@ import pandas as pd
 from pandera.typing import DataFrame
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject
+from pypdf.errors import FileNotDecryptedError, WrongPasswordError
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_masivas
@@ -716,12 +717,12 @@ def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, f
         'promedio_por_tipo': promedio_por_tipo
     }
 
-def obtener_df_bancos_sin_responder(solicitudes_df: DataFrame[SolicitudesSchema]) -> pd.DataFrame:
+def obtener_df_bancos_sin_responder(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
     """
     Obtiene un DataFrame con la cantidad de solicitudes sin responder por banco.
 
     Args:
-        solicitudes_df (DataFrame[SolicitudesSchema]): DataFrame con las solicitudes.
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
 
     Returns:
         pd.DataFrame: DataFrame con la cantidad de solicitudes sin responder por banco.
@@ -756,6 +757,7 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
     """
     # Paso 1: Crear un diccionario con los datos necesarios para el acuerdo
     acuerdo_data = {
+        "ID_Solicitud": solicitud['ID_Solicitud'],
         "Referencia": solicitud['Referencia'],
         "Cedula": solicitud['Cedula'],
         "Metadata_Solicitud": {
@@ -793,27 +795,45 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
     Returns:
         bytes: Contenido del PDF con los metadatos agregados en formato binario.
     """
-    # Paso 1: Leer el PDF desde los bytes
-    reader = PdfReader(BytesIO(pdf_bytes))
-    writer = PdfWriter()
+    try:
+        # Tramemos la Contraseña del PDF desde el Session_State
+        pdf_password = st.session_state.get('pdf_password_{}'.format(metadata['ID_Solicitud']), None)
+        # La Volvemos None si esta vacía
+        if pdf_password == '':
+            pdf_password = None
 
-    # Paso 2: Copiar todas las páginas del lector al escritor
-    for page in reader.pages:
-        writer.add_page(page)
+        # Paso 1: Leer el PDF desde los bytes
+        reader = PdfReader(BytesIO(pdf_bytes), password=pdf_password)
+        writer = PdfWriter()
 
-    # Paso 3: Crear la Llave de Acceso y Guardar la Información de Metadatos en el PDF
-    hidden_key = NameObject("/Acuerdo_Info_Metadata")
-    hidden_value = TextStringObject(json.dumps({"agreement":metadata, "generated_at": pd.Timestamp.now('America/Bogota').isoformat()}, ensure_ascii=False))
+        # Paso 2: Copiar todas las páginas del lector al escritor
+        for page in reader.pages:
+            writer.add_page(page)
 
-    # Paso 4: Agregar los metadatos al PDF
-    writer.add_metadata({hidden_key: hidden_value})
+        # Paso 3: Crear la Llave de Acceso y Guardar la Información de Metadatos en el PDF
+        hidden_key = NameObject("/Acuerdo_Info_Metadata")
+        hidden_value = TextStringObject(json.dumps({"agreement":metadata, "generated_at": pd.Timestamp.now('America/Bogota').isoformat()}, ensure_ascii=False))
 
-    # Paso 5: Guardar el PDF con los metadatos en un objeto BytesIO
-    output_pdf_bytes = BytesIO()
-    writer.write(output_pdf_bytes)
+        # Paso 4: Agregar los metadatos al PDF
+        writer.add_metadata({hidden_key: hidden_value})
 
-    # Paso 6: Retornar los bytes del PDF con los metadatos agregados
-    return output_pdf_bytes.getvalue()
+        # Paso 5: Guardar el PDF con los metadatos en un objeto BytesIO
+        output_pdf_bytes = BytesIO()
+        writer.write(output_pdf_bytes)
+
+        # Paso 6: Retornar los bytes del PDF con los metadatos agregados
+        return output_pdf_bytes.getvalue()
+    except (WrongPasswordError, FileNotDecryptedError) as e:
+        st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar.", icon="ℹ️")
+        st.text_input(
+            "**Contraseña del PDF**",
+            key="pdf_password_{}".format(metadata['ID_Solicitud']),
+            type="password",
+            help="Ingresa la contraseña del PDF para guardarlo correctamente",
+        )
+        if isinstance(e, WrongPasswordError):
+            st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
+        st.stop()
 
 # Función Auxiliar para obtener los Correos a Cargo del Usuario Actual
 def obtener_correos_a_cargo_usuario_actual() -> list[str]:

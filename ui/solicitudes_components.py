@@ -819,7 +819,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         )
 
     # Siguiente: Expander para mostrar los Inputs por Deuda
-    with st.expander("**💸 Respuesta por Deuda**", expanded=False):
+    with st.expander("**💸 Respuesta por Deuda**", expanded=not st.session_state[key_usar_monto_total]):
         st.markdown("### **Datos por Deuda 🏦**")
         if cuotas_input == "Por Deuda":
             colIdDeuda, colNumCredito, colMontoActual, colSolicitado, colMontoPropuesto, colCuotasDeuda = st.columns(6, border=True)
@@ -1942,7 +1942,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         if casas_en_base:
             st.markdown("### 💼 Casas que Registran en Base")
             mensaje_casas = ' | '.join(
-                casas_en_base
+                np.unique(casas_en_base)
             )
             st.markdown("## -> "+mensaje_casas)
         else:
@@ -2165,7 +2165,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 label="**Fecha de Respuesta:**",
                 value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
                 help = "La Fecha de Respuesta de la solicitud",
-                border=True,
                 width="stretch",
             )
         with colEstadoSolicitud:
@@ -2173,7 +2172,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 label="**Estado de Solicitud:**",
                 value=solicitud["Estado_Solicitud"],
                 help = "El Estado de la solicitud",
-                border=True,
                 width="stretch",
             )
 
@@ -2181,13 +2179,12 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colMontoRespuesta: # type: ignore
                 deudas_respuesta = solicitud.get("JSON_Respuesta", []) + solicitud.get("Metadata_Solicitud", {}).get("Addendums", [])
                 deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
-                monto_total_respuesta = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
+                monto_total_respuesta = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["JSON_Respuesta"] + solicitud.get("Metadata_Solicitud", {}).get("Addendums", []) if d['Id_Deuda'] in deudas_respuesta)
                 monto_actual_respuesta = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
                 st.metric(
                     label="**Monto Respuesta:**", value=formatNumber(monto_total_respuesta),
                     help = "El monto total de la respuesta (La Suma de los Valores Propuestos por Deuda) que se envió al Aliado",
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
-                    border=True,
                     width="stretch",
                 )
 
@@ -2198,6 +2195,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Si la Solicitud no es Exitosa, todo finaliza aquí
         if solicitud["Estado_Solicitud"] != "Exitosa":
+            st.info("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
             return
 
         # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
@@ -2211,12 +2209,26 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], border=True)
 
         with colFechaLimite:
-            fecha_limite_pago = solicitud.get("Fecha_Limite_Pago", None)
+            fecha_limite_pago = pd.to_datetime(solicitud.get("Fecha_Limite_Pago", None), errors='coerce')
+            # Calculamos la Diferencia a Hoy
+            if pd.notnull(fecha_limite_pago):
+                diferencia_dias = getBDDaysDiffFloat(fecha_limite_pago, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
+                delta_color = "red" if diferencia_dias < 0 else "green"
+                delta_arrow = "down" if diferencia_dias < 0 else "up"
+                delta_text = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if diferencia_dias < 0 else "para pagar")
+            else:
+                delta_color = "gray"
+                delta_arrow = "off"
+                delta_text = "No Brindada"
+
             st.metric(
                 label="**Fecha Límite de Pago:**",
                 value=fecha_limite_pago.strftime("%Y-%m-%d") if pd.notnull(fecha_limite_pago) else "No Brindada",
                 help = "La Fecha Límite de Pago de la solicitud",
                 width="stretch",
+                delta=delta_text,
+                delta_color=delta_color,
+                delta_arrow=delta_arrow,
             )
         with colPagoTotal:
             aplica_pto = solicitud.get("Metadata_Solicitud", {}).get("Pago_Total_Obligatorio", False)

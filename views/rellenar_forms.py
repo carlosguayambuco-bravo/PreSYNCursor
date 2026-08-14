@@ -374,7 +374,7 @@ response_info = {
     'Tipo_Solicitud': tipo_solicitud,
     'Datos_Solicitud': json.dumps(info_completa_deudas, ensure_ascii=False),
     'Ejecutivo': aliadosDict[aliado_seleccionado].obtener_ejecutivo() if aliado_seleccionado != 'Directo Base' else '',
-    'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d') if fecha_esperada_pago else '',
+    'Fecha_Esperada_Pago': fecha_esperada_pago.strftime('%Y-%m-%d %H:%M:%S') if fecha_esperada_pago else '',
     'Tipo_Pago': tipo_pago if tipo_pago else '',
     'Metadata_Solicitud': json.dumps({
         'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0].title(),
