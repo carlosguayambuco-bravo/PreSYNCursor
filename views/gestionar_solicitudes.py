@@ -50,7 +50,7 @@ with tabSolicitudes:
 
     # Creamos una Caption de cuantas soilicitudes estamos mostrando
     st.caption(
-        "Mostrando {} de {} Solicitudes. ({:.1%})".format(
+        "**Mostrando {} de {} Solicitudes.** (**{:.1%}**)".format(
             min(st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'], len(solicitudes_filtered)),
             len(solicitudes_filtered),
             min(st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'], len(solicitudes_filtered)) / len(solicitudes_filtered) if len(solicitudes_filtered) > 0 else 0

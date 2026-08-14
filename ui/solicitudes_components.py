@@ -157,6 +157,14 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
                 disabled = usar_recomendado,
             )
 
+    # Filtro Nuevo: Organizar por ABC de Casa_Cobro default=False
+    organizar_abc = st.toggle(
+        "**Organizar por Abecedario**",
+        value=False,
+        key="organizar_abc_solicitudes_gestion_input",
+        help = "Organizar los Aliados por ABC (A a la Z)"
+    )
+
     # Paso 3: Aplicar ls filtros seleccionados al DataFrame de Solicitudes
 
     if ejecutivo_solicitud:
@@ -203,7 +211,10 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
         solicitudes_df = solicitudes_df.iloc[sorted_indices]
     else:
         # Ordenamos los más antiguos primero
-        solicitudes_df = solicitudes_df.sort_values(by="Timestamp", ascending=True)
+        if organizar_abc:
+            solicitudes_df = solicitudes_df.sort_values(by=["Casa_Cobro","Timestamp"], ascending=True)
+        else:
+            solicitudes_df = solicitudes_df.sort_values(by="Timestamp", ascending=True)
         # Creamos la Máscara de solicitudes sin responder
         mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
         # Ordenamos los Datos para que la mascara quede de ultimas
@@ -1857,9 +1868,10 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         aliado=solicitud["Casa_Cobro"],
         id=solicitud["ID_Solicitud"]
     )
+    expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
-    with st.expander(expander_name, expanded=is_main):
+    with st.expander(expander_name, expanded=is_main, key=expander_key, on_change=st.rerun):
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 
@@ -1995,7 +2007,8 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="ejecutivo")
 
-        mostrar_mensaje_actualizado(solicitud=solicitud, origen="ejecutivo")
+        if st.session_state.get(expander_key, False):
+            mostrar_mensaje_actualizado(solicitud=solicitud, origen="ejecutivo")
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
         solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
@@ -2029,8 +2042,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         aliado=solicitud["Casa_Cobro"],
         id=solicitud["ID_Solicitud"]
     )
+    expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
 
-    with st.expander(expander_name, expanded=False):
+    with st.expander(expander_name, expanded=False, key=expander_key, on_change=st.rerun):
 
         # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
         colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], vertical_alignment="center")
@@ -2079,8 +2093,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         if comentario_negociador:
             st.info("**Comentario del Negociador:** {}".format(comentario_negociador), icon="ℹ️")
-        if comentario_ejecutivo:
-            st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
 
         # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
@@ -2278,7 +2290,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     width="stretch",
                 )
 
-        mostrar_mensaje_actualizado(solicitud=solicitud, origen="nego")
+        if st.session_state.get(expander_key, False):
+            mostrar_mensaje_actualizado(solicitud=solicitud, origen="nego")
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
@@ -2352,7 +2365,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         num_solicitudes = len(solicitudes)
         sols_sin_tocar = (solicitudes['Estado_Solicitud'] == 'Sin Tocar').sum()
         sols_solicitados = (solicitudes['Estado_Solicitud'] == 'Solicitado').sum()
-        sols_respondidos = (~solicitudes['Estado_Solicitud'].isin(['Sin Tocar','Solicitado'])).sum()
+        sols_respondidos = (~obtener_mascara_sin_responder(solicitudes)).sum()
     
         with colGeneral:
             st.metric(
@@ -2432,101 +2445,58 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
             if not respuestas_por_dia['promedio_por_tipo']:
                 st.info("No hay Respuestas", icon="ℹ️")
 
-    # Creamos 2 Columnas: 1 para Pie Graph de Estados de Solicitudes y otra para KPIs
-    colPieEstados, colKPIs = st.columns([4, 2], gap = "small", vertical_alignment="center", border=True,)
-
-    with colPieEstados:
-        st.subheader("📊 Distribución de Estados de Solicitudes")
-        # Creamos el Gráfico de Pie de Estados de Solicitudes
-        fig_pie_estados = px.pie(
-            solicitudes,
-            names='Estado_Solicitud',
-            title='Distribución de Estados de Solicitudes',
-            hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Set3
-        )
-        st.plotly_chart(fig_pie_estados,width= "stretch")
-
-    with colKPIs:
-        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes)
-        respuestas_por_dia = obtener_promedio_respuestas_dia(solicitudes)
-        mascara_sin_responder = obtener_mascara_sin_responder(solicitudes)
-        solicitudes_sin_responder = mascara_sin_responder.sum()
-
-        st.subheader("📈 KPIs de Respuesta")
-        st.metric(
-            "**Solicitudes Sin Responder**", 
-            f"{solicitudes_sin_responder} Solicitudes", 
-            delta_color= "green" if solicitudes_sin_responder <= 20 else "red"
-        )
-        st.metric(
-            "**Promedio de Tiempo de Respuesta (días)**", 
-            f"{tiempos_respuesta['promedio_general']:.2f}",
-            delta_color= "green" if tiempos_respuesta['promedio_general'] <= 3 else "red" # type: ignore
-        )
-        st.metric(
-            "**Respuestas por Día**",
-            f"{respuestas_por_dia['promedio_general']:.2f}",
-            delta_color= "green" if respuestas_por_dia['promedio_general'] >= 10 else "red" # type: ignore
-        )
-        # Ahora Creamos 2 Popovers para mostrar los detalles de los KPIs
-        with st.popover("Respuestas por Día", icon="ℹ️"):
-            st.write("**Promedio de Respuestas por Día por Tipo de Solicitud:**")
-            for dia, respuestas in respuestas_por_dia['promedio_por_tipo'].items(): # type: ignore
-                st.write(f"- {dia}: {respuestas:.2f} respuestas")
-
-        with st.popover("Tiempos por Tipo", icon="ℹ️"):
-            st.write("**Promedio de Tiempo de Respuesta por Tipo de Solicitud:**")
-            for tipo, tiempo in tiempos_respuesta['promedio_por_tipo'].items(): # type: ignore
-                st.write(f"- {tipo}: {tiempo:.2f} días")
-
     # Añadimos un Divisor
     st.divider()
-    # Siguientes Gráficos: Solicitudes sin Responder por Casa de Cobro, Bancos y Ejecutivos
-    st.subheader("📊 Solicitudes Sin Responder")
 
-    if solicitudes_sin_responder > 0:
-        # La Estructura será: 2 Columnas: Casa de Cobro y Ejecutivo
-        colCasaCobro, colEjecutivo = st.columns([4,3], gap = "small", vertical_alignment="center", border=True,)
+    # Paso 2: Solicitudes sin Responder - Se muestra:
+    # Gráfica de Barras Apiladas de Solicitudes por Aliado por Tipo de Solicitud
+    # 2 Columnas: Pie de Pendientes de Responder por Ejecutivo y Pie de Estados de Solicitud
 
-        with colCasaCobro: # La única con gráfico de Barras, además este debe ser vertical
-            st.subheader("🥸 Por Casa de Cobro")
+    with st.expander("📊 **Solicitudes Sin Responder**", expanded=False):
+        # 2.1 Crear el Gráfico de Barras de Solicitudes
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes)
+        solicitudes_sin_responder = solicitudes[mask_sin_responder]
 
-            fig_casa_cobro = px.bar(
-                solicitudes.groupby('Casa_Cobro').size().reset_index(name='count'),
-                x='count',                # Swapped: values on x-axis
-                y='Casa_Cobro',            # Swapped: labels on y-axis
-                title='Solicitudes Sin Responder por Casa de Cobro',
-                color='count',
-                orientation='h',           # Set orientation to horizontal
-                color_continuous_scale=px.colors.sequential.Viridis
-            )
+        # Agrupamos por Aliado y Tipo de Solicitud
+        resumen_sin_responder = solicitudes_sin_responder.groupby(['Casa_Cobro', 'Tipo_Solicitud']).size().reset_index(name='count')
+        # Agregamos la Columna Conteo Total
+        resumen_sin_responder['Conteo_Total'] = resumen_sin_responder.groupby('Casa_Cobro')['count'].transform('sum')
+        # Ordenamos de Mayor a Menor por Conteo pero General no por Tipo de Solicitud
+        resumen_sin_responder = resumen_sin_responder.sort_values(by='Conteo_Total', ascending=False)
 
-            # Ahora Renombramos los ejes para que sean más claros
-            fig_casa_cobro.update_layout(
-                xaxis_title="Cantidad de Solicitudes Sin Responder",
-                yaxis_title="Casa de Cobro",
-                coloraxis_colorbar=dict(title="Cantidad")
-            )
+        # Definimos Configuraciones del Gráfico
+        pixels_per_bar = 40
+        base_height = 400
+        height = base_height + pixels_per_bar * len(resumen_sin_responder['Casa_Cobro'].unique())
 
-            # Optional: To keep the top category at the top of the chart
-            fig_casa_cobro.update_layout(yaxis={'categoryorder': 'total ascending'})
+        # Creamos el Gráfico
+        fig_sin_responder = px.bar(
+            resumen_sin_responder,
+            x='count',
+            y='Casa_Cobro',
+            color='Tipo_Solicitud',
+            orientation='h',
+            custom_data=['Casa_Cobro', 'Tipo_Solicitud', 'count'],
+            height=height,
+            labels={'count': 'Número de Solicitudes', 'Casa_Cobro': 'Aliado', 'Tipo_Solicitud': 'Tipo de Solicitud'},
+            color_discrete_sequence=px.colors.qualitative.Set2,
+            title="Solicitudes Sin Responder por Aliado y Tipo de Solicitud",
+        )
 
-            st.plotly_chart(fig_casa_cobro, width='stretch', key="casa_cobro_no_response_ejecutivo")
+        # Agregamos el Hover
+        fig_sin_responder.update_traces(
+            hovertemplate="<b>Aliado:</b> %{customdata[0]}<br><b>Tipo de Solicitud:</b> %{customdata[1]}<br><b>Número de Solicitudes:</b> %{customdata[2]}<extra></extra>"
+        )
 
-        with colEjecutivo: # Mostramos un Pie
-            st.subheader("👨‍💼 Por Ejecutivo")
-            fig_ejecutivo = px.pie(
-                solicitudes.groupby('Ejecutivo').size().reset_index(name='count'),
-                names='Ejecutivo',
-                values='count',
-                title='Solicitudes Sin Responder por Ejecutivo',
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
-            st.plotly_chart(fig_ejecutivo, width='stretch', key="ejecutivo_no_response_ejecutivo")
-    else:
-        st.success("No hay solicitudes sin responder en este momento.", icon="✅")
+        # Agregamos Margen y ajustamos dtick para mostrar todos los aliados
+        fig_sin_responder.update_layout(
+            margin=dict(l=150, r=50, t=50, b=50),
+            yaxis=dict(dtick=1, type='category'),
+        )
+
+        # Mostramos el Gráfico
+        with st.container(border=True):
+            st.plotly_chart(fig_sin_responder)
 
 # Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
 def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True) -> None:

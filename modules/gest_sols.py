@@ -581,6 +581,7 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         "id_solicitud_gestion_input",
         "cedula_solicitud_gestion_input",
         "id_deuda_solicitud_gestion_input",
+        "organizar_abc_solicitudes_gestion_input",
     ]
     keys_to_list = [
         'tipo_solicitud_gestion_input',
@@ -603,8 +604,9 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         else:
             st.session_state[key] = None
 
-    # Reiniciamos también filtros_recomendados_solicitudes a False
+    # Reiniciamos también filtros_recomendados_solicitudes y organizar_abc_solicitudes_gestion_input a False
     st.session_state['filtros_recomendados_solicitudes'] = False
+    st.session_state['organizar_abc_solicitudes_gestion_input'] = False
     # Si es Básico, pasamos estado_solicitud_gestion_input a "Sin Tocar"
     if method == 'basic':
         st.session_state['estado_solicitud_gestion_input'] = "Sin Tocar"

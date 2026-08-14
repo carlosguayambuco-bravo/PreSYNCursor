@@ -357,6 +357,9 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
 
+    # Aplicamos a Casa_Cobro .upper y strip
+    masivasDF['Casa_Cobro'] = masivasDF['Casa_Cobro'].apply(lambda s: str(s).upper().strip() if pd.notnull(s) else '')
+
     # Cargamos los Cambios de Referencia y los Aplicamos
     refChangesDict = st.session_state["changes_references_dict"]
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
