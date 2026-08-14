@@ -101,6 +101,9 @@ if deudas_activas_df.empty:
     st.error("No se encontraron deudas activas para la referencia proporcionada.")
     st.stop()
 
+# Volvemos a dejar el Id_Deuda como intocable para que el usuario no lo cambie
+st.session_state['id_rep_needed'] = False
+
 
 # Verificamos que exista una Última Actualización para las Deudas Activas
 ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))
@@ -228,7 +231,7 @@ with col1:
 with col2:
     aliado_seleccionado = st.selectbox(
         "**Aliado - Casa de Cobro**",
-        options=list(aliadosDict.keys())+['Directo Base'],
+        options=list(aliadosDict.keys()),
         help="Seleccione el aliado con el que desea realizar la solicitud",
         index=None,
     )

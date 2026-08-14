@@ -1802,16 +1802,16 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
     deudas_info = solicitud["JSON_Respuesta"]
     hay_cuotas = any(d['Num_Cuotas'] > 1 for d in deudas_info)
     if hay_cuotas:
-        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta, colCuotas = st.columns([3,3,3,6,6,3], vertical_alignment="top")
+        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta, colCuotas = st.columns([3,3,6,6,6,3], vertical_alignment="top")
     else:
-        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta = st.columns([3,3,3,6,6], vertical_alignment="top")
+        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta = st.columns([3,3,6,6,6], vertical_alignment="top")
 
     with colIdDeuda:
         st.markdown("**Id Deuda:**")
     with colBanco:
         st.markdown("**Banco:**")
     with colNumCredito:
-        st.markdown("**Número de Crédito:**")
+        st.markdown("**Número Crédito:**")
     with colMontoSolicitado:
         st.markdown("**Monto Solicitado:**")
     with colMontoRespuesta:
@@ -1915,18 +1915,21 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             with colFechaPago:
                 fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
                 falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+                ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
                 st.metric(
-                    label="**Fecha de Pago:**", value=fecha_pago,
+                    label="**Fecha de Pago:**", 
+                    value=fecha_pago,
                     help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
                     border=True,
-                    delta_color = "red" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "green",
-                    delta_arrow="down" if solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) else "up",
-                    delta = "{} {:.1f} días hábiles".format("Faltan" if falta_para_pago > 0 else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
+                    delta_color = "red" if ya_paso_fecha else "green",
+                    delta_arrow="down" if ya_paso_fecha else "up",
+                    delta = "{} {:.1f} días hábiles".format("Faltan" if (not ya_paso_fecha) else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
                 )
 
             with colTipoPago:
                 st.metric(
-                    label="**Tipo de Pago:**", value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
+                    label="**Tipo de Pago:**", 
+                    value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
                     help = "El Método de Pago del Acuerdo u Oferta de Pago",
                     border=True,
                     delta="Ojala que paguen",
@@ -1958,7 +1961,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         deudas_actuales = [d['Id_Deuda'] for d in solicitud['Datos_Solicitud']]
         casas_en_base = obtener_casas_cobro_base(deudas = deudas_actuales)
         # Añadimos markdown
-        casas_en_base = ["**{}**".format(casa) for casa in casas_en_base]
+        casas_en_base = ["**{}**".format(casa.title().strip()) for casa in casas_en_base]
 
         if casas_en_base:
             st.markdown("### 💼 Casas que Registran en Base")
@@ -2264,7 +2267,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colMetodoPago:  # type: ignore
                 st.metric(
                     label="**Método de Pago:**",
-                    value=solicitud.get("Metodo_Pago", "No Brindado"),
+                    value=solicitud.get("Metadata_Solicitud", {}).get("Metodo_Pago", "No Brindado"),
                     help = "El Método de Pago de la solicitud",
                     width="stretch",
                 )

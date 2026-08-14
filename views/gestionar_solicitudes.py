@@ -104,4 +104,7 @@ with tabSolicitudes:
 
 # Ahora Creamos el Dashboard
 with tabResumenSolicitudes:
-    mostrar_resumen_solicitudes_ejecutivo(solicitudes=solicitudes_filtered)
+    try:
+        mostrar_resumen_solicitudes_ejecutivo(solicitudes=solicitudes_filtered)
+    except Exception as e:
+        st.error("Ocurrió un error al generar el resumen de solicitudes: {}".format(str(e)), icon="❌")
