@@ -217,7 +217,7 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     return deudas_df
 
 # Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
-@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 100,)
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 500,)
 def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]

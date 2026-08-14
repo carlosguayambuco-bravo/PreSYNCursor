@@ -1169,7 +1169,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids)
             # Guardamos la Metadata en el PDF
             try:
-                bytes_acuerdo = add_metadata_to_uploaded_pdf(pdf_bytes=bytes_acuerdo, metadata=metadata_to_add_acuerdo.to_dict())
+                bytes_acuerdo = add_metadata_to_uploaded_pdf(
+                    pdf_bytes=bytes_acuerdo,
+                    metadata=metadata_to_add_acuerdo.to_dict(),
+                    password=st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), None)
+                )
             except Exception as e:
                 st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
                     str(e)
