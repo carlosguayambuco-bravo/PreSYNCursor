@@ -1188,6 +1188,9 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
                 st.stop()
 
+            if st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), None):
+                st.success("El PDF se ha guardado correctamente con la contraseña ingresada.", icon="✅")
+
         elif formato_pago == "Generar PDF":
             bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
             # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
