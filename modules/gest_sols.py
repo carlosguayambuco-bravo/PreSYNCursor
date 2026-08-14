@@ -784,56 +784,40 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
     # Paso 2: Convertir el diccionario a una Serie de Pandas
     return pd.Series(acuerdo_data)
 
-def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, Any]) -> bytes:
-    """
-    Agrega metadatos a un archivo PDF subido.
+def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, Any], password: str | None = None) -> bytes:
+    """Procesa el PDF. Si falla por encriptación, eleva la excepción para que la UI la maneje."""
+    if password == '':
+        password = None
 
-    Args:
-        pdf_bytes (bytes): Contenido del PDF en bytes.
-        metadata (dict[Hashable, Any]): Diccionario con los metadatos a agregar.
-
-    Returns:
-        bytes: Contenido del PDF con los metadatos agregados en formato binario.
-    """
     try:
-        # Tramemos la Contraseña del PDF desde el Session_State
-        pdf_password = st.session_state.get('pdf_password_{}'.format(metadata['ID_Solicitud']), None)
-        # La Volvemos None si esta vacía
-        if pdf_password == '':
-            pdf_password = None
+        reader = PdfReader(BytesIO(pdf_bytes), password=password)
+        
+        # Forzar la desencriptación verificando si está encriptado
+        if reader.is_encrypted and not password:
+            raise FileNotDecryptedError("El archivo requiere contraseña.")
 
-        # Paso 1: Leer el PDF desde los bytes
-        reader = PdfReader(BytesIO(pdf_bytes), password=pdf_password)
         writer = PdfWriter()
 
-        # Paso 2: Copiar todas las páginas del lector al escritor
+        # Copiar páginas (aquí suele saltar el error real)
         for page in reader.pages:
             writer.add_page(page)
 
-        # Paso 3: Crear la Llave de Acceso y Guardar la Información de Metadatos en el PDF
+        # Agregar metadatos
         hidden_key = NameObject("/Acuerdo_Info_Metadata")
-        hidden_value = TextStringObject(json.dumps({"agreement":metadata, "generated_at": pd.Timestamp.now('America/Bogota').isoformat()}, ensure_ascii=False))
-
-        # Paso 4: Agregar los metadatos al PDF
+        hidden_value = TextStringObject(json.dumps({
+            "agreement": metadata, 
+            "generated_at": pd.Timestamp.now('America/Bogota').isoformat()
+        }, ensure_ascii=False))
+        
         writer.add_metadata({hidden_key: hidden_value})
 
-        # Paso 5: Guardar el PDF con los metadatos en un objeto BytesIO
         output_pdf_bytes = BytesIO()
         writer.write(output_pdf_bytes)
-
-        # Paso 6: Retornar los bytes del PDF con los metadatos agregados
         return output_pdf_bytes.getvalue()
+
     except (WrongPasswordError, FileNotDecryptedError) as e:
-        st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar.", icon="ℹ️")
-        st.text_input(
-            "**Contraseña del PDF**",
-            key="pdf_password_{}".format(metadata['ID_Solicitud']),
-            type="password",
-            help="Ingresa la contraseña del PDF para guardarlo correctamente",
-        )
-        if isinstance(e, WrongPasswordError):
-            st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
-        st.stop()
+        # Re-lanzamos para que la interfaz lo capture
+        raise e
 
 # Función Auxiliar para obtener los Correos a Cargo del Usuario Actual
 def obtener_correos_a_cargo_usuario_actual() -> list[str]:

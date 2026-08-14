@@ -9,6 +9,7 @@ import streamlit as st
 from st_copy import copy_button
 import plotly.graph_objects as go
 import plotly.express as px
+from pypdf.errors import WrongPasswordError
 # Librerías Locales
 from data.data_loader import load_app_config
 from data.data_uploader import upload_form_response_to_google_sheets
@@ -585,7 +586,7 @@ def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecut
     if fue_antes and (diff_dias > float(app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE'])):
         if origen == "ejecutivo":
             st.warning(
-                "El cliente ha actualizado sus deudas hace {:.2f} días hábiles, lo cual es mayor al mínimo de {} días requerido para considerar la actualización.".format(
+                "El Negociador actualizó al cliente hace {:.2f} días hábiles, lo cual es mayor al mínimo de {} días requerido para considerar la actualización.".format(
                     diff_dias,
                     app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
                 ),
@@ -1167,9 +1168,22 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             # Generamos la Metadata de la Solicitud
             metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids)
             # Guardamos la Metadata en el PDF
-            bytes_acuerdo = add_metadata_to_uploaded_pdf(pdf_bytes=bytes_acuerdo, metadata=metadata_to_add_acuerdo.to_dict())
+            try:
+                bytes_acuerdo = add_metadata_to_uploaded_pdf(pdf_bytes=bytes_acuerdo, metadata=metadata_to_add_acuerdo.to_dict())
+            except Exception as e:
+                st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
+                    str(e)
+                ), icon="ℹ️")
+                st.text_input(
+                    "**Contraseña del PDF**",
+                    key="pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']),
+                    type="password",
+                    help="Ingresa la contraseña del PDF para guardarlo correctamente",
+                )
+                if isinstance(e, WrongPasswordError):
+                    st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
+                st.stop()
 
-            
         elif formato_pago == "Generar PDF":
             bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
             # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
