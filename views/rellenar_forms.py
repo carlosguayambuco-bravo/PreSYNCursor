@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 # Librerías Propias
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
+from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 from utils.helpers_general import cleanNumber
 
@@ -110,7 +110,7 @@ ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activ
 # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
 cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
 user = st.session_state['user_obj']
-es_admin = (user.role == 'admin')
+es_admin = (user.role == 'admin') and (not st.session_state.get('simulate_negotiator', True))
 
 
 st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} días hábiles)'.format(
@@ -260,29 +260,84 @@ if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
 
 deudas_info = {deuda: cleanNumber(st.session_state.get(f'monto_propuesto_{deuda}', 0)) for deuda in deudas_seleccionadas}
 
+# Ajuste: Cuando es Directo Base, se busca en las Deudas Masivas
+masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
+
+if aliado_seleccionado.lower().strip() == 'directo base':
+    # Alerta de Modificación 1: Todas las Deudas Seleccionadas tienen un Descuento en Base
+    if len(masivas_locales) < len(deudas_seleccionadas):
+        st.warning("No todas las deudas seleccionadas tienen un descuento en base.", icon="⚠️")
+        st.stop()
+
+    if es_admin:
+        st.dataframe(masivas_locales)
+
+    # Alerta de Modificación 2: Todas las Deudas tienen Descuento en Base para un Mismo Aliado
+    if len(masivas_locales['Casa_Cobro'].unique()) > 1:
+        # Creamos una Lista de los Aliados Posibles
+        aliados_posibles = []
+
+        for aliado in masivas_locales['Casa_Cobro'].unique():
+            deudas_aliado = set(masivas_locales[masivas_locales['Casa_Cobro'] == aliado]['Id_Deuda'].tolist())
+            if all((deuda in deudas_aliado for deuda in deudas_seleccionadas)):
+                aliados_posibles.append(aliado)
+
+        if not aliados_posibles:
+            st.warning("No todas las deudas seleccionadas tienen un descuento en base para un mismo aliado.", icon="⚠️")
+            # Mostramos como Subir la Solicitud dadas las diferentes deudas
+            mostrar_como_subir_solicitud_aliados_diferentes(
+                ml = masivas_locales,
+                es_admin = es_admin,
+            )
+            st.stop()
+
+        if es_admin:
+            st.info("Los Aliados Posibles para las Deudas Seleccionadas son: ({})".format(", ".join(aliados_posibles)), icon="ℹ️")
+
+        # Ahora Cambiamos el Aliado al Nuevo
+        if len(aliados_posibles) == 1:
+            aliado_seleccionado = aliados_posibles[0]
+        else:
+            aliado_seleccionado = obtener_aliado_en_base(deudas=deudas_seleccionadas, aliados_posibles=aliados_posibles)
+
+
+    else:
+        aliado_seleccionado = masivas_locales['Casa_Cobro'].iloc[0]
+
+    if es_admin:
+        st.info(f"Se ha cambiado automáticamente el aliado seleccionado a **{aliado_seleccionado}** ya que todas las deudas seleccionadas tienen un descuento en base para este aliado.", icon="ℹ️")
+
+    # Verificación última: Que el Aliado este en la Lista de Aliados Posibles
+    if aliado_seleccionado not in aliadosDict:
+        st.warning("Error de Selección de Aliado Interna, manda DM sobre la Referencia y Deudas que intentaste", icon="⚠️")
+        st.stop()
+
+    aliado_cambiado = True
+else:
+    aliado_cambiado = False
+
 # --- Siguiente: Alertas y Verificaciones ---
 
 # Alerta 1: Descuento en Base y Aliado Brinda Descuento Máximo
-masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
-if aliado_seleccionado != 'Directo Base' and not masivas_locales.empty:
+
+if not masivas_locales.empty:
     aliado_brinda_descuento_maximo = aliadosDict[aliado_seleccionado].brinda_maximo_descuento()
     if aliado_brinda_descuento_maximo:
         st.warning("El aliado seleccionado brinda descuento máximo, por lo que una oferta de mejora de descuento puede no ser aceptada. Se recomienda revisar las condiciones de la solicitud antes de continuar.")
 
 # Alerta 2: Pago Obligatorio de Solicitud (Para Validación)
-if tipo_solicitud == 'Validación' and aliado_seleccionado != 'Directo Base':
+if tipo_solicitud == 'Validación':
     aliado_brinda_pago_obligatorio = aliadosDict[aliado_seleccionado].pagar_co_obligatorio()
     if aliado_brinda_pago_obligatorio:
         st.warning("Dadas las Características del Aliado seleccionado, se requiere el pago obligatorio en caso de realizarse la validación.")
 
 # Alerta 3: Verificar si el Aliado da Posibilidades de Cuotas
-if aliado_seleccionado != 'Directo Base':
-    # Verificamos si Permite Cuotas
-    aliado_brinda_cuotas = aliadosDict[aliado_seleccionado].permite_cuotas()
-    # Verificamos si en la Solciitud se realiza una opción a cuotas
-    solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
-    if not aliado_brinda_cuotas and solicitud_a_cuotas:
-        st.warning("El aliado seleccionado no brinda la posibilidad de cuotas, por lo que se recomienda revisar las condiciones de la solicitud antes de continuar.")
+# Verificamos si Permite Cuotas
+aliado_brinda_cuotas = aliadosDict[aliado_seleccionado].permite_cuotas()
+# Verificamos si en la Solciitud se realiza una opción a cuotas
+solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
+if not aliado_brinda_cuotas and solicitud_a_cuotas:
+    st.warning("El aliado seleccionado no brinda la posibilidad de cuotas, por lo que se recomienda revisar las condiciones de la solicitud antes de continuar.")
 
 # Alerta 4: Verificacion de Descuentos en Base
 if (not masivas_locales.empty) and tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
@@ -359,7 +414,7 @@ with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
         deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
         info_completa_deudas=info_completa_deudas,
         tipo_solicitud=tipo_solicitud,
-        nombre_aliado=aliado_seleccionado,
+        nombre_aliado=aliado_seleccionado if not (aliado_cambiado and (not es_admin)) else "DIRECTO BASE",
         fecha_esperada_pago=fecha_esperada_pago,
         tipo_pago=tipo_pago,
     )

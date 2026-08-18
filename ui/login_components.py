@@ -50,6 +50,13 @@ def show_user_info():
             # Actualizamos el user_email en el estado de sesión
             st.session_state["user_email"] = email_simulado.strip()
 
+        st.sidebar.toggle(
+                    label="**🚹Simular Negociador**",
+                    key="simulate_negotiator",
+                    help="Activa este toggle para simular un negociador y ver la aplicación como lo haría un usuario normal.",
+                    value=False
+                )
+
         st.sidebar.divider()
 
     # Botón de Recarga de Solicitudes

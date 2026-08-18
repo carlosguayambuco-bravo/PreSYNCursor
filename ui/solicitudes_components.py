@@ -1871,7 +1871,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
-    with st.expander(expander_name, expanded=is_main, key=expander_key, on_change=st.rerun):
+    with st.expander(expander_name, expanded=is_main, key=expander_key, on_change="rerun"):
         # Creamos un Espacio pequeño para Separar el Expander del Contenido
         st.space("small")
 
@@ -2357,7 +2357,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     # Días de Respuesta Promedio y Máximo por Tipo de Solicitud
     # Respuestas por Día Promedio por Tipo de Solicitud
     
-    with st.expander("📊 **KPIs de Solicitudes del Negociador**", expanded=True):
+    with st.expander("📊 **KPIs de Solicitudes**", expanded=True):
         # Creamos las 4 Columnas
         colGeneral, colNoRep, colRepDias, colDiasProm = st.columns(4, border=True, gap="small")
     
@@ -2404,7 +2404,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                 help="Cantidad de solicitudes sin responder por tipo de solicitud.",
             )
             for _, row in resumen_por_tipo.iterrows():
-                st.caption("**{}**: : {} Solicitudes ({:.1%})".format(
+                st.caption("**{}**: {} Solicitudes ({:.1%})".format(
                     row['Tipo_Solicitud'], 
                     row['count'],
                     row['count'] / len(solicitudes_sin_responder_por_tipo) if len(solicitudes_sin_responder_por_tipo) > 0 else 0
@@ -2462,7 +2462,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         # Agregamos la Columna Conteo Total
         resumen_sin_responder['Conteo_Total'] = resumen_sin_responder.groupby('Casa_Cobro')['count'].transform('sum')
         # Ordenamos de Mayor a Menor por Conteo pero General no por Tipo de Solicitud
-        resumen_sin_responder = resumen_sin_responder.sort_values(by='Conteo_Total', ascending=False)
+        resumen_sin_responder = resumen_sin_responder.sort_values(by='Conteo_Total', ascending=True)
 
         # Definimos Configuraciones del Gráfico
         pixels_per_bar = 40
@@ -2497,6 +2497,66 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         # Mostramos el Gráfico
         with st.container(border=True):
             st.plotly_chart(fig_sin_responder)
+
+        # 2.2: Creamos 2 Columnas: Pie de Pendientes de Responder por Ejecutivo y Pie de Estados de Solicitud
+        with st.container(border=True):
+            colPieEjecutivo, colPieEstado = st.columns(2)
+
+            # Pie de Pendientes de Responder por Ejecutivo
+            with colPieEjecutivo:
+                resumen_por_ejecutivo = solicitudes_sin_responder.groupby('Ejecutivo').size().reset_index(name='count')
+                fig_pie_ejecutivo = px.pie(
+                    resumen_por_ejecutivo,
+                    names='Ejecutivo',
+                    values='count',
+                    title="Solicitudes Sin Responder por Ejecutivo",
+                    color_discrete_sequence=px.colors.qualitative.Set3,
+                    hole = .4,
+                )
+                fig_pie_ejecutivo.update_traces(
+                    hovertemplate="<b>Ejecutivo:</b> %{label}<br><b>Número de Solicitudes:</b> %{value}<br><b>Porcentaje:</b> %{percent}<extra></extra>"
+                )
+                st.plotly_chart(fig_pie_ejecutivo)
+
+            # Pie de Estados de Solicitud
+            with colPieEstado:
+                resumen_por_estado = solicitudes_sin_responder.groupby('Estado_Solicitud').size().reset_index(name='count')
+                fig_pie_estado = px.pie(
+                    resumen_por_estado,
+                    names='Estado_Solicitud',
+                    values='count',
+                    title="Solicitudes Sin Responder por Estado",
+                    color_discrete_sequence=px.colors.qualitative.Set3,
+                    hole = .4,
+                )
+                fig_pie_estado.update_traces(
+                    hovertemplate="<b>Estado:</b> %{label}<br><b>Número de Solicitudes:</b> %{value}<br><b>Porcentaje:</b> %{percent}<extra></extra>"
+                )
+                st.plotly_chart(fig_pie_estado)
+
+        # 2.3 Timeline de Solicitudes Sin Responder por Tipo de Solicitud
+        with st.container(border=True):
+            # Creamos un Timeline de Solicitudes Sin Responder por Tipo de Solicitud
+            solicitudes_sin_responder['Fecha'] = solicitudes_sin_responder['Timestamp'].dt.date
+            resumen_timeline = solicitudes_sin_responder.groupby(['Fecha', 'Tipo_Solicitud']).size().reset_index(name='count')
+
+            fig_timeline = px.line(
+                resumen_timeline,
+                x='Fecha',
+                y='count',
+                color='Tipo_Solicitud',
+                markers=True,
+                title="Timeline de Solicitudes Sin Responder por Tipo de Solicitud",
+                labels={'count': 'Número de Solicitudes', 'Fecha': 'Fecha', 'Tipo_Solicitud': 'Tipo de Solicitud'},
+                color_discrete_sequence=px.colors.qualitative.Set2,
+            )
+
+            fig_timeline.update_traces(
+                hovertemplate="<b>Fecha:</b> %{x}<br><b>Tipo de Solicitud:</b> %{customdata[0]}<br><b>Número de Solicitudes:</b> %{y}<extra></extra>",
+                customdata=resumen_timeline[['Tipo_Solicitud']].values
+            )
+
+            st.plotly_chart(fig_timeline)
 
 # Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
 def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True) -> None:

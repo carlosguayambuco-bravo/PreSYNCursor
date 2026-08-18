@@ -157,6 +157,37 @@ def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
 
     return "No Encontrado"
 
+# Función para Obtener el Aliado en Base dado un Conjunto de Deudas y Aliados Posibles
+def obtener_aliado_en_base(*, deudas: list[str], aliados_posibles: list[str]) -> str:
+    # Paso 1: Cargamos las Masivas
+    masivas_df = load_masivas()
+    # Paso 2: Buscamos las Deudas en las Masivas
+    masivas_locales = masivas_df[masivas_df['Id_Deuda'].isin(deudas)]
+    # Paso 3: Filtramos por los Aliados Posibles
+    masivas_filtradas = masivas_locales[masivas_locales['Casa_Cobro'].isin(aliados_posibles)]
+    # Paso 4: Hacemos un Agrupamiento por Casa de Cobro para dejar el Minimo PaB_Propuesta
+    aliado_en_base = masivas_filtradas.groupby('Casa_Cobro')['PaB_Propuesta'].min().idxmin() # type: ignore
+    return str(aliado_en_base)
+
+# Función Auxiliar para Mostrar como subir la Solicitud de Aliados Diferentes
+def mostrar_como_subir_solicitud_aliados_diferentes(*, ml: pd.DataFrame, es_admin: bool = False) -> None:
+    # ml es Masivas Locales
+    # Primero vamos a crear el Body de la Información
+    body_info = [
+        "{}: Deudas {}".format(
+            casa if es_admin else "Aliado {}".format(i+1),
+            '-'.join(ml[ml['Casa_Cobro'] == casa]['Id_Deuda'].tolist())
+        ) for i, casa in enumerate(ml['Casa_Cobro'].unique())
+    ]
+    # Ahora Mostramos la Información en un st.info
+    st.info(
+        title="Información de Subida de Solicitud con Aliados Diferentes",
+        body="Para subir la solicitud, debes crear una solicitud por cada aliado diferente. La información de las deudas por aliado es la siguiente:\n\n{}".format(
+            "\n\n".join(body_info)
+        ),
+        icon="ℹ️"
+    )
+
 # --- Queries a MetaBase ---
 
 # Función Auxiliar para obtener la referencia dada una deuda
