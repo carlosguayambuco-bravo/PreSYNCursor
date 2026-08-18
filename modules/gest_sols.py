@@ -555,12 +555,15 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
     plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
 
-    # Paso 2: Registrar el Log de la Subida Masiva de Solicitudes
-    upload_log_to_sheets(info="Subida de Plantilla Masiva de Solicitudes",
-        detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets.")
+    # Paso 2: Subir la Plantilla Masiva a Google Sheets
+    success = upload_massive_solicitudes_filtered_plantilla(plantilla_df)
 
-    # Paso 3: Subir la Plantilla Masiva a Google Sheets
-    return upload_massive_solicitudes_filtered_plantilla(plantilla_df)
+    # Paso 3: Registrar el Log de la Subida Masiva de Solicitudes
+    upload_log_to_sheets(info="Subida de Plantilla Masiva de Solicitudes",
+        detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets. ({'Éxito' if success else 'Fallo'})"
+    )
+
+    return success
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
 def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "reset") -> None:
