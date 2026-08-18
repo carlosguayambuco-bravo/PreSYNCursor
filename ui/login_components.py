@@ -68,5 +68,8 @@ def show_user_info():
         banner_manager = get_banned_manager()
         banner_manager.reset()
 
+        # Limpiamos los Cambios Locales
+        st.session_state['local_changes'] = []
+
         # Recargamos la Información
         st.rerun()
