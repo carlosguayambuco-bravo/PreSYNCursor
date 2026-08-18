@@ -107,6 +107,8 @@ with tabSolicitudes:
         success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_filtered)
         if success:
             st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
+        else:
+            st.toast("Ocurrió un error al subir las solicitudes a Google Sheets. Por favor, inténtalo de nuevo.", icon="❌")
 
     if mas_solicitudes:
         st.session_state['Cantidad_Solicitudes_Ver_Ejecutivo'] += 10  # Incrementamos en 10 la cantidad de solicitudes a mostrar

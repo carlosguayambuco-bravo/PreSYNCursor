@@ -258,9 +258,8 @@ def upload_log_to_sheets(*,info: str, detail: str):
     # Paso 4: Agregar la Fila del Log al Final de la Hoja
     _retry(lambda: logs_ws.append_row(log_data), label="Append Log Row")
 
-    # Paso 5: Mostrar un Toast y re-ejecutar el App
+    # Paso 5: Mostrar un Toast
     st.toast(f"{info}: {detail}", icon="✅")
-    st.rerun()
 
 def upload_addendum_debt(*,
         reference: str,

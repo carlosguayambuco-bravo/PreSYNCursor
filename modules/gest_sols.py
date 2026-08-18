@@ -538,7 +538,7 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes
     download_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
 
     # Paso 2: Convertir el DataFrame a CSV en formato binario
-    csv_bytes = download_df.to_csv(index=False).encode('utf-8')
+    csv_bytes = download_df.to_csv(index=False,sep=';').encode('utf-8')
 
     return csv_bytes
 
