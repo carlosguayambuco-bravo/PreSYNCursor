@@ -52,6 +52,15 @@ with tabVer:
     for _, solicitud in solicitudes_filtered.head(st.session_state['Cantidad_Solicitudes_Ver_Negociador']).iterrows():
         mostrar_datos_solicitud_negociador(solicitud=solicitud)
 
+    # Creamos una Caption de cuantas soilicitudes estamos mostrando
+    st.caption(
+        "**Mostrando {} de {} Solicitudes.** (**{:.1%}**)".format(
+            min(st.session_state['Cantidad_Solicitudes_Ver_Negociador'], len(solicitudes_filtered)),
+            len(solicitudes_filtered),
+            min(st.session_state['Cantidad_Solicitudes_Ver_Negociador'], len(solicitudes_filtered)) / len(solicitudes_filtered) if len(solicitudes_filtered) > 0 else 0
+        )
+    )
+
     # Creamos 2 Botones: Cargar Mas Solicitudes y Reiniciar Filtros
     colMas, colReiniciar = st.columns([2, 2], gap="large")
 

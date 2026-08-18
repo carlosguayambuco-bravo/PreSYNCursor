@@ -2044,7 +2044,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
     )
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
 
-    with st.expander(expander_name, expanded=False, key=expander_key, on_change=st.rerun):
+    with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
 
         # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
         colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], vertical_alignment="center")
@@ -2145,10 +2145,13 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
 
+        # Mostramos el Comentario del Negociador
+        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo if comentario_ejecutivo else "Sin Comentario"), icon="ℹ️")
+
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
         if es_solicitud_sin_responder(solicitud):
             st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
-            return 
+            return
 
         # Siguiente verificación: SI neceista aprobación es necesario que se aprube o desapruebe
         if es_solicitud_aprobacion_necesaria(solicitud):
@@ -2229,11 +2232,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
                     width="stretch",
                 )
-
-        # Mostramos los Comentarios del Ejecutivo otra vez
-        comentario_ejecutivo = solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "")
-        if comentario_ejecutivo:
-            st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
 
         # Si la Solicitud no es Exitosa, todo finaliza aquí
         if solicitud["Estado_Solicitud"] != "Exitosa":
@@ -2607,7 +2605,7 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_na
             label="**Deudas y Clientes Solicitados:**",
             value="{} deudas, {} clientes".format(num_deudas, num_clientes),
             help="El número total de deudas e clientes incluidos en las solicitudes.",
-            delta = "{} deudas por cliente en promedio".format(num_deudas / num_clientes) if num_clientes > 0 else "N/A",
+            delta = "{} deudas por cliente en promedio".format(round(num_deudas / num_clientes,2)) if num_clientes > 0 else "N/A",
             delta_color="gray",
             delta_arrow="off",
             border=True
@@ -2708,7 +2706,7 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_na
 
 # Función Auxiliar para mostrar el Botón que limpia los Filtros Versión Negociador
 def mostrar_boton_limpiar_filtros_negociador(key_extra: str):
-    reiniciar_filtros = st.button(
+    st.button(
         "Reiniciar Filtros",
         key="reiniciar_filtros_button" + key_extra,
         help="Haz clic para reiniciar los filtros de solicitudes",

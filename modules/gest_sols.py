@@ -102,8 +102,8 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
         valor = row['PaB_Propuesta']
         descuento = 1 - valor / original_amount if original_amount != 0 else 0
         monto_portafolio = row["PaB_Portafolio"]
-        es_portafolio = "Si" if (monto_portafolio > 0) else "No"
-        if es_portafolio == "Si":
+        es_portafolio = "SI" if (monto_portafolio > 0) else "No"
+        if es_portafolio == "SI":
             str_portafolio = f"**Portafolio**: {monto_portafolio:,.0f}"
         else:
             str_portafolio = "***No es Portafolio***"
@@ -139,10 +139,9 @@ def es_solicitud_aprobacion_necesaria(solicitud: pd.Series) -> bool:
     Returns:
         bool: True si la solicitud requiere aprobación, False en caso contrario.
     """
-    maskAprobComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité"
-    maskAprobIlocalizado = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
-    maskSinResponder = es_solicitud_sin_responder(solicitud)
-    return (maskAprobComite or maskAprobIlocalizado) and maskSinResponder
+    maskAprobComite = (solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1) and (solicitud["Estado_Solicitud"] == "Bajo Comité")
+    maskAprobIlocalizado = (solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1) and (solicitud["Estado_Solicitud"] == "Titular Ilocalizable")
+    return (maskAprobComite or maskAprobIlocalizado)
 
 def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal["Comité", "Titular Ilocalizable"]]:
     """
@@ -154,9 +153,9 @@ def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal[
     Returns:
         Optional[Literal["Comité", "Titular Ilocalizable"]]: Tipo de aprobación necesaria ("Comité" o "Titular Ilocalizable") o None si no requiere aprobación.
     """
-    if solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1 and solicitud["Estado_Solicitud"] == "Bajo Comité":
+    if (solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1) and (solicitud["Estado_Solicitud"] == "Bajo Comité"):
         return "Comité"
-    elif solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable":
+    elif (solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1) and (solicitud["Estado_Solicitud"] == "Titular Ilocalizable"):
         return "Titular Ilocalizable"
     else:
         return None
@@ -172,8 +171,8 @@ def obtener_mascara_sin_responder(solicitudes_df: pd.DataFrame) -> pd.Series:
         pd.Series: Serie con las solicitudes sin responder.
     """
     maskSinTocar = (solicitudes_df["Estado_Solicitud"] == "Sin Tocar") | (solicitudes_df["Estado_Solicitud"] == "Solicitado")
-    maskBajoComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0)  == 1) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
-    maskTitularIlocalizable = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
+    maskBajoComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0) == 3) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
+    maskTitularIlocalizable = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 3) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
     banner_manager = get_banned_manager()
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
     return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
@@ -202,8 +201,7 @@ def obtener_mascara_aprobacion_necesaria(solicitudes_df: pd.DataFrame) -> pd.Ser
     """
     maskAprobComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
     maskAprobIlocalizado = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
-    maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
-    return (maskAprobComite | maskAprobIlocalizado) & maskSinResponder
+    return (maskAprobComite | maskAprobIlocalizado)
 
 def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Optional[Literal["Comité", "Titular Ilocalizable"]], aprobado: bool) -> bool:
     """
@@ -775,7 +773,10 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
             {
                 "Id_Deuda": deuda['Id_Deuda'],
                 "Banco": deuda['Banco'],
-                "Numero_Credito": deuda.get('Numero_Credito','N/A'),
+                "Numero_Credito": st.session_state.get(
+                    "numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], deuda['Id_Deuda']),
+                    deuda.get('Numero_Credito', 'N/A')
+                ),
                 "Monto_Propuesto": cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0),
                 "Num_Cuotas": cleanNumber(deuda.get('Num_Cuotas', 1), default_nan=1.0)
             }

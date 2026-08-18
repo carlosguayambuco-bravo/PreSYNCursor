@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 # Librerías Propias
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas 
+from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas  # pyright: ignore[reportAttributeAccessIssue]
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 from utils.helpers_general import cleanNumber
 
