@@ -12,7 +12,7 @@ import plotly.express as px
 from pypdf.errors import WrongPasswordError
 # Librerías Locales
 from data.data_loader import load_app_config
-from data.data_uploader import upload_form_response_to_google_sheets
+from data.data_uploader import upload_form_response_to_google_sheets, upload_log_to_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
@@ -1672,6 +1672,7 @@ def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> 
         "¿Está seguro que desea actualizar las solicitudes seleccionadas a 'Solicitado'? Esta acción no se puede deshacer.",
         icon="⚠️",
     )
+    st.info("Las Solicitudes ya respondidas no se van a marcar",icon="ℹ️")
 
     # Mostramos un Resumen de las Solicitudes a Actualizar
     st.markdown("### **Resumen de Solicitudes a Actualizar**")
@@ -1725,10 +1726,20 @@ def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> 
             type="primary",
             width="stretch",
         ):
+            # Obtenemos la Máscara sin Responder para esas solicitudes
+            mask_sin_responder = obtener_mascara_sin_responder(solicitudes)
             # Actualizamos las Solicitudes a "Solicitado"
-            success = update_solicitudes_to_solicitado(solicitudes=solicitudes)
+            success = update_solicitudes_to_solicitado(solicitudes=solicitudes[mask_sin_responder])
+            upload_log_to_sheets(
+                info="Marcación Masiva de Solicitados",
+                detail="Se suben {} solicitudes como Solicitados ({})".format(
+                    np.sum(mask_sin_responder),
+                    'Éxito' if success else "Error"
+                )
+            )
             if success:
                 st.toast("Solicitudes actualizadas exitosamente a 'Solicitado'.", icon="✅")
+                sleep(1)
                 st.rerun()
             else:
                 st.toast("Intenta de Nuevo actualizar las Solicitudes",icon="❌")

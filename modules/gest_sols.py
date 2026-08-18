@@ -487,6 +487,9 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     Returns:
         pd.DataFrame: DataFrame con la plantilla masiva de solicitudes.
     """
+    # Paso 0: Dejar solicitudes sin responder
+    mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
+    solicitudes_df = solicitudes_df[mask_sin_responder]
 
     # Paso 1: Iterar sobre cada solicitud y llenar la plantilla
     filas = []
@@ -519,8 +522,6 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     # Ahora vamos a Quitar las Columnas de Portafolio y Plazos si no hay datos en ellas
     if plantilla_df['Portafolio'].nunique() == 1 and plantilla_df['Portafolio'].iloc[0] == '':
         plantilla_df = plantilla_df.drop(columns=['Portafolio'])
-    if plantilla_df['Plazos'].nunique() == 1 and plantilla_df['Plazos'].iloc[0] == '':
-        plantilla_df = plantilla_df.drop(columns=['Plazos'])
 
     return plantilla_df
 
@@ -552,16 +553,20 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
     Returns:
         bool: True si la subida fue exitosa, False en caso contrario.
     """
+    # Mostramos un Toast de Recordar que solo se suben solicitudes sin respuesta
+    st.toast("Recuerda que solo se dejan solicitudes que aún no tengan respuesta", icon="ℹ️")
+
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
-    plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
+    with st.spinner("Subiendo Información a Google Sheets..."):
+        plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
 
-    # Paso 2: Subir la Plantilla Masiva a Google Sheets
-    success = upload_massive_solicitudes_filtered_plantilla(plantilla_df)
+        # Paso 2: Subir la Plantilla Masiva a Google Sheets
+        success = upload_massive_solicitudes_filtered_plantilla(plantilla_df)
 
-    # Paso 3: Registrar el Log de la Subida Masiva de Solicitudes
-    upload_log_to_sheets(info="Subida de Plantilla Masiva de Solicitudes",
-        detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets. ({'Éxito' if success else 'Fallo'})"
-    )
+        # Paso 3: Registrar el Log de la Subida Masiva de Solicitudes
+        upload_log_to_sheets(info="Subida de Plantilla Masiva de Solicitudes",
+            detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets. ({'Éxito' if success else 'Fallo'})"
+        )
 
     return success
 
