@@ -100,7 +100,7 @@ def get_user_role(email: str) -> str:
     if user_row['Es_Negociador']:
         return 'nego'
     # Caso 2: Si Nombre_Empleo == 'Encargado de Negociación', entonces devolvemos 'leader'
-    if user_row['Nombre_Empleo'] == 'Encargado de Negociación':
+    if user_row['Nombre_Empleo'] == 'Encargado de Negociación' or user_row['Nombre_Empleo'] == 'Team Leader Negociación':
         return 'leader'
     # Caso 3: Si Nombre_Empleo contiene gerente o analista, entonces devolvemos 'admin'
     if 'gerente' in user_row['Nombre_Empleo'].lower() or 'analista' in user_row['Nombre_Empleo'].lower():

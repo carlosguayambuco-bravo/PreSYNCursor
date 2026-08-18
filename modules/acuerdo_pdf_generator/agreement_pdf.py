@@ -109,7 +109,9 @@ class _AgreementCanvas(Canvas):
         y = self._header(margin)
         y = self._identity(data, margin, y, content_w)
         y = self._summary(data, debts, margin, y - 14, content_w) - 14
-        per_page = 7 if self.orientation == "horizontal" else 12
+        # Seis filas dejan espacio suficiente para que las recomendaciones no
+        # invadan el pie de página en formato horizontal.
+        per_page = 6 if self.orientation == "horizontal" else 12
         chunks = [debts[index:index + per_page] for index in range(0, len(debts), per_page)] or [[]]
         for page_index, chunk in enumerate(chunks):
             if page_index:
@@ -120,10 +122,18 @@ class _AgreementCanvas(Canvas):
             if self.orientation == "horizontal":
                 table_w, gap = content_w * .63, 12
                 y_after_table = self._debt_table(chunk, margin, y, table_w)
-                comment_h = max(90, y - y_after_table)
-                self._comment(data["executive_comment"], margin + table_w + gap, y, content_w - table_w - gap, comment_h)
-                recommendations_h = max(65, 30 + 14 * len(considerations))
+                comment_w = content_w - table_w - gap
+                # El comentario crece según las líneas que requiera, sin
+                # quedar recortado cuando la tabla tiene pocas deudas.
+                comment_h = max(y - y_after_table, self._comment_height(data["executive_comment"], comment_w))
+                self._comment(data["executive_comment"], margin + table_w + gap, y, comment_w, comment_h)
+                recommendations_h = max(75, 40 + 14 * len(considerations))
                 y = min(y_after_table, y - comment_h) - 14
+                if y - recommendations_h < 50:
+                    self._footer(data, moment); self.showPage()
+                    if self.orientation == "horizontal":
+                        self._page_watermark()
+                    y = self._header(margin, compact=True)
                 self._considerations(considerations, margin, y, content_w, recommendations_h)
                 y -= recommendations_h
             else:
@@ -170,22 +180,24 @@ class _AgreementCanvas(Canvas):
         self.setStrokeColor(self.palette["border"]); self.line(x + left_w, y - height, x + left_w, y); self.line(x + left_w, y - 38, x + width, y - 38)
         total = sum((debt["amount"] for debt in debts), Decimal("0"))
         centered = self.orientation == "horizontal"
-        self._field("MONTO TOTAL DE PAGO", _currency(total), x + 13, y, left_w - 24, important=True, value_size=21, value_alignment=1 if centered else 0)
-        self._field("FORMA DE PAGO", data["payment_method"], x + left_w + 12, y, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
-        self._field("FECHA LÍMITE DE PAGO", _format_date(data["due_date"]), x + left_w + 12, y - 38, width - left_w - 20, important=True, value_size=10, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
+        self._field("MONTO TOTAL DE PAGO", _currency(total), x + 13, y, left_w - 24, important=True, value_size=22, value_alignment=1 if centered else 0)
+        self._field("FORMA DE PAGO", data["payment_method"], x + left_w + 12, y, width - left_w - 20, important=True, value_size=13, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
+        self._field("FECHA LÍMITE DE PAGO", _format_date(data["due_date"]), x + left_w + 12, y - 38, width - left_w - 20, important=True, value_size=13, label_offset=15, value_bottom_offset=34, value_alignment=1 if centered else 0)
         return y - height
 
     def _debt_table(self, debts: list[dict[str, Any]], x: float, y: float, width: float) -> float:
         title_h, row_h = 25, 23
-        rows = debts or [{"id": "-", "credit_number": "-", "bank": "-"}]
+        rows = debts or [{"id": "-", "credit_number": "-", "bank": "-", "amount": Decimal("0")}]
         height = title_h + row_h * (len(rows) + 1)
         self.card(x, y - height, width, height)
         self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 11)
         self.drawCentredString(x + width / 2, y - 16, "RELACIÓN DE DEUDAS")
         
         # Columna BANCO integrada para ambas orientaciones entre ID DEUDA y NÚMERO CRÉDITO
-        table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO"]] + [[d["id"], d["bank"], d["credit_number"]] for d in rows]
-        column_widths = [width * .25, width * .35, width * .40]
+        table_data = [["ID DEUDA", "BANCO", "NÚMERO CRÉDITO", "MONTO DE PAGO"]] + [
+            [d["id"], d["bank"], d["credit_number"], _currency(d["amount"])] for d in rows
+        ]
+        column_widths = [width * .16, width * .26, width * .31, width * .27]
 
         table = Table(table_data, colWidths=column_widths, rowHeights=row_h)
         table.setStyle(TableStyle([
@@ -202,19 +214,26 @@ class _AgreementCanvas(Canvas):
         self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 10)
         self.drawString(x + 12, y - 18, "RECOMENDACIONES")
         style = ParagraphStyle("consideration", fontName=self.font, fontSize=8.2, leading=10.2, textColor=self.palette["text"])
-        cursor = y - 33
+        cursor = y - 37
         for index, item in enumerate(items, 1):
-            paragraph = Paragraph(_escape(f"{index}. {item}"), style); _, p_h = paragraph.wrap(width - 24, height)
-            paragraph.drawOn(self, x + 14, cursor - p_h); cursor -= p_h + 4
+            paragraph = Paragraph(_escape(f"{index}. {item}"), style); _, p_h = paragraph.wrap(width - 28, height)
+            paragraph.drawOn(self, x + 16, cursor - p_h); cursor -= p_h + 5
 
     def _comment(self, value: Any, x: float, y: float, width: float, height: float) -> None:
         self.card(x, y - height, width, height, fill=HexColor("#FFF8F7"))
         self.setFillColor(self.palette["primary"]); self.setFont(self.bold_font, 10)
         self.drawString(x + 12, y - 18, "COMENTARIO DEL EJECUTIVO")
-        style = ParagraphStyle("executive-comment", fontName=self.font, fontSize=8.2, leading=10.2, textColor=self.palette["text"])
+        style = ParagraphStyle("executive-comment", fontName=self.font, fontSize=9.2, leading=11.2, textColor=self.palette["text"])
         paragraph = Paragraph(_escape(str(value or "Sin Comentario adicional, priorizar el pago")), style)
         _, p_h = paragraph.wrap(width - 24, height - 35)
         paragraph.drawOn(self, x + 14, y - 33 - p_h)
+
+    def _comment_height(self, value: Any, width: float) -> float:
+        """Calcula la altura necesaria para el contenido y sus márgenes."""
+        style = ParagraphStyle("executive-comment-measure", fontName=self.font, fontSize=9.2, leading=11.2)
+        paragraph = Paragraph(_escape(str(value or "Sin Comentario adicional, priorizar el pago")), style)
+        _, paragraph_h = paragraph.wrap(width - 24, 10_000)
+        return max(90, paragraph_h + 47)
 
     def _field(self, label: str, value: Any, x: float, top: float, width: float, important: bool = False, value_size: float = 9, label_offset: float = 18, value_bottom_offset: Optional[float] = None, value_alignment: int = 0) -> None:
         self.setFillColor(self.palette["muted"]); self.setFont(self.font, 7)
