@@ -57,6 +57,10 @@ def show_user_info():
                     value=False
                 )
 
+        st.sidebar.markdown("**Cambios Locales:** {}".format(
+            len(st.session_state.get('local_changes', []))
+        ))
+
         st.sidebar.divider()
 
     # Botón de Recarga de Solicitudes
