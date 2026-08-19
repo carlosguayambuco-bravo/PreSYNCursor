@@ -107,7 +107,7 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
             str_portafolio = f"**Portafolio**: {monto_portafolio:,.0f}"
         else:
             str_portafolio = "***No es Portafolio***"
-        descuento_formateado = f"**{casa_cobro}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
+        descuento_formateado = f"(*{debt}*) **{casa_cobro}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
         descuentos_formateados.append(descuento_formateado)
 
     return descuentos_formateados
@@ -510,6 +510,9 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     # Creamos el DataFrame
     plantilla_df = pd.DataFrame(filas)
 
+    if plantilla_df.empty:
+        return PlantillaSolicitudesSchema.empty()
+
     # Quitamos Datos donde no haya Propuesta
     plantilla_df = plantilla_df.dropna(subset=['Propuesta'])
 
@@ -537,6 +540,8 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes
     """
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
     download_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
+    if download_df.empty:
+        return bytes()
 
     # Paso 2: Convertir el DataFrame a CSV en formato binario
     csv_bytes = download_df.to_csv(index=False,sep=';').encode('utf-8')

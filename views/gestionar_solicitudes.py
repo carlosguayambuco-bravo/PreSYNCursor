@@ -58,7 +58,7 @@ with tabSolicitudes:
     )
 
     # Creamos 5 Botones: Cargar Más Solicitudes, Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
-    colMas, colDescargar, colSubir, colCopiar, colMarcar = st.columns([2, 2, 2, 1, 2], gap = "large")
+    colMas, colDescargar, colSubir, colMarcar, colCopiar = st.columns([3, 3, 3, 3, 1], gap = "large")
 
     with colMas:
         mas_solicitudes =  st.button("Cargar Más Solicitudes",
@@ -68,23 +68,26 @@ with tabSolicitudes:
             type="secondary"
         )
     with colDescargar:
+        download_bytes = generar_descarga_masiva_solicitudes(solicitudes_df=solicitudes_filtered)
         st.download_button("Descargar Solicitudes",
-            generar_descarga_masiva_solicitudes(solicitudes_df=solicitudes_filtered),
+            download_bytes,
             file_name="solicitudes.csv",
             mime="text/csv",
             type="primary",
             key="descargar_solicitudes_button",
             help="Haz clic para descargar las solicitudes filtradas completas",
             on_click=upload_log_to_sheets,
+            disabled=len(download_bytes)<=0,
             kwargs={"info": "Descarga de Solicitudes", "detail": f"{st.session_state['user_email']} descargó {len(solicitudes_filtered)} solicitudes filtradas."},
         )
 
     with colSubir:
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_filtered)
         subido_sheets = st.button("Subir Solicitudes a Sheets",
             key="subir_solicitudes_button",
             help="Haz clic para subir las solicitudes filtradas a Google Sheets",
             type="primary",
-            disabled = len(solicitudes_filtered) == 0,
+            disabled = (mask_sin_responder).sum() == 0,
             )
 
     with colCopiar:
@@ -99,7 +102,7 @@ with tabSolicitudes:
             key="marcar_solicitudes_button",
             help="Haz clic para marcar las solicitudes filtradas como 'Solicitado'",
             type="primary",
-            disabled = len(solicitudes_filtered) == 0,
+            disabled = (mask_sin_responder).sum() == 0,
         ):
             dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
 

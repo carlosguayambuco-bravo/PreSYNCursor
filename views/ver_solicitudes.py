@@ -69,7 +69,7 @@ with tabVer:
             "Cargar Más Solicitudes",
             key="cargar_mas_solicitudes_button",
             help="Haz clic para cargar más solicitudes",
-            disabled=len(solicitudes_df) <= st.session_state['Cantidad_Solicitudes_Ver_Negociador'],
+            disabled=len(solicitudes_filtered) <= st.session_state['Cantidad_Solicitudes_Ver_Negociador'],
             type="primary"
         )
 
