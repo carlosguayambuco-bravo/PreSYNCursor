@@ -4,7 +4,7 @@
 from altair import value
 import streamlit as st
 # Librerías Locales
-from core.auth import delete_saved_credentials
+#from core.auth import delete_saved_credentials
 from core.users import User
 from data.data_loader import load_solicitudes_mec
 from modules.classes import get_banned_manager
@@ -35,7 +35,7 @@ def show_user_info():
 
     # Ahora añadimos Botón de Cerrar Sesión en el Sidebar
     if st.sidebar.button("Cerrar Sesión", icon="🚪",width = "stretch"):
-        delete_saved_credentials()
+        #delete_saved_credentials()
         # Limpiamos el estado de sesión
         st.session_state.clear()
         # Redirigimos al usuario a la página de login
