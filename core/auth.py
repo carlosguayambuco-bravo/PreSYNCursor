@@ -139,7 +139,7 @@ def authenticate_user():
     params = st.query_params
 
     # 1. Check if returning from Google Auth with code
-    if "code" in params and "credentials" not in st.session_state:
+    if "code" in params and not("credentials" in st.session_state):
         try:
             code = params["code"]
             flow = create_flow()
@@ -173,7 +173,7 @@ def authenticate_user():
             st.session_state["creds_google"] = Credentials.from_authorized_user_info(st.session_state["credentials"], scopes=SCOPES)
             
             # Clear URL parameters to keep address bar clean
-            st.query_params.clear()
+            # st.query_params.clear() Deleted for Saving url with auto-login
 
             # Guardamos el Usuario
             st.session_state["user_obj"] = create_user_from_session()
