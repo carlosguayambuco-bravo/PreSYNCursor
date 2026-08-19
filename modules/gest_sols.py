@@ -496,6 +496,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     for _, solicitud in solicitudes_df.iterrows():
         for deuda in solicitud['Datos_Solicitud']:
             nueva_fila = {
+                'Casa_Cobro': solicitud['Casa_Cobro'],
                 'Tipo_Solicitud': solicitud['Tipo_Solicitud'],
                 'Cedula': solicitud['Cedula'],
                 'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
