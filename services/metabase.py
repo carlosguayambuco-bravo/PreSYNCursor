@@ -6,7 +6,6 @@ import time
 # Librerías de Terceros
 import pandas as pd
 import requests
-import requests_mock
 
 MAX_QUERY_ATTEMPTS = 3
 SESSION_TIMEOUT_SECONDS = 900  # 15 minutos
