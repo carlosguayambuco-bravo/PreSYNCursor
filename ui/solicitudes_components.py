@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Literal, Optional
+import math
+from typing import Callable, Literal, Optional
 from time import sleep
 # Librerías de Terceros
 import numpy as np
@@ -17,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_df_bancos_sin_responder, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -2490,6 +2491,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
             labels={'count': 'Número de Solicitudes', 'Casa_Cobro': 'Aliado', 'Tipo_Solicitud': 'Tipo de Solicitud'},
             color_discrete_sequence=px.colors.qualitative.Set2,
             title="Solicitudes Sin Responder por Aliado y Tipo de Solicitud",
+            text="Tipo_Solicitud",
         )
 
         # Agregamos el Hover
@@ -2500,7 +2502,12 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         # Agregamos Margen y ajustamos dtick para mostrar todos los aliados
         fig_sin_responder.update_layout(
             margin=dict(l=150, r=50, t=50, b=50),
-            yaxis=dict(dtick=1, type='category'),
+            yaxis=dict(
+                dtick=1, 
+                type='category',
+                categoryorder='array', # Ayuda para ordenamiento de Categorías
+                categoryarray=resumen_sin_responder['Casa_Cobro'].unique()
+            ),
         )
 
         # Mostramos el Gráfico
@@ -2724,3 +2731,163 @@ def mostrar_boton_limpiar_filtros_negociador(key_extra: str):
         on_click=reiniciar_filtros_solicitudes_negociadores,
         type="secondary"
     )
+
+# Función Auxiliar para Mostrar las Solicitudes Paginadas (10-20-30-40 por página)
+def mostrar_solicitudes_paginadas(
+    *,
+    solicitudes_df: pd.DataFrame,
+    mostrar_funcion: Callable[..., None],
+    key: str,
+) -> None:
+    """Muestra las solicitudes en sub-páginas manejadas de forma local.
+
+    Divide el DataFrame en páginas según la cantidad de registros por página
+    seleccionada (10-20-30-40) y renderiza cada registro de la página actual
+    con la función `mostrar_funcion` (cambia entre la vista de Negociador y
+    la de Ejecutivo). En la parte inferior izquierda se escoge cuántos
+    registros ver por página y en la parte inferior derecha se navega con un
+    máximo de 5 botones: Ir al Inicio, Anterior (número), Página Actual
+    (número, type="primary"), Siguiente (número) e Ir al Final. Además, se
+    mantiene el caption con el porcentaje de registros mostrados.
+
+    El estado de la paginación (página actual y registros por página) se
+    guarda en el Session State de forma local, aislado con la `key` indicada.
+    """
+    # --- Estado Local de la Paginación (aislado por `key`) ---
+    key_registros_por_pagina = "paginacion_registros_por_pagina_{}".format(key)
+    key_pagina_actual = "paginacion_pagina_actual_{}".format(key)
+
+    st.session_state.setdefault(key_registros_por_pagina, 10)
+    st.session_state.setdefault(key_pagina_actual, 1)
+
+    total_solicitudes = len(solicitudes_df)
+    if total_solicitudes == 0:
+        st.caption("**Mostrando 0 de 0 Solicitudes.** (**0.0%**)")
+        return
+
+    registros_por_pagina = st.session_state[key_registros_por_pagina]
+    total_paginas = max(1, math.ceil(total_solicitudes / registros_por_pagina))
+    pagina_actual = min(st.session_state[key_pagina_actual], total_paginas)
+    st.session_state[key_pagina_actual] = pagina_actual
+
+    # Rebanada del DataFrame correspondiente a la página actual
+    inicio = (pagina_actual - 1) * registros_por_pagina
+    fin = min(inicio + registros_por_pagina, total_solicitudes)
+    pagina_df = solicitudes_df.iloc[inicio:fin]
+
+    # Paso 1: Mostrar los Registros de la Página Actual
+    for _, solicitud in pagina_df.iterrows():
+        mostrar_funcion(solicitud=solicitud)
+
+    # Paso 2: Caption con los Registros Mostrados y su Porcentaje
+    st.caption(
+        "**Mostrando {}-{} de {} Solicitudes.** (**{:.1%}**, **{}** páginas en total)".format(
+            inicio + 1,
+            fin,
+            total_solicitudes,
+            len(pagina_df) / total_solicitudes,
+            total_paginas
+        )
+    )
+
+    # Paso 3: Controles de Paginación (Izquierda: Registros por Página)
+    colRegistros, colEspacio, colSelectPag, colNavegacion = st.columns([2,1,1,2], vertical_alignment="center", gap="large")
+
+    with colRegistros:
+        def reiniciar_pagina_actual() -> None:
+            st.session_state[key_pagina_actual] = 1
+
+        st.selectbox(
+            "**Registros por página**",
+            options=[10, 20, 30, 40],
+            key=key_registros_por_pagina,
+            on_change=reiniciar_pagina_actual,
+            help="Selecciona cuántas solicitudes quieres ver por página.",
+            disabled=(total_solicitudes<=10),
+        )
+
+    with colSelectPag:
+        st.number_input(
+            label="Página Actual",
+            key=key_pagina_actual,
+            min_value=1,
+            max_value=total_paginas,
+            disabled=total_paginas<=1,
+            help="La página actual en la que te encuentras"
+        )
+
+    # Paso 4: Controles de Paginación (Derecha: Máximo 5 Botones de Navegación)
+    with colNavegacion:
+        st.space("xxsmall")
+
+        if total_paginas > 1:
+            colInicio, colAnterior, colActual, colSiguiente, colFinal = st.columns(
+                5, vertical_alignment="center", gap="small"
+            )
+
+            with colInicio:
+                ir_inicio = st.button(
+                    "<<",
+                    key="paginacion_ir_inicio_{}".format(key),
+                    disabled=(pagina_actual == 1),
+                    help="Ir a la primera página de solicitudes.",
+                    width="stretch",
+                )
+            with colAnterior:
+                ir_anterior = st.button(
+                    str(max(1, pagina_actual - 1)) if pagina_actual-1>0 else "N/A",
+                    key="paginacion_anterior_{}".format(key),
+                    disabled=(pagina_actual == 1),
+                    help="Ir a la página anterior de solicitudes.",
+                    width="stretch",
+                )
+            with colActual:
+                st.button(
+                    str(pagina_actual),
+                    key="paginacion_actual_{}".format(key),
+                    type="primary",
+                    help="Página actual de solicitudes.",
+                    width="stretch",
+                    on_click=None,
+                )
+            with colSiguiente:
+                ir_siguiente = st.button(
+                    str(min(total_paginas, pagina_actual + 1)),
+                    key="paginacion_siguiente_{}".format(key),
+                    disabled=(pagina_actual >= total_paginas),
+                    help="Ir a la página siguiente de solicitudes.",
+                    width="stretch",
+                )
+            with colFinal:
+                ir_final = st.button(
+                    ">>",
+                    key="paginacion_ir_final_{}".format(key),
+                    disabled=(pagina_actual >= total_paginas),
+                    help="Ir a la última página de solicitudes.",
+                    width="stretch",
+                )
+        else:
+            # Una sola página: solo se muestra el indicador de la página actual
+            st.button(
+                str(pagina_actual),
+                key="paginacion_actual_{}".format(key),
+                disabled=True,
+                type="primary",
+                help="Página actual de solicitudes.",
+                width="stretch",
+            )
+
+    # Paso 5: Aplicar la Navegación Seleccionada
+    if total_paginas > 1:
+        if ir_inicio:
+            st.session_state[key_pagina_actual] = 1
+            st.rerun()
+        elif ir_anterior:
+            st.session_state[key_pagina_actual] = max(1, pagina_actual - 1)
+            st.rerun()
+        elif ir_siguiente:
+            st.session_state[key_pagina_actual] = min(total_paginas, pagina_actual + 1)
+            st.rerun()
+        elif ir_final:
+            st.session_state[key_pagina_actual] = total_paginas
+            st.rerun()

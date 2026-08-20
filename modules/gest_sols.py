@@ -247,6 +247,8 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
     maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder & maskDiffID
 
+    solicitud['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
+
     updated_ids = set() # Inicializamos el Set de IDs Actualizados
     need_update_rows = [solicitud] # Inicializamos la lista de filas que necesitan ser actualizadas con la solicitud actual
     for _, solicitud_to_update in solicitudes_df[maskFinal].iterrows():
@@ -263,6 +265,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         solicitud_to_update['Fecha_Limite_Pago'] = solicitud.get('Fecha_Limite_Pago', '')
         solicitud_to_update['Ejecutivo'] = solicitud['Ejecutivo']
         solicitud_to_update['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+
+        # Guardamos un trace en la Metadata
+        solicitud_to_update['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
         # Actualizamos Addendums si hay
         if 'Addendums' in solicitud['Metadata_Solicitud']:
@@ -303,6 +308,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             sub_solicitud['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
             sub_solicitud['Ejecutivo'] = solicitud['Ejecutivo']
             sub_solicitud['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+
+            # Guardamos un trace en la Metadata
+            solicitud_to_update['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
             # Actualizamos Addendums si hay
             if 'Addendums' in solicitud['Metadata_Solicitud']:
@@ -364,7 +372,8 @@ def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     string_solicitado = "por {}".format(obtener_nombre_negociador(email=solicitudes[0]['Correo'])) if len(solicitudes) > 1 else "por ti"
     body_correo = EMAIL_BODY_GENERAL.format(
         string_solicitado=string_solicitado,
-        nombre_ejecutivo=st.session_state['user_name']
+        nombre_ejecutivo=st.session_state['user_name'],
+        comentario_llamativo = solicitudes[0]['Metadata_Solicitud'].get('Comentario_Ejecutivo') or "Realizar el Pago lo más pronto posible"
     )
     # Paso 6: Traer el Servicio de Google Mail desde el Session State
     google_mail_service: GoogleMailService = st.session_state['google_mail_service']
@@ -930,6 +939,7 @@ def crear_plantilla_solicitud_acuerdo_pago(
             'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
             'Comentario_Negociador': comentario,
             'Origen_Solicitud': solicitud['ID_Solicitud'],
+            'Es_Reasignado': (solicitud['Correo'] != st.session_state['user_email']),
         }),
         'Estado_Solicitud': 'Sin Tocar',
     }
@@ -967,6 +977,7 @@ def crear_plantilla_solicitud_validacion(
             'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
             'Comentario_Negociador': comentario,
             'Origen_Solicitud': solicitud['ID_Solicitud'],
+            'Es_Reasignado': (solicitud['Correo'] != st.session_state['user_email']),
         }),
         'Estado_Solicitud': 'Sin Tocar',
     }

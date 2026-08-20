@@ -63,7 +63,7 @@ class GoogleMailService:
             str: Mensaje codificado en base64.
         """
         message = MIMEMultipart()
-        message.attach(MIMEText(body, 'plain'))
+        message.attach(MIMEText(body, 'html'))
         message['to'] = to
         message['subject'] = subject
 

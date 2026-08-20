@@ -4,11 +4,16 @@ import base64
 import secrets
 import jwt
 import time
+import threading
+import datetime
+import json
 # Librerías de Terceros
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 import streamlit as st
+import extra_streamlit_components as stx
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 # Librerías Locales
 from core.users import User
 from data.data_loader import load_headcount_negociacion
@@ -21,6 +26,187 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",  # Grants access to read and write files created or opened by the app
     "https://www.googleapis.com/auth/gmail.send", # Grants access to send emails on behalf of the user
 ]
+
+# --- Persistencia de credenciales en cookies (extra-streamlit-components) ---
+# Las credenciales de Google se guardan ahora en cookies del navegador en lugar
+# de un archivo local: el filesystem no es persistente en Streamlit Cloud, así
+# que la sesión solo puede sobrevivir a los reinicios de la app vía cookies.
+CREDENTIALS_COOKIE_PREFIX = "google_oauth"
+CREDENTIALS_COOKIE_FIELDS = (
+    "token",
+    "refresh_token",
+    "token_uri",
+    "client_id",
+    "client_secret",
+    "scopes",
+)
+# Tiempo de vida de las cookies de autenticación (días).
+CREDENTIALS_COOKIE_MAX_AGE_DAYS = 30
+
+# Claves (keys) de los componentes. Deben ser únicas por ejecución del script:
+# Streamlit rechaza instancias duplicadas con la misma clave en una misma corrida.
+_COOKIE_KEY_READ = "auth_cookies_read"
+_COOKIE_KEY_WRITE = "auth_cookies_write"
+_COOKIE_KEY_DELETE = "auth_cookies_delete"
+
+# Memoria por ejecución del script: evita instanciar dos veces el componente de
+# lectura cuando initialize_services() y authenticate_user() se ejecutan en la
+# misma corrida. threading.local() aísla la memoria por sesión (cada sesión de
+# Streamlit corre en su propio hilo).
+_read_state = threading.local()
+
+# --- Cache de credenciales con scope de sesión (st.cache_resource) ---
+# Capa adicional de mantenimiento de las credenciales: aunque por error se
+# borren las credenciales del session_state (o las cookies), el cache de sesión
+# sigue disponible para restaurarlas. Al tener scope="session", cada sesión
+# tiene su propia entrada y se elimina automáticamente cuando la sesión se
+# desconecta.
+@st.cache_resource(scope="session", show_spinner=False)
+def _credentials_cache() -> dict:
+    """Almacenamiento de las credenciales del usuario a nivel de sesión."""
+    return {}
+
+
+def _cache_credentials(credentials_data: dict) -> None:
+    """Guarda las credenciales del usuario en el cache de sesión."""
+    cache = _credentials_cache()
+    cache.clear()
+    cache.update(credentials_data)
+
+
+def load_cached_credentials() -> dict | None:
+    """Devuelve las credenciales guardadas en el cache de sesión, si existen.
+
+    Es el último recurso para restaurar las credenciales cuando no están ni en
+    el session_state ni en las cookies.
+    """
+    cache = _credentials_cache()
+    return dict(cache) if cache else None
+
+
+def clear_cached_credentials() -> None:
+    """Elimina las credenciales del cache de sesión (cierre de sesión)."""
+    _credentials_cache.clear()
+
+
+def _cookie_name(field: str) -> str:
+    """Nombre de la cookie para un campo de las credenciales."""
+    return f"{CREDENTIALS_COOKIE_PREFIX}_{field}"
+
+
+def _cookie_expiration() -> datetime.datetime:
+    """Fecha de expiración de las cookies de autenticación."""
+    return datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        days=CREDENTIALS_COOKIE_MAX_AGE_DAYS
+    )
+
+
+def _cookie_secure() -> bool | None:
+    """True cuando la app se sirve por HTTPS, para marcar las cookies como Secure."""
+    try:
+        app_url = st.context.url or ""
+        return app_url.startswith("https://")
+    except Exception:
+        return None
+
+
+def _cookie_options() -> dict:
+    """Opciones comunes para escribir las cookies de autenticación."""
+    return {
+        "path": "/",
+        "expires_at": _cookie_expiration(),
+        "secure": _cookie_secure(),
+        "same_site": "strict",
+    }
+
+
+def _reader_registered_this_run() -> bool:
+    """True si el componente de lectura de cookies ya se instanció en esta corrida."""
+    ctx = get_script_run_ctx()
+    if ctx is None:
+        return False
+    return _COOKIE_KEY_READ in ctx.shared.widget_user_keys_this_run
+
+
+def load_saved_credentials() -> dict | None:
+    """Loads the Google OAuth credentials persisted in browser cookies, if available.
+
+    The CookieManager component can only be instantiated once per script run
+    (Streamlit rejects duplicate element keys), so the result is memoized for
+    the rest of the current run.
+    """
+    if _reader_registered_this_run():
+        return getattr(_read_state, "result", None)
+
+    credentials = None
+    try:
+        cookie_manager = stx.CookieManager(key=_COOKIE_KEY_READ)
+        raw_values = {
+            field: cookie_manager.get(_cookie_name(field))
+            for field in CREDENTIALS_COOKIE_FIELDS
+        }
+        if raw_values.get("token"):
+            credentials = {
+                "token": raw_values["token"],
+                "refresh_token": raw_values.get("refresh_token"),
+                "token_uri": raw_values.get("token_uri"),
+                "client_id": raw_values.get("client_id"),
+                "client_secret": raw_values.get("client_secret"),
+                "scopes": json.loads(raw_values.get("scopes") or "[]"),
+            }
+    except Exception:
+        credentials = None
+
+    if credentials is not None:
+        # Respaldo en el cache de sesión para futuras recuperaciones.
+        _cache_credentials(credentials)
+    else:
+        # Último recurso: cache de sesión.
+        credentials = load_cached_credentials()
+
+    _read_state.result = credentials
+    return credentials
+
+
+def save_credentials(credentials: Credentials) -> dict:
+    """Persists the OAuth credentials as browser cookies for Streamlit reruns.
+
+    Se guarda un campo por cookie para respetar el límite de ~4KB por cookie
+    (los tokens de acceso de Google pueden ser largos).
+    """
+    credentials_data = {
+        "token": credentials.token,
+        "refresh_token": credentials.refresh_token,
+        "token_uri": credentials.token_uri,
+        "client_id": credentials.client_id,
+        "client_secret": credentials.client_secret,
+        "scopes": credentials.scopes,
+    }
+    cookies = {
+        _cookie_name(field): (
+            json.dumps(value or []) if field == "scopes" else (value or "")
+        )
+        for field, value in credentials_data.items()
+    }
+    cookie_manager = stx.CookieManager(key=_COOKIE_KEY_WRITE)
+    cookie_manager.batch_set(cookies, **_cookie_options())
+    # Guardamos también en el cache de sesión como capa adicional de respaldo.
+    _cache_credentials(credentials_data)
+    return credentials_data
+
+
+def delete_saved_credentials() -> None:
+    """Removes the credentials cookies during logout."""
+    cookie_manager = stx.CookieManager(key=_COOKIE_KEY_DELETE)
+    for index, field in enumerate(CREDENTIALS_COOKIE_FIELDS):
+        try:
+            cookie_manager.delete(_cookie_name(field), key=f"delete_{index}")
+        except KeyError:
+            # La cookie no existe en el snapshot del componente: nada que borrar.
+            pass
+    # Eliminamos también las credenciales del cache de sesión.
+    clear_cached_credentials()
+
 
 def generate_jwt_token(cv: str) -> str:
     """Generates a JWT token with a short expiration time."""
@@ -184,3 +370,6 @@ def authenticate_user():
             st.info("Por favor, intenta iniciar sesión nuevamente.", icon="ℹ️")
             # Volvemos a generar la URL guardandola en auth_url
             st.session_state["auth_url"] = get_auth_url()
+    elif "credentials" in st.session_state and "user_obj" not in st.session_state:
+        st.session_state["user_obj"] = create_user_from_session()
+        st.rerun()

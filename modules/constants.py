@@ -176,18 +176,30 @@ EMAIL_SUBJECT_MAPPER ={
     "Oferta de Acuerdo": EMAIL_SUBJECT_OFERTA_ACUERDO,
 }
 
-EMAIL_BODY_GENERAL = """Cordial saludo,
-
-Espero que te encuentres bien.
-
-El motivo del presente mensaje es hacer la entrega formal del acuerdo de pago que fue solicitado {string_solicitado}. Adjunto a este correo podrás encontrar todos los detalles correspondientes.
-
-Quedo atento a cualquier comentario o paso adicional que se deba seguir.
-
-Muchas gracias por tu atención.
-
-Atentamente,
-{nombre_ejecutivo}
+EMAIL_BODY_GENERAL = """<html>
+<body style="font-family: Arial, sans-serif; font-size: 14px; color: #333333; line-height: 1.5;">
+    <p>Cordial saludo,</p>
+    
+    <p>Espero que te encuentres bien.</p>
+    
+    <p>El motivo del presente mensaje es hacer la entrega formal del acuerdo de pago que fue solicitado {string_solicitado}. Adjunto a este correo podrás encontrar todos los detalles correspondientes.</p>
+    
+    <!-- BLOQUE DE CITA LLAMATIVO (QUOTEBLOCK) -->
+    <div style="background-color: #f4f6f8; border-left: 5px solid #0056b3; padding: 15px; margin: 20px 0; border-radius: 4px;">
+        <p style="margin: 0; font-weight: bold; color: #0056b3;">⚠️ Recordatorio Importante:</p>
+        <p style="margin: 5px 0 0 0; font-style: italic; color: #555555;">
+            {comentario_llamativo}
+        </p>
+    </div>
+    
+    <p>Quedo atento a cualquier comentario o paso adicional que se deba seguir.</p>
+    
+    <p>Muchas gracias por tu atención.</p>
+    
+    <p>Atentamente,<br>
+    <strong>{nombre_ejecutivo}</strong></p>
+</body>
+</html>
 """
 
 DEFAULT_CCS = [
