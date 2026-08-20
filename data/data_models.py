@@ -234,6 +234,7 @@ class PlantillaSolicitudesSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de la plantilla de solicitudes.
     """
+    Casa_Cobro: str
     Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
     Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,12}$")  # Validación de cédula
     Nombre_Cliente: str
