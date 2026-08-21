@@ -32,18 +32,10 @@ tabSolicitudes, tabResumenSolicitudes = st.tabs(
 if tabSolicitudes.open:
     with tabSolicitudes:
         st.title("🗒️ Gestión de Solicitudes")
-if tabSolicitudes.open:
-    with tabSolicitudes:
-        st.title("🗒️ Gestión de Solicitudes")
 
         st.divider()
         st.space("small")
-        st.divider()
-        st.space("small")
 
-        if solicitudes_filtered.empty:
-            st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
-            st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
         if solicitudes_filtered.empty:
             st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
             st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
@@ -56,6 +48,8 @@ if tabSolicitudes.open:
         )
 
         st.divider()
+
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df=solicitudes_filtered)
 
         # Creamos 4 Botones: Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
         colDescargar, colSubir, colMarcar, colCopiar = st.columns([3, 3, 3, 1], gap = "large")
@@ -74,19 +68,11 @@ if tabSolicitudes.open:
             )
 
         with colSubir:
-            mask_sin_responder = obtener_mascara_sin_responder(solicitudes_filtered)
             subido_sheets = st.button("Subir Solicitudes a Sheets",
                 key="subir_solicitudes_button",
                 help="Haz clic para subir las solicitudes filtradas a Google Sheets",
                 type="primary",
                 disabled = (mask_sin_responder).sum() == 0,
-                )
-        with colSubir:
-            subido_sheets = st.button("Subir Solicitudes a Sheets",
-                key="subir_solicitudes_button",
-                help="Haz clic para subir las solicitudes filtradas a Google Sheets",
-                type="primary",
-                disabled = len(solicitudes_filtered) == 0,
                 )
 
         with colCopiar:
@@ -101,7 +87,7 @@ if tabSolicitudes.open:
                 key="marcar_solicitudes_button",
                 help="Haz clic para marcar las solicitudes filtradas como 'Solicitado'",
                 type="primary",
-                disabled = len(solicitudes_filtered) == 0,
+                disabled = (mask_sin_responder).sum() == 0,
             ):
                 dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
 
@@ -111,20 +97,8 @@ if tabSolicitudes.open:
                 st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
             else:
                 st.toast("Ocurrió un error al subir las solicitudes a Google Sheets. Por favor, inténtalo de nuevo.", icon="❌")
-        if subido_sheets:
-            success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_filtered)
-            if success:
-                st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
-            else:
-                st.toast("Ocurrió un error al subir las solicitudes a Google Sheets. Por favor, inténtalo de nuevo.", icon="❌")
 
 # Ahora Creamos el Dashboard
-if tabResumenSolicitudes.open:
-    with tabResumenSolicitudes:
-        try:
-            mostrar_resumen_solicitudes_ejecutivo(solicitudes=solicitudes_filtered)
-        except Exception as e:
-            st.error("Ocurrió un error al generar el resumen de solicitudes: {}".format(str(e)), icon="❌")
 if tabResumenSolicitudes.open:
     with tabResumenSolicitudes:
         try:
