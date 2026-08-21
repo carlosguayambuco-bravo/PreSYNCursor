@@ -36,7 +36,7 @@ DICCIONARIO_BANCOS = {
     'Bancolombia': ['Qnt Bancolombia','Bancolombia','Contento Bancolombia Sufi'],
     'Agaval': ['Agaval'],
     'Rappipay': ['Rappipay'],
-    'Banco Fallabella': ['Logros Factoring Falabella','Grupo Jurídico Falabella','Bancofalab Citisumma','Eyc Falabella',
+    'Banco Falabella': ['Logros Factoring Falabella','Grupo Jurídico Falabella','Bancofalab Citisumma','Eyc Falabella',
                         'Citisumma Falabella','Deudu Falabella','Cobrando Falabella','Falabella','Banco Falabella Casa De Cobro',
                         'Redinstantic Falabella','Bfalabella Contactosol'],
     'Banco AV Villas': ['Deudu Av Villas','Banco Av Villas','Av Villas','Qnt Av Villas','Grupo Juridico Av Villas','Grupo Consultor Andino Av Villas',

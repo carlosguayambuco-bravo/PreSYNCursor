@@ -4,7 +4,7 @@
 from altair import value
 import streamlit as st
 # Librerías Locales
-from core.auth import delete_saved_credentials
+from core.auth import are_cookies_saved, delete_saved_credentials
 from core.users import User
 from data.data_loader import load_solicitudes_mec
 from modules.classes import get_banned_manager
@@ -35,10 +35,11 @@ def show_user_info():
 
     # Ahora añadimos Botón de Cerrar Sesión en el Sidebar
     if st.sidebar.button("Cerrar Sesión", icon="🚪",width = "stretch"):
+        # Limpiamos el estado de sesión primero para que los borrados de
+        # cookies encolados no se pierdan con el clear del session_state.
+        st.session_state.clear()
         # Eliminamos las cookies de autenticación de Google
         delete_saved_credentials()
-        # Limpiamos el estado de sesión
-        st.session_state.clear()
         # Redirigimos al usuario a la página de login
         st.rerun()
 
@@ -90,3 +91,9 @@ def show_user_info():
 
         # Recargamos la Información
         st.rerun()
+
+    # Indicador del estado de guardado de las cookies de autenticación
+    if are_cookies_saved():
+        st.sidebar.markdown(":material/check_circle: :green[**Cookies guardadas correctamente**]")
+    else:
+        st.sidebar.markdown(":material/warning: :orange[**Cookies no guardadas**]")

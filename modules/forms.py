@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 from __future__ import annotations
+from typing import Optional
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -156,6 +157,23 @@ def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
             return nombre_completo # type: ignore
 
     return "No Encontrado"
+
+def obtener_correo_lider_negociador(*, email: str) -> Optional[str]:
+    # Paso 1: Obtener los Datos del Headcount
+    headcount_df = load_headcount_negociacion()
+    # Paso 2: Filtrar el DataFrame por el Email
+    negociador_row = headcount_df[headcount_df['Correo'] == email]
+    if negociador_row.empty:
+        return None
+
+    # Obtenemos el nombre del líder
+    lider_name = negociador_row.values[0]['Lider']
+    # Buscamos el Lider ahora
+    lider_row = headcount_df[headcount_df['Nombre'] == lider_name]
+    if lider_row.empty:
+        return None
+    # Si existe la Fila entonces devolvemos el Correo
+    return lider_row.values[0]['Correo']
 
 # Función para Obtener el Aliado en Base dado un Conjunto de Deudas y Aliados Posibles
 def obtener_aliado_en_base(*, deudas: list[str], aliados_posibles: list[str]) -> str:

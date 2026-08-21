@@ -8,7 +8,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_models import DeudasActivasSchema
 from modules.forms import obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
-from utils.helpers_general import cleanNumber, formatNumber
+from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat
 
 def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[str]:
     st.subheader("Deudas Activas del Cliente")
@@ -324,6 +324,7 @@ def mostrar_resumen_solicitud(*,
         nombre_aliado: str,
         fecha_esperada_pago: Optional[pd.Timestamp] = None,
         tipo_pago: Optional[str] = None,
+        comentario: Optional[str] = None,
     ) -> None:
     st.subheader("📄 Resumen de la Solicitud")
 
@@ -340,22 +341,24 @@ def mostrar_resumen_solicitud(*,
             "Referencia del Cliente",
             value=referencia
         )
-        # Ahora Vamos a Mostrar por Cada Deuda Seleccionada, el Monto Propuesto y el Número de Cuotas
-        colIdDeuda, colMontoPropuesto, colNumCuotas = colResumen.columns([2, 2, 2], gap="small")
-        with colIdDeuda:
-            st.markdown("**Id Deuda**")
-        with colMontoPropuesto:
-            st.markdown("**Monto Propuesto**")
-        with colNumCuotas:
-            st.markdown("**Número de Cuotas**")
 
-        for deuda in info_completa_deudas:
+        with st.container(border=True):
+            # Ahora Vamos a Mostrar por Cada Deuda Seleccionada, el Monto Propuesto y el Número de Cuotas
+            colIdDeuda, colMontoPropuesto, colNumCuotas = colResumen.columns([2, 2, 2], gap="small")
             with colIdDeuda:
-                st.text(deuda['Id_Deuda'])
+                st.markdown("**Id Deuda**")
             with colMontoPropuesto:
-                st.text('$'+formatNumber(deuda['Monto_Propuesto']))
+                st.markdown("**Monto Propuesto**")
             with colNumCuotas:
-                st.text(deuda['Num_Cuotas'])
+                st.markdown("**Número de Cuotas**")
+
+            for deuda in info_completa_deudas:
+                with colIdDeuda:
+                    st.text(deuda['Id_Deuda'])
+                with colMontoPropuesto:
+                    st.text('$'+formatNumber(deuda['Monto_Propuesto']))
+                with colNumCuotas:
+                    st.text(deuda['Num_Cuotas'])
 
 
     with colMonto:
@@ -374,14 +377,32 @@ def mostrar_resumen_solicitud(*,
             delta_color="green" if descuentoTotal < 0.7 else "yellow" if descuentoTotal < 0.90 else "red"
         )
 
+        st.info(comentario or "Sin Comentario", title="Comentario de la Solicitud", icon="🫡")
+
     # Ahora, si existe Fecha esperada de Pago y Tipo de Pago los Mostramos
     if fecha_esperada_pago and tipo_pago:
         st.markdown("#### ℹ️ **Detalles de Pago**")
-        st.metric(
-            label="Fecha Esperada de Pago",
-            value=fecha_esperada_pago.strftime("%Y-%m-%d")
-        )
-        st.metric(
-            label="Tipo de Pago",
-            value=tipo_pago
-        )
+
+        colFechaEspPago, colTipoPago = st.columns(2, gap="large")
+
+        with colFechaEspPago:
+            # Calculamos la Diferencia en Días Hábiles a hoy
+            diff_days = getBDDaysDiffFloat(
+                fecha_esperada_pago.tz_localize(None),
+                pd.Timestamp.now('America/Bogota').tz_localize(None)
+                )
+            st.metric(
+                label="Fecha Esperada de Pago",
+                value=fecha_esperada_pago.strftime("%Y-%m-%d"),
+                border=True,
+                delta = "En {:.2f} días hábiles".format(diff_days),
+                delta_color="green" if diff_days > 5 else "yellow" if diff_days>=2 else "red",
+            )
+        with colTipoPago:
+            st.metric(
+                label="Tipo de Pago",
+                value=tipo_pago,
+                border=True,
+                delta="Pagar si es exitosa",
+                delta_color="green",
+            )

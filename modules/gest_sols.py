@@ -17,7 +17,7 @@ from data.data_uploader import update_massive_solicitudes_in_google_sheets, upda
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
-from modules.forms import obtener_nombre_negociador
+from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized
 
@@ -414,10 +414,14 @@ def redistribuir_resultado_solicitud(*, solicitud: pd.Series, pdf_bytes: Optiona
 
 def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     # Paso 1: Definir todos los Destinatarios Principales
-    main_recipients = list(set([sol['Correo'] for sol in solicitudes]))
-    main_recipients = ', '.join(main_recipients)
-    # Paso 2: Definir todos los CCs
-    current_ccs = DEFAULT_CCS
+    main_recipients = set([sol['Correo'] for sol in solicitudes])
+    # Añadimos los Correos de Lideres
+    correos_lideres = [obtener_correo_lider_negociador(email=cr) for cr in main_recipients]
+    # Quitamos los Nulos
+    correos_lideres = set([cr for cr in correos_lideres if not(cr is None)])
+    main_recipients = ', '.join(list(main_recipients))
+    # Paso 2: Definir todos los CCs (Default + Lideres)
+    current_ccs = DEFAULT_CCS + list(correos_lideres)
     # Si el Tipo Pago == Crédito, se añade el CC de Crédito
     if any(sol['Tipo_Pago'] == 'Crédito' for sol in solicitudes):
         current_ccs += CCS_CREDITO
@@ -549,12 +553,13 @@ def obtener_link_acuerdo_pago(file_id: str) -> str:
     """
     return f"https://drive.google.com/open?id={file_id}"
 
-def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
+def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_portafolio: bool = False) -> pd.DataFrame:
     """
     Genera una plantilla masiva de solicitudes a partir de un DataFrame de solicitudes.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+        modo_portafolio: (bool, default False): Si se agrupan las Solicitudes por Portafolio o se dejan por Deuda
 
     Returns:
         pd.DataFrame: DataFrame con la plantilla masiva de solicitudes.
@@ -566,19 +571,31 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     # Paso 1: Iterar sobre cada solicitud y llenar la plantilla
     filas = []
     for _, solicitud in solicitudes_df.iterrows():
-        for deuda in solicitud['Datos_Solicitud']:
-            nueva_fila = {
-                'Casa_Cobro': solicitud['Casa_Cobro'],
-                'Tipo_Solicitud': solicitud['Tipo_Solicitud'],
-                'Cedula': solicitud['Cedula'],
-                'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
-                'Numero_Obligacion': deuda['Numero_Credito'],
-                'Banco': deuda['Banco'],
-                'Propuesta': cleanNumber(deuda.get('Monto_Propuesto', np.nan), default_nan=np.nan),
-                'Portafolio': '1' if len(solicitud['Datos_Solicitud']) > 1 else '',
-                'Plazos': deuda.get('Num_Cuotas', ''),
-            }
+        nueva_fila = {
+            'Casa_Cobro': solicitud['Casa_Cobro'],
+            'Tipo_Solicitud': solicitud['Tipo_Solicitud'],
+            'Cedula': solicitud['Cedula'],
+            'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
+            'Portafolio': '1' if len(solicitud['Datos_Solicitud']) > 1 else ''
+        }
+        if not modo_portafolio:
+            for deuda in solicitud['Datos_Solicitud']:
+                # Añadimos Contenidos Específicos por Deuda
+                deuda_dict = nueva_fila.copy()
+                deuda_dict['Banco'] = deuda['Banco']
+                deuda_dict['Numero_Obligacion'] = deuda['Numero_Credito']
+                deuda_dict['Propuesta'] = cleanNumber(deuda.get('Monto_Propuesto', np.nan), default_nan=np.nan)
+                deuda_dict['Plazos'] = deuda.get('Num_Cuotas', '')
+                filas.append(deuda_dict)
+                continue
+        else:
+            nueva_fila['Banco'] = ' | '.join([d['Banco'] for d in solicitud['Datos_Solicitud']])
+            nueva_fila['Numero_Obligacion'] = ' | '.join([str(d['Numero_Credito']) for d in solicitud['Datos_Solicitud']])
+            nueva_fila['Propuesta'] = sum([cleanNumber(d.get('Monto_Propuesto', 0)) for d in solicitud['Datos_Solicitud']])
+            nueva_fila['Plazos'] = max([d.get('Num_Cuotas',1) for d in solicitud['Datos_Solicitud']])
+
             filas.append(nueva_fila)
+            continue
 
     # Creamos el DataFrame
     plantilla_df = pd.DataFrame(filas)
@@ -601,18 +618,19 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
 
     return plantilla_df
 
-def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes:
+def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame, en_portafolio: bool) -> bytes:
     """
     Genera un archivo CSV para la descarga masiva de solicitudes.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes a descargar.
+        en_portafolio (bool): Si se genera el DF en portafolio o por Deuda
 
     Returns:
         bytes: Contenido del archivo CSV en formato binario.
     """
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
-    download_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
+    download_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio)
     if download_df.empty:
         return bytes()
 
@@ -621,12 +639,13 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes
 
     return csv_bytes
 
-def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
+def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame, en_portafolio: bool) -> bool:
     """
     Sube una plantilla masiva de solicitudes a Google Sheets.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes a subir.
+        en_portafolio (bool): Si se genera el DF en portafolio o por Deuda
 
     Returns:
         bool: True si la subida fue exitosa, False en caso contrario.
@@ -636,7 +655,7 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
 
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
     with st.spinner("Subiendo Información a Google Sheets..."):
-        plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
+        plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio)
 
         # Paso 2: Subir la Plantilla Masiva a Google Sheets
         success = upload_massive_solicitudes_filtered_plantilla(plantilla_df)

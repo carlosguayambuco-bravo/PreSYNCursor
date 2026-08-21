@@ -417,6 +417,7 @@ with st.expander("**Ver Resumen de la Solicitud**", expanded=True):
         nombre_aliado=aliado_seleccionado if not (aliado_cambiado and (not es_admin)) else "DIRECTO BASE",
         fecha_esperada_pago=fecha_esperada_pago,
         tipo_pago=tipo_pago,
+        comentario=comentario_adicional,
     )
 
 # --- Siguiente: Botón de Envío del Formulario ---

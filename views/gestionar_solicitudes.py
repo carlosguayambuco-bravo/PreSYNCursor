@@ -8,7 +8,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
-from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_mascara_sin_responder, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
+from modules.gest_sols import generar_descarga_masiva_solicitudes, generar_plantilla_masiva_solicitudes, get_massive_solicitudes_txt, obtener_mascara_sin_responder, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
 from ui.solicitudes_components import dialog_confirmar_actualizacion_solicitudes, mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo, mostrar_solicitudes_paginadas
 
 # Paso 1: Cargar las Solicitudes MEC
@@ -49,12 +49,22 @@ if tabSolicitudes.open:
 
         st.divider()
 
+        modo_plantilla = st.toggle(
+            label="Plantilla en Portafolio",
+            value=True,
+            help="Generar Plantilla agrupando los Datos de Deudas",
+            key="plantilla_en_portafolio_gestionar_solicitudes"
+        )
+
         mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df=solicitudes_filtered)
 
         # Creamos 4 Botones: Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
         colDescargar, colSubir, colMarcar, colCopiar = st.columns([3, 3, 3, 1], gap = "large")
         with colDescargar:
-            download_bytes = generar_descarga_masiva_solicitudes(solicitudes_df=solicitudes_filtered)
+            download_bytes = generar_descarga_masiva_solicitudes(
+                solicitudes_df=solicitudes_filtered,
+                en_portafolio=modo_plantilla
+            )
             st.download_button("Descargar Solicitudes",
                 download_bytes,
                 file_name="solicitudes.csv",
@@ -91,8 +101,18 @@ if tabSolicitudes.open:
             ):
                 dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
 
+        st.write(
+            generar_plantilla_masiva_solicitudes(
+                solicitudes_df=solicitudes_filtered,
+                modo_portafolio=modo_plantilla,
+            )
+        )
+
         if subido_sheets:
-            success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_filtered)
+            success = subir_masivo_plantilla_solicitudes(
+                solicitudes_df=solicitudes_filtered,
+                en_portafolio=modo_plantilla
+                )
             if success:
                 st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
             else:

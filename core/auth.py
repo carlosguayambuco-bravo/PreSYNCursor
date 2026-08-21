@@ -3,9 +3,11 @@
 import base64
 import datetime
 import json
+import re
 import secrets
 import threading
 import time
+import urllib.parse
 
 # Librerías de Terceros
 import jwt
@@ -17,9 +19,9 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 try:
-    import extra_streamlit_components as stx
-except ImportError:  # Sin el paquete, la persistencia queda solo en cookies.
-    stx = None
+    from streamlit_extras.cookie_manager import cookie_manager as stx_cookie_manager
+except ImportError:  # Sin el paquete, las cookies solo se leen de la petición HTTP.
+    stx_cookie_manager = None
 
 # Librerías Locales
 from core.users import User
@@ -36,8 +38,9 @@ SCOPES = [
 
 # --- Configuración de la persistencia de credenciales ---
 # Las credenciales de Google se persisten en dos capas:
-#   1. Cookies del navegador: sobreviven a recargas de página y reinicios de
-#      la app (el filesystem no es persistente en Streamlit Cloud).
+#   1. Cookies del navegador, gestionadas con el CookieManager de
+#      streamlit-extras: sobreviven a recargas de página y reinicios de
+#      la app (funciona también en Streamlit Cloud).
 #   2. Session state y almacén privado de la sesión: respaldo durante la
 #      ejecución actual.
 CREDENTIALS_COOKIE_PREFIX = st.secrets.get("COOKIES_PREFIX","google_oauth")
@@ -53,8 +56,9 @@ CREDENTIALS_COOKIE_FIELDS = (
 # Tiempo de vida de las cookies de autenticación (días).
 CREDENTIALS_COOKIE_MAX_AGE_DAYS = 30
 
-# Claves (keys) de los componentes de cookies. Deben ser únicas por ejecución
-# del script: Streamlit rechaza instancias duplicadas con la misma clave.
+# Claves (keys) de los componentes del CookieManager de streamlit-extras.
+# Deben ser únicas por ejecución del script: Streamlit rechaza instancias
+# duplicadas con la misma clave.
 _COOKIE_KEY_READ = "auth_cookies_read"
 _COOKIE_KEY_WRITE = "auth_cookies_write"
 _COOKIE_KEY_DELETE = "auth_cookies_delete"
@@ -106,17 +110,56 @@ def _normalize_expiry(expiry) -> str | None:
     """Normaliza una fecha de expiración al formato esperado por google-auth.
 
     google-auth solo entiende "YYYY-MM-DDTHH:MM:SS.ffffffZ" en
-    from_authorized_user_info; aquí se tolera cualquier formato ISO 8601.
+    from_authorized_user_info. Aquí se toleran además:
+      - El formato compacto guardado en cookies ("YYYY-MM-DDTHHMMSSZ"),
+        que no contiene caracteres que el frontend codifique en URI.
+      - Valores codificados en URI por el navegador (p. ej. ':' como '%3A').
     """
     if not expiry:
         return None
     if isinstance(expiry, datetime.datetime):
         return expiry.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    text = str(expiry).strip()
+    if "%" in text:  # Viene codificado en URI desde las cookies.
+        try:
+            text = urllib.parse.unquote(text)
+        except Exception:
+            return None
+
+    # Formato compacto sin ':' usado al guardar en cookies.
+    compact = re.match(
+        r"^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})(?:\.(\d+))?Z$", text
+    )
+    if compact:
+        fraction = compact.group(5) or "0"
+        text = (
+            f"{compact.group(1)}T{compact.group(2)}:{compact.group(3)}:"
+            f"{compact.group(4)}.{fraction}Z"
+        )
+
     try:
-        parsed = datetime.datetime.fromisoformat(str(expiry).replace("Z", "+00:00"))
+        parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
         return parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     except ValueError:
         return None
+
+
+def _cookie_expiry_string(expiry) -> str | None:
+    """Formatea la expiración en un formato seguro para guardar en cookies.
+
+    El frontend del CookieManager de streamlit-extras aplica
+    encodeURIComponent al valor: los ':' quedarían como '%3A' y google-auth
+    fallaría al leerlos. El formato compacto "YYYY-MM-DDTHHMMSS.ffffffZ" no
+    contiene caracteres codificables, por lo que el valor llega íntegro a
+    st.context.cookies. Al leer se normaliza de vuelta al formato de
+    google-auth con _normalize_expiry.
+    """
+    normalized = _normalize_expiry(expiry)
+    if not normalized:
+        return None
+    parsed = datetime.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    return parsed.strftime("%Y-%m-%dT%H%M%S.%fZ")
 
 
 def _normalized_credentials_data(credentials_data: dict) -> dict:
@@ -233,13 +276,32 @@ def _cookie_secure() -> bool | None:
 
 
 def _cookie_options() -> dict:
-    """Opciones comunes para escribir las cookies de autenticación."""
+    """Opciones comunes para escribir y borrar las cookies de autenticación."""
     return {
         "path": "/",
-        "expires_at": _cookie_expiration(),
         "secure": _cookie_secure(),
-        "same_site": "lax",
+        "samesite": "lax",
     }
+
+
+def _get_cookie_manager(key: str):
+    """Devuelve (creándola si hace falta) la instancia del CookieManager de
+    streamlit-extras para la clave dada, memoizada por ejecución del script.
+
+    El componente solo puede montarse una vez por ejecución con la misma
+    clave: la memoización evita montajes duplicados dentro de la corrida.
+    """
+    if stx_cookie_manager is None:
+        return None
+    managers = getattr(_run_state, "cookie_managers", None)
+    if managers is None:
+        managers = {}
+        _run_state.cookie_managers = managers
+    manager = managers.get(key)
+    if manager is None:
+        manager = stx_cookie_manager(key=key)
+        managers[key] = manager
+    return manager
 
 
 def _encode_scopes(scopes) -> str:
@@ -267,7 +329,8 @@ def _credentials_from_raw_values(raw_values: dict) -> dict | None:
     """Construye el diccionario de credenciales desde los valores crudos (cookies).
 
     Solo se aceptan cadenas de texto no vacías: cualquier valor corrupto o
-    inesperado invalida la lectura para evitar credenciales basura.
+    inesperado invalida la lectura para evitar credenciales basura. La
+    expiración se normaliza al formato de google-auth.
     """
     def _str(value):
         return value if isinstance(value, str) and value else None
@@ -282,8 +345,23 @@ def _credentials_from_raw_values(raw_values: dict) -> dict | None:
         "client_id": _str(raw_values.get("client_id")),
         "client_secret": _str(raw_values.get("client_secret")),
         "scopes": _decode_scopes(raw_values.get("scopes") or ""),
-        "expiry": _str(raw_values.get("expiry")),
+        "expiry": _normalize_expiry(_str(raw_values.get("expiry"))),
     }
+
+
+def _unquote_cookie_value(value):
+    """Deshace la codificación URI aplicada por el frontend a los valores.
+
+    El CookieManager de streamlit-extras escribe las cookies con
+    encodeURIComponent (los ':' llegan a st.context.cookies como '%3A'), así
+    que hay que decodificar los valores leídos de la petición HTTP.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        return urllib.parse.unquote(value)
+    except Exception:
+        return value
 
 
 def _read_request_cookies() -> dict | None:
@@ -293,11 +371,14 @@ def _read_request_cookies() -> dict | None:
     petición, por lo que están disponibles desde la primera ejecución del
     script, sin el desfase asíncrono del componente de cookies. Esto también
     funciona en Streamlit Cloud.
+
+    Los valores se decodifican de su codificación URI: el frontend los
+    escribe con encodeURIComponent.
     """
     try:
         request_cookies = st.context.cookies
         raw_values = {
-            field: request_cookies.get(_cookie_name(field))
+            field: _unquote_cookie_value(request_cookies.get(_cookie_name(field)))
             for field in CREDENTIALS_COOKIE_FIELDS
         }
         return _credentials_from_raw_values(raw_values)
@@ -309,23 +390,24 @@ def load_saved_credentials() -> dict | None:
     """Recupera las credenciales persistidas en cookies del navegador, si existen.
 
     Primero intenta la lectura síncrona de las cookies de la petición inicial
-    (st.context.cookies) y, como respaldo, el componente CookieManager de
-    extra-streamlit-components. El componente solo puede instanciarse una vez
-    por ejecución, por lo que el resultado se memoiza para el resto de la corrida.
+    (st.context.cookies) y, como respaldo, el CookieManager de
+    streamlit-extras. El componente solo puede instanciarse una vez por
+    ejecución, por lo que el resultado se memoiza para el resto de la corrida.
     """
     if getattr(_run_state, "cookies_read_done", False):
         return getattr(_run_state, "cookies_result", None)
 
     credentials = _read_request_cookies()
 
-    if credentials is None and stx is not None:
+    if credentials is None and stx_cookie_manager is not None:
         try:
-            cookie_manager = stx.CookieManager(key=_COOKIE_KEY_READ)
-            raw_values = {
-                field: cookie_manager.get(_cookie_name(field))
-                for field in CREDENTIALS_COOKIE_FIELDS
-            }
-            credentials = _credentials_from_raw_values(raw_values)
+            cookie_manager = _get_cookie_manager(_COOKIE_KEY_READ)
+            if cookie_manager is not None and cookie_manager.ready():
+                raw_values = {
+                    field: cookie_manager.get(_cookie_name(field))
+                    for field in CREDENTIALS_COOKIE_FIELDS
+                }
+                credentials = _credentials_from_raw_values(raw_values)
         except Exception:
             credentials = None
 
@@ -337,47 +419,128 @@ def load_saved_credentials() -> dict | None:
 def save_credentials(credentials_data: dict, email: str | None = None) -> None:
     """Persiste las credenciales de Google en dos capas:
 
-    1. Cookies del navegador (sobreviven recargas de página y reinicios).
+    1. Cookies del navegador con el CookieManager de streamlit-extras
+       (sobreviven recargas de página y reinicios).
     2. Almacén privado de la sesión (respaldo durante la ejecución actual).
 
     Se guarda un campo por cookie para respetar el límite de ~4KB por cookie
-    (los tokens de acceso de Google pueden ser largos).
+    (los tokens de acceso de Google pueden ser largos). La expiración se
+    guarda en un formato compacto sin ':' para que la codificación URI del
+    frontend no la corrompa. Las escrituras quedan encoladas y se aplican en
+    el navegador cuando el componente se monta en una ejecución posterior
+    (ver _flush_pending_cookie_operations).
     """
     credentials_data = _normalized_credentials_data(credentials_data)
 
-    if stx is not None:
+    if stx_cookie_manager is not None:
         try:
-            cookies = {
-                _cookie_name(field): (
-                    _encode_scopes(value) if field == "scopes" else (value or "")
+            cookie_manager = _get_cookie_manager(_COOKIE_KEY_WRITE)
+            for field, value in credentials_data.items():
+                if field == "expiry":
+                    raw_value = _cookie_expiry_string(value) or ""
+                elif field == "scopes":
+                    raw_value = _encode_scopes(value)
+                else:
+                    raw_value = value or ""
+                cookie_manager.set(
+                    _cookie_name(field),
+                    raw_value,
+                    **_cookie_options(),
+                    expires=_cookie_expiration(),
                 )
-                for field, value in credentials_data.items()
-            }
-            cookie_manager = stx.CookieManager(key=_COOKIE_KEY_WRITE)
-            cookie_manager.batch_set(cookies, **_cookie_options())
         except Exception:
-            pass
+            pass  # Las cookies son un respaldo: nunca deben romper el flujo.
 
     # Capa adicional de respaldo dentro de la propia sesión.
     _cache_credentials(credentials_data)
 
 
 def delete_saved_credentials() -> None:
-    """Borra las credenciales persistidas durante el cierre de sesión."""
+    """Borra las cookies de autenticación guardadas en el navegador.
+
+    Los borrados quedan encolados y se aplican en el navegador cuando el
+    componente se monta en una ejecución posterior (ver
+    _flush_pending_cookie_operations).
+    """
     store = _session_store()
 
-    if stx is not None:
+    if stx_cookie_manager is not None:
         try:
-            cookie_manager = stx.CookieManager(key=_COOKIE_KEY_DELETE)
-            for index, field in enumerate(CREDENTIALS_COOKIE_FIELDS):
+            cookie_manager = _get_cookie_manager(_COOKIE_KEY_DELETE)
+            for field in CREDENTIALS_COOKIE_FIELDS:
                 try:
-                    cookie_manager.delete(_cookie_name(field), key=f"delete_{index}")
+                    cookie_manager.delete(_cookie_name(field), **_cookie_options())
                 except Exception:
-                    pass  # La cookie no existe en el snapshot: nada que borrar.
+                    pass  # La cookie no existe: nada que borrar.
         except Exception:
             pass
 
     store.clear()
+
+
+def _cookie_manager_store_key(key: str) -> str:
+    """Clave del session_state donde el CookieManager guarda su cola de
+    operaciones pendientes (f"{key}__cookie_manager_state")."""
+    return f"{key}__cookie_manager_state"
+
+
+def _flush_pending_cookie_operations() -> None:
+    """Aplica en el navegador las operaciones de cookies pendientes.
+
+    El CookieManager de streamlit-extras encola las escrituras y borrados en
+    el session_state y los aplica cuando el componente se vuelve a montar en
+    una ejecución posterior. Se monta en cada ejecución (siguiendo el patrón
+    recomendado por la librería) para garantizar que ninguna operación quede
+    sin aplicar en el navegador.
+    """
+    if stx_cookie_manager is None:
+        return
+
+    # El manager de escritura se monta siempre: sus operaciones pendientes se
+    # envían al navegador en el siguiente montaje del componente.
+    try:
+        _get_cookie_manager(_COOKIE_KEY_WRITE)
+    except Exception:
+        pass
+
+    # El manager de borrado solo se monta cuando tiene operaciones pendientes:
+    # así delete_saved_credentials() puede instanciarlo después de un
+    # st.session_state.clear() (cierre de sesión) sin chocar con la clave del
+    # componente ya montada en la misma ejecución.
+    try:
+        store = st.session_state.get(_cookie_manager_store_key(_COOKIE_KEY_DELETE))
+        if store and store.get("pending_operations"):
+            _get_cookie_manager(_COOKIE_KEY_DELETE)
+    except Exception:
+        pass
+
+
+def are_cookies_saved() -> bool:
+    """Indica si las credenciales están guardadas correctamente en las cookies.
+
+    Primero revisa las cookies de la petición HTTP (st.context.cookies) y,
+    como respaldo, el snapshot del CookieManager de streamlit-extras si ya
+    está sincronizado con el navegador. Se usa en la UI para mostrar el
+    estado de guardado de las cookies de autenticación.
+    """
+    if _read_request_cookies() is not None:
+        return True
+
+    if stx_cookie_manager is None:
+        return False
+
+    try:
+        cookie_manager = _get_cookie_manager(_COOKIE_KEY_READ)
+        if cookie_manager is None or not cookie_manager.ready():
+            return False
+        raw_values = {
+            field: cookie_manager.get(_cookie_name(field))
+            for field in CREDENTIALS_COOKIE_FIELDS
+        }
+    except Exception:
+        return False
+
+    return _credentials_from_raw_values(raw_values) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +727,10 @@ def authenticate_user():
     la página o la sesión de Streamlit expiró, y detecta el cierre de sesión
     para borrar lo guardado.
     """
+    # Aplicamos en el navegador las escrituras/borrados de cookies que hayan
+    # quedado encolados en ejecuciones anteriores.
+    _flush_pending_cookie_operations()
+
     # Read query params
     params = st.query_params
 
