@@ -2,19 +2,14 @@
 # Librerías de Python
 import base64
 import datetime
-import hashlib
 import json
-import os
 import secrets
-import tempfile
 import threading
 import time
-from pathlib import Path
 
 # Librerías de Terceros
 import jwt
 import streamlit as st
-from cryptography.fernet import Fernet
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -23,7 +18,7 @@ from googleapiclient.discovery import build
 
 try:
     import extra_streamlit_components as stx
-except ImportError:  # Sin el paquete, la persistencia queda solo en archivo local.
+except ImportError:  # Sin el paquete, la persistencia queda solo en cookies.
     stx = None
 
 # Librerías Locales
@@ -40,12 +35,12 @@ SCOPES = [
 ]
 
 # --- Configuración de la persistencia de credenciales ---
-# Las credenciales de Google se persisten en dos capas redundantes:
+# Las credenciales de Google se persisten en dos capas:
 #   1. Cookies del navegador: sobreviven a recargas de página y reinicios de
 #      la app (el filesystem no es persistente en Streamlit Cloud).
-#   2. Archivo local cifrado con Fernet: sobrevive incluso si el navegador
-#      bloquea o no envía las cookies.
-CREDENTIALS_COOKIE_PREFIX = "google_oauth"
+#   2. Session state y almacén privado de la sesión: respaldo durante la
+#      ejecución actual.
+CREDENTIALS_COOKIE_PREFIX = st.secrets.get("COOKIES_PREFIX","google_oauth")
 CREDENTIALS_COOKIE_FIELDS = (
     "token",
     "refresh_token",
@@ -57,10 +52,6 @@ CREDENTIALS_COOKIE_FIELDS = (
 )
 # Tiempo de vida de las cookies de autenticación (días).
 CREDENTIALS_COOKIE_MAX_AGE_DAYS = 30
-
-# Ubicación del archivo local encriptado con las credenciales.
-CREDENTIALS_FILE_DIRNAME = ".presyncursor"
-CREDENTIALS_FILE_NAME = "google_credentials.enc"
 
 # Claves (keys) de los componentes de cookies. Deben ser únicas por ejecución
 # del script: Streamlit rechaza instancias duplicadas con la misma clave.
@@ -97,7 +88,7 @@ def load_cached_credentials() -> dict | None:
     """Devuelve las credenciales del almacén privado de la sesión, si existen.
 
     Es el último recurso para restaurar las credenciales cuando no están ni en
-    el session_state, ni en las cookies, ni en el archivo local.
+    el session_state, ni en las cookies.
     """
     cached = _session_store().get("credentials")
     return dict(cached) if cached else None
@@ -215,108 +206,6 @@ def _refresh_session_in_place() -> None:
     credentials_data = _credentials_to_dict(credentials)
     st.session_state["credentials"] = credentials_data
     save_credentials(credentials_data, email=st.session_state.get("user_email"))
-
-
-# ---------------------------------------------------------------------------
-# Guardado local encriptado (Fernet + archivo en disco)
-# ---------------------------------------------------------------------------
-def _fernet() -> Fernet:
-    """Instancia de Fernet con una clave derivada de los secretos de la app.
-
-    La clave se deriva de secretos ya existentes (jwt_auth y client_secret),
-    de modo que el descifrado funciona entre reinicios de la aplicación sin
-    necesidad de configurar nada nuevo.
-    """
-    if getattr(_run_state, "fernet", None) is None:
-        jwt_secret = st.secrets.get("google_oauth", {}).get("jwt_auth", "")
-        client_secret = st.secrets.get("google_oauth", {}).get("client_secret", "")
-        material = f"{jwt_secret}:{client_secret}".encode("utf-8")
-        key = base64.urlsafe_b64encode(hashlib.sha256(material).digest())
-        _run_state.fernet = Fernet(key)
-    return _run_state.fernet
-
-
-def _credentials_file_path() -> Path:
-    """Ruta del archivo local encriptado (directorio del usuario o temp como respaldo)."""
-    if getattr(_run_state, "credentials_file_path", None) is None:
-        base_dir = Path.home() / CREDENTIALS_FILE_DIRNAME
-        try:
-            base_dir.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            base_dir = Path(tempfile.gettempdir()) / CREDENTIALS_FILE_DIRNAME
-            base_dir.mkdir(parents=True, exist_ok=True)
-        _run_state.credentials_file_path = base_dir / CREDENTIALS_FILE_NAME
-    return _run_state.credentials_file_path
-
-
-def _read_local_store() -> dict:
-    """Lee y descifra el archivo local. Devuelve un almacén vacío si falla."""
-    try:
-        path = _credentials_file_path()
-        if not path.exists():
-            return {"users": {}, "last": None}
-        payload = path.read_bytes()
-        if not payload:
-            return {"users": {}, "last": None}
-        store = json.loads(_fernet().decrypt(payload).decode("utf-8"))
-        if not isinstance(store, dict) or not isinstance(store.get("users"), dict):
-            return {"users": {}, "last": None}
-        return store
-    except Exception:
-        return {"users": {}, "last": None}
-
-
-def _write_local_store(store: dict) -> None:
-    """Cifra y escribe el almacén de forma atómica (escritura temporal + reemplazo)."""
-    path = _credentials_file_path()
-    payload = _fernet().encrypt(json.dumps(store).encode("utf-8"))
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(temp_path, "wb") as handle:
-        handle.write(payload)
-    os.replace(temp_path, path)
-    try:
-        os.chmod(path, 0o600)  # Solo el dueño del proceso puede leerlo.
-    except OSError:
-        pass
-
-
-def _save_local_credentials(email: str, credentials_data: dict) -> None:
-    """Guarda (cifradas) las credenciales del usuario en el archivo local."""
-    try:
-        store = _read_local_store()
-        store.setdefault("users", {})[email] = credentials_data
-        store["last"] = email
-        _write_local_store(store)
-    except Exception:
-        pass  # La persistencia local es un respaldo: nunca debe romper el flujo.
-
-
-def _load_local_credentials() -> tuple[str, dict] | None:
-    """Devuelve (email, credenciales) del último usuario guardado en el archivo."""
-    try:
-        store = _read_local_store()
-        email = store.get("last")
-        credentials_data = (store.get("users") or {}).get(email)
-        if not email or not credentials_data or not credentials_data.get("token"):
-            return None
-        return email, dict(credentials_data)
-    except Exception:
-        return None
-
-
-def _delete_local_credentials(email: str | None = None) -> None:
-    """Borra las credenciales del archivo local (solo las del email dado, o todas)."""
-    try:
-        store = _read_local_store()
-        if email and email in store.get("users", {}):
-            del store["users"][email]
-            if store.get("last") == email:
-                store["last"] = next(iter(store["users"]), None)
-            _write_local_store(store)
-        else:
-            _write_local_store({"users": {}, "last": None})
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -446,10 +335,10 @@ def load_saved_credentials() -> dict | None:
 
 
 def save_credentials(credentials_data: dict, email: str | None = None) -> None:
-    """Persiste las credenciales de Google en dos capas redundantes:
+    """Persiste las credenciales de Google en dos capas:
 
     1. Cookies del navegador (sobreviven recargas de página y reinicios).
-    2. Archivo local cifrado con Fernet (respaldo si el navegador no coopera).
+    2. Almacén privado de la sesión (respaldo durante la ejecución actual).
 
     Se guarda un campo por cookie para respetar el límite de ~4KB por cookie
     (los tokens de acceso de Google pueden ser largos).
@@ -467,10 +356,7 @@ def save_credentials(credentials_data: dict, email: str | None = None) -> None:
             cookie_manager = stx.CookieManager(key=_COOKIE_KEY_WRITE)
             cookie_manager.batch_set(cookies, **_cookie_options())
         except Exception:
-            pass  # Las cookies son un respaldo: el archivo local queda como garantía.
-
-    if email:
-        _save_local_credentials(email, credentials_data)
+            pass
 
     # Capa adicional de respaldo dentro de la propia sesión.
     _cache_credentials(credentials_data)
@@ -479,7 +365,6 @@ def save_credentials(credentials_data: dict, email: str | None = None) -> None:
 def delete_saved_credentials() -> None:
     """Borra las credenciales persistidas durante el cierre de sesión."""
     store = _session_store()
-    email = store.get("email")
 
     if stx is not None:
         try:
@@ -492,7 +377,6 @@ def delete_saved_credentials() -> None:
         except Exception:
             pass
 
-    _delete_local_credentials(email)
     store.clear()
 
 
@@ -648,8 +532,8 @@ def _handle_oauth_callback(params) -> None:
         store["authenticated"] = True
         store["email"] = email
 
-        # Persistimos las credenciales (cookies + archivo local encriptado)
-        # para que la sesión sobreviva a recargas de página y reinicios.
+        # Persistimos las credenciales (cookies + almacén de sesión) para que
+        # la sesión sobreviva a recargas de página y reinicios.
         save_credentials(credentials_data, email=email)
 
         st.rerun()
@@ -663,15 +547,11 @@ def _handle_oauth_callback(params) -> None:
 
 def _restore_credentials() -> dict | None:
     """Busca credenciales persistidas en este orden:
-    cookies del navegador -> archivo local encriptado -> almacén de sesión.
+    cookies del navegador -> almacén de sesión.
     """
     credentials = load_saved_credentials()
     if credentials:
         return credentials
-
-    restored = _load_local_credentials()
-    if restored is not None:
-        return restored[1]
 
     return load_cached_credentials()
 
@@ -680,9 +560,9 @@ def authenticate_user():
     """Handles query params after Google redirects back to Streamlit.
 
     Además de completar el callback de OAuth, restaura la sesión desde las
-    credenciales persistidas (cookies o archivo local encriptado) cuando se
-    recarga la página o la sesión de Streamlit expiró, y detecta el cierre de
-    sesión para borrar lo guardado.
+    credenciales persistidas (cookies o almacén de sesión) cuando se recarga
+    la página o la sesión de Streamlit expiró, y detecta el cierre de sesión
+    para borrar lo guardado.
     """
     # Read query params
     params = st.query_params
