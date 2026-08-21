@@ -204,6 +204,50 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
         return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
     return ""
 
+def _ejecutar_logica_deudas(*, referencia: str, estado_key: str) -> DataFrame[DeudasActivasSchema]:
+    """Función auxiliar interna que maneja el flujo del botón y el reintento."""
+    try:
+        # Intentamos obtener los datos
+        df = obtener_deudas_activas(referencia=referencia)
+        # Si funciona, limpiamos el contador de esta llamada específica
+        st.session_state[estado_key] = 0 
+        return df
+    except LookupError:
+        # Si falla, sumamos un intento al contador específico de esta llamada
+        st.session_state[estado_key] += 1
+        
+        st.error('Error en Carga de Deudas Activas', icon="🔴")
+        
+        # Validamos si ya superó el límite
+        if st.session_state[estado_key] >= 5:
+            st.error('🔴 Demasiados Intentos - Por favor comunicarse con Administrador')
+            st.stop()
+
+        # Mostramos el botón. Al hacer clic, Streamlit recargará el script,
+        # volverá a entrar a la función, pero ahora el contador tendrá +1.
+        st.button(
+            label=f"Reintentar Búsqueda de Deudas Activas (Intento {st.session_state[estado_key]}/5)",
+            key=f"btn_{estado_key}",  # Key único para que el botón no choque con otros
+            type="primary",
+            icon="🔴"
+        )
+        st.stop()
+
+def obtener_deudas_activas_con_retry(*, referencia: str, id_llamada: str = "") -> DataFrame[DeudasActivasSchema]:
+    """
+    Función principal autónoma. 
+    id_llamada: Úsalo sólo si llamas a la función dos veces seguidas con la misma referencia 
+                en la misma pantalla, para evitar que compartan el mismo estado.
+    """
+    # Creamos un identificador único en el session_state para esta llamada en particular
+    estado_key = f"intentos_deudas_{referencia}_{id_llamada}"
+    
+    # Inicializamos el contador para esta llamada si no existe
+    if estado_key not in st.session_state:
+        st.session_state[estado_key] = 0
+
+    return _ejecutar_logica_deudas(referencia=referencia, estado_key=estado_key)
+
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
 def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:

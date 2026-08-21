@@ -545,7 +545,7 @@ def get_auth_url():
     return auth_url
 
 def get_user_info_from_credentials():
-    """Fetches user info (email, name) from Google using the credentials stored in session state."""
+    """Fetches user info (email, name) from Google using active credentials."""
 
     service = build("oauth2", "v2", credentials=st.session_state["creds_google"])
     user_info = service.userinfo().get().execute()

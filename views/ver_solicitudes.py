@@ -61,11 +61,11 @@ if tabResumen.open:
         st.title("😎 Resumen de Solicitudes")
         st.space("small")
 
-    # Paso 1: Definir quién se va a mostrar
-    if st.session_state.get('ver_todos_a_mi_cargo', False):
-        correos_revisar = obtener_correos_a_cargo_usuario_actual()
-    else:
-        correos_revisar = solicitudes_filtered['Correo'].unique().tolist()
+        # Paso 1: Definir quién se va a mostrar
+        if st.session_state.get('ver_todos_a_mi_cargo', False):
+            correos_revisar = obtener_correos_a_cargo_usuario_actual()
+        else:
+            correos_revisar = solicitudes_filtered['Correo'].unique().tolist()
 
         # Mostramos un Resumen general de las solicitudes 
         st.header("📊 Resumen General de Solicitudes")
@@ -89,28 +89,28 @@ if tabResumen.open:
                         show_header=False,
                     )
 
-    st.divider()
-    # Siguiente: Mostramos el toggle para ver todos a mi cargo y para expandir o no todos los expanders
-    colToggle, colExpand, colLimpiarBtt = st.columns([2, 2, 2], gap="large")
-    with colToggle:
-        ver_todos_a_mi_cargo = st.toggle(
-            "Ver Todos a mi Cargo",
-            value=st.session_state.get('ver_todos_a_mi_cargo', False),
-            key="ver_todos_a_mi_cargo_toggle",
-            help="Si marcas esta opción, se mostrarán todos los negociadores a tu cargo.",
-        )
-        st.session_state['ver_todos_a_mi_cargo'] = ver_todos_a_mi_cargo
-    with colExpand:
-        expandir_todos = st.toggle(
-            "Expandir Todos",
-            value=st.session_state.get('expandir_todos', False),
-            key="expandir_todos_toggle",
-            help="Si marcas esta opción, se expandirán todos los resúmenes de negociadores.",
-        )
-        if expandir_todos:
-            for correo in correos_revisar:
-                key_expander = f"expander_{correo}"
-                st.session_state[key_expander] = True
+        st.divider()
+        # Siguiente: Mostramos el toggle para ver todos a mi cargo y para expandir o no todos los expanders
+        colToggle, colExpand, colLimpiarBtt = st.columns([2, 2, 2], gap="large")
+        with colToggle:
+            ver_todos_a_mi_cargo = st.toggle(
+                "Ver Todos a mi Cargo",
+                value=st.session_state.get('ver_todos_a_mi_cargo', False),
+                key="ver_todos_a_mi_cargo_toggle",
+                help="Si marcas esta opción, se mostrarán todos los negociadores a tu cargo.",
+            )
+            st.session_state['ver_todos_a_mi_cargo'] = ver_todos_a_mi_cargo
+        with colExpand:
+            expandir_todos = st.toggle(
+                "Expandir Todos",
+                value=st.session_state.get('expandir_todos', False),
+                key="expandir_todos_toggle",
+                help="Si marcas esta opción, se expandirán todos los resúmenes de negociadores.",
+            )
+            if expandir_todos:
+                for correo in correos_revisar:
+                    key_expander = f"expander_{correo}"
+                    st.session_state[key_expander] = True
 
-    with colLimpiarBtt:
-        mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_resumen")
+        with colLimpiarBtt:
+            mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_resumen")

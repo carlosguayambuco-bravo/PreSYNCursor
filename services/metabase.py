@@ -71,11 +71,15 @@ class MetabaseService:
         }
 
         try:
+
             # Se pasa la consulta serializada dentro del campo 'query' en data=
             response = requests.post(
             endpointURL, data={'query': json.dumps(payload, ensure_ascii=False)}, headers=headers
             )
             response.raise_for_status()
+
+            # Vamos a Simular un error 504
+
 
             # /api/dataset/json devuelve directamente una lista de registros [{"col1": val, ...}, ...]
             data = response.json()
@@ -87,26 +91,25 @@ class MetabaseService:
 
             return queryDF
 
-        # Primer Error: Rechazo de Metabase
-        except requests.exceptions.HTTPError as err:
-            print('🚯Error por Rechazo de Metabase (Código {}): {}'.format(response.status_code,err))
-            return pd.DataFrame()
-        # Segundo Error: Timeout, Se aplican reintentos hasta MAX_QUERY_ATTEMPTS
-        except requests.exceptions.Timeout:
-            if self.query_attempts >= MAX_QUERY_ATTEMPTS:
-                print('🚯Error por Timeout: Metabase esta lento, se alcanzó el máximo de intentos ({}).'.format(
-                    MAX_QUERY_ATTEMPTS
+        # Primer Error: Timeout, Se aplican reintentos hasta MAX_QUERY_ATTEMPTS
+        except (requests.exceptions.Timeout, requests.exceptions.HTTPError) as err:
+            if response.status_code == 504 or isinstance(err,requests.exceptions.Timeout):
+                if self.query_attempts >= MAX_QUERY_ATTEMPTS:
+                    print('🚯Error por Timeout: Metabase esta lento, se alcanzó el máximo de intentos ({}).'.format(
+                        MAX_QUERY_ATTEMPTS
+                    ))
+                    raise LookupError("🔴Hubó un error al obtener las Deudas Activas (berex caído)")
+        
+                print('🚯Error por Timeout: Metabase esta lento, Aplicando Intento {}'.format(
+                    self.query_attempts + 1 
                 ))
+                self.query_attempts += 1
+    
+                return self.execute_query(query)  # Reintento de la Consulta
+            else:
+                print('🚯Error por Rechazo de Metabase (Código {}): {}'.format(response.status_code,err))
                 return pd.DataFrame()
-
-            print('🚯Error por Timeout: Metabase esta lento, Aplicando Intento {}'.format(
-                self.query_attempts + 1 
-            ))
-            self.query_attempts += 1
-
-            return self.execute_query(query)  # Reintento de la Consulta
-            
-        # Tercer Error: Algun Error Adicional
+        # Segundo Error: Algun Error Adicional
         except Exception as e:
             print('🚯Error Inesperado: {}'.format(e))
             return pd.DataFrame()

@@ -95,7 +95,8 @@ def load_current_month_solicitudes() -> pd.DataFrame:
         local_changes_df = local_changes_df.drop_duplicates(subset='ID_Solicitud', keep='last')
         # Limpiamos Fechas
         for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
-            local_changes_df[col] = pd.to_datetime(local_changes_df[col], errors='coerce', dayfirst=False)
+            if col in local_changes_df.columns:
+                local_changes_df[col] = pd.to_datetime(local_changes_df[col], errors='coerce', dayfirst=False)
 
         # Paso 2: Preparamos Operaciones por Índices dejando ID_Solicitud
         local_changes_df = local_changes_df.set_index('ID_Solicitud', drop=False)

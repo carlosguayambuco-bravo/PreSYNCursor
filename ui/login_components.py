@@ -1,11 +1,14 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
+from altair import value
 import streamlit as st
 # Librerías Locales
+from core.auth import delete_saved_credentials
 from core.users import User
 from data.data_loader import load_solicitudes_mec
 from modules.classes import get_banned_manager
+from modules.forms import obtener_deudas_activas
 
 def show_user_info():
     # Primero Cargamos la Información del Usuario desde el estado de sesión
@@ -32,6 +35,8 @@ def show_user_info():
 
     # Ahora añadimos Botón de Cerrar Sesión en el Sidebar
     if st.sidebar.button("Cerrar Sesión", icon="🚪",width = "stretch"):
+        # Eliminamos las cookies de autenticación de Google
+        delete_saved_credentials()
         # Limpiamos el estado de sesión
         st.session_state.clear()
         # Redirigimos al usuario a la página de login
@@ -56,6 +61,14 @@ def show_user_info():
                     help="Activa este toggle para simular un negociador y ver la aplicación como lo haría un usuario normal.",
                     value=False
                 )
+
+        if st.sidebar.button(
+            label="Reiniciar Cache de Consultas",
+            key="reset_query_activas",
+            help="Botón para Reiniciar la Query de Deudas Activas",
+            type="primary",
+        ):
+            obtener_deudas_activas.clear()
 
         st.sidebar.markdown("**Cambios Locales:** {}".format(
             len(st.session_state.get('local_changes', []))

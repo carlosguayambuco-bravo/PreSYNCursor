@@ -568,6 +568,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
     for _, solicitud in solicitudes_df.iterrows():
         for deuda in solicitud['Datos_Solicitud']:
             nueva_fila = {
+                'Casa_Cobro': solicitud['Casa_Cobro'],
                 'Tipo_Solicitud': solicitud['Tipo_Solicitud'],
                 'Cedula': solicitud['Cedula'],
                 'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
@@ -612,6 +613,8 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame) -> bytes
     """
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
     download_df = generar_plantilla_masiva_solicitudes(solicitudes_df)
+    if download_df.empty:
+        return bytes()
 
     # Paso 2: Convertir el DataFrame a CSV en formato binario
     csv_bytes = download_df.to_csv(index=False,sep=';').encode('utf-8')
@@ -643,8 +646,7 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame) -> bool:
             detail=f"{st.session_state['user_email']} subió {len(plantilla_df)} solicitudes filtradas a Google Sheets. ({'Éxito' if success else 'Fallo'})"
         )
 
-    # Paso 3: Subir la Plantilla Masiva a Google Sheets
-    return upload_massive_solicitudes_filtered_plantilla(plantilla_df)
+    return success
 
 # Función para Reiniciar los Filtros de Solicitudes en el Session State
 def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "reset") -> None:

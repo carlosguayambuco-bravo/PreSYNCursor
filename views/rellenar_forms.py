@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 # Librerías Propias
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas  # pyright: ignore[reportAttributeAccessIssue]
+from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas  # pyright: ignore[reportAttributeAccessIssue]
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 from utils.helpers_general import cleanNumber
 
@@ -63,7 +63,7 @@ id_deuda = str(id_deuda).strip().replace('.0','') if id_deuda else ''
 
 # Paso Siguiente: Obtener las Deudas Activas y la Última Actualización
 # --- Deudas Activas ---
-deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
+deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente)
 
 # Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
 if deudas_activas_df.empty:
@@ -89,7 +89,7 @@ if deudas_activas_df.empty:
         st.stop()
 
     # Obtenemos las Deudas Activas con la Referencia Obtenida
-    deudas_activas_df = obtener_deudas_activas(referencia=referencia_cliente)
+    deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente)
 else:
     ref_antigua = referencia_cliente
 

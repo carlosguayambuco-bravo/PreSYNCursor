@@ -3,14 +3,25 @@
 # Librerías de Python
 import json
 # Librerías de Terceros
+from google.oauth2.credentials import Credentials
 import streamlit as st
 # Librerías Locales
+from core.auth import SCOPES, load_saved_credentials
 from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions # type: ignore
 from modules.classes import crear_diccionario_aliados
 from services import MetabaseService, GoogleSheetsService, GoogleMailService, GoogleDriveService
 
 # Creamos el Servicio de Metabase y de GoogleSheets
 def initialize_services(debugging_mode: bool = False):
+    if "credentials" not in st.session_state:
+        saved_credentials = load_saved_credentials()
+        if saved_credentials is not None:
+            st.session_state["credentials"] = saved_credentials
+            st.session_state["creds_google"] = Credentials.from_authorized_user_info(
+                saved_credentials,
+                scopes=SCOPES,
+            )
+
     if ("metabase_service" in st.session_state) and ("google_sheets_service" in st.session_state) and ("google_mail_service" in st.session_state) and ("google_drive_service" in st.session_state):
         return  # Los servicios ya están inicializados
 

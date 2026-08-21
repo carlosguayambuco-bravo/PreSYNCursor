@@ -32,10 +32,18 @@ tabSolicitudes, tabResumenSolicitudes = st.tabs(
 if tabSolicitudes.open:
     with tabSolicitudes:
         st.title("🗒️ Gestión de Solicitudes")
+if tabSolicitudes.open:
+    with tabSolicitudes:
+        st.title("🗒️ Gestión de Solicitudes")
 
         st.divider()
         st.space("small")
+        st.divider()
+        st.space("small")
 
+        if solicitudes_filtered.empty:
+            st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
+            st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
         if solicitudes_filtered.empty:
             st.warning("No se encontraron solicitudes que coincidan con los filtros aplicados.", icon="⚠️")
             st.stop()  # Detenemos la ejecución del script si no hay solicitudes que mostrar
@@ -66,6 +74,14 @@ if tabSolicitudes.open:
             )
 
         with colSubir:
+            mask_sin_responder = obtener_mascara_sin_responder(solicitudes_filtered)
+            subido_sheets = st.button("Subir Solicitudes a Sheets",
+                key="subir_solicitudes_button",
+                help="Haz clic para subir las solicitudes filtradas a Google Sheets",
+                type="primary",
+                disabled = (mask_sin_responder).sum() == 0,
+                )
+        with colSubir:
             subido_sheets = st.button("Subir Solicitudes a Sheets",
                 key="subir_solicitudes_button",
                 help="Haz clic para subir las solicitudes filtradas a Google Sheets",
@@ -95,8 +111,20 @@ if tabSolicitudes.open:
                 st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
             else:
                 st.toast("Ocurrió un error al subir las solicitudes a Google Sheets. Por favor, inténtalo de nuevo.", icon="❌")
+        if subido_sheets:
+            success = subir_masivo_plantilla_solicitudes(solicitudes_df=solicitudes_filtered)
+            if success:
+                st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")
+            else:
+                st.toast("Ocurrió un error al subir las solicitudes a Google Sheets. Por favor, inténtalo de nuevo.", icon="❌")
 
 # Ahora Creamos el Dashboard
+if tabResumenSolicitudes.open:
+    with tabResumenSolicitudes:
+        try:
+            mostrar_resumen_solicitudes_ejecutivo(solicitudes=solicitudes_filtered)
+        except Exception as e:
+            st.error("Ocurrió un error al generar el resumen de solicitudes: {}".format(str(e)), icon="❌")
 if tabResumenSolicitudes.open:
     with tabResumenSolicitudes:
         try:

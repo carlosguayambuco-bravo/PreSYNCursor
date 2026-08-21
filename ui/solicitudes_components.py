@@ -1962,6 +1962,107 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
             with colCuotas: # type: ignore
                 st.code(d['Num_Cuotas'], language="text")
 
+# Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud
+def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Literal['nego','ejecutivo'], expander_key: str, default_expand_debts: bool = True):
+    # Siguiente Paso: Mostramos la Info de la Respuesta
+    st.subheader("**📋 Información de la Respuesta a la Solicitud**")
+
+    comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario')
+    
+    with st.container(border=True, horizontal_alignment="distribute"):
+        # Creamos Columnas para Mostrar: Fecha de Respuesta, Estado de Solicitud, Monto Respuesta (Si Hay)
+        if solicitud["Estado_Solicitud"] == "Exitosa":
+            colFechaResp, colEstadoSolicitud, colMontoRespuesta = st.columns([2, 2, 2], vertical_alignment="center")
+        else:
+            colFechaResp, colEstadoSolicitud = st.columns([2, 2], vertical_alignment="center")
+    
+        with colFechaResp:
+            st.metric(
+                label="**Fecha de Respuesta:**",
+                value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
+                help = "La Fecha de Respuesta de la solicitud",
+                width="stretch",
+            )
+        with colEstadoSolicitud:
+            st.metric(
+                label="**Estado de Solicitud:**",
+                value=solicitud["Estado_Solicitud"],
+                help = "El Estado de la solicitud",
+                width="stretch",
+            )
+    
+        if solicitud["Estado_Solicitud"] == "Exitosa":
+            with colMontoRespuesta: # type: ignore
+                deudas_respuesta = solicitud.get("JSON_Respuesta", []) + solicitud.get("Metadata_Solicitud", {}).get("Addendums", [])
+                deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
+                monto_total_respuesta = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["JSON_Respuesta"] + solicitud.get("Metadata_Solicitud", {}).get("Addendums", []) if d['Id_Deuda'] in deudas_respuesta)
+                monto_actual_respuesta = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
+                st.metric(
+                    label="**Monto Respuesta:**", value=formatNumber(monto_total_respuesta),
+                    help = "El monto total de la respuesta (La Suma de los Valores Propuestos por Deuda) que se envió al Aliado",
+                    delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
+                    width="stretch",
+                )
+        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
+
+    if st.session_state.get(expander_key, False):
+        mostrar_mensaje_actualizado(solicitud=solicitud, origen=origen)
+    
+    # Si la Solicitud no es Exitosa, todo finaliza aquí
+    if solicitud["Estado_Solicitud"] != "Exitosa":
+        st.info("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
+        return
+    
+    # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
+    with st.expander("**💰 Detalles de la Respuesta por Deuda**", expanded=default_expand_debts):
+        mostrar_detalles_respuesta_deuda(solicitud=solicitud)
+    
+    # Siguiente: Mostrar Fecha_Limite_Pago, Pago Total Obligatorio y Metodo de Pago si no es Validación
+    if solicitud["Tipo_Solicitud"] == "Validación":
+        colFechaLimite, colPagoTotal = st.columns([2, 2], border=True)
+    else:
+        colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], border=True)
+    
+    with colFechaLimite:
+        fecha_limite_pago = pd.to_datetime(solicitud.get("Fecha_Limite_Pago", ''), errors='coerce')
+        # Calculamos la Diferencia a Hoy
+        if pd.notnull(fecha_limite_pago):
+            diferencia_dias = getBDDaysDiffFloat(fecha_limite_pago, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
+            delta_color = "red" if diferencia_dias < 0 else "green"
+            delta_arrow = "down" if diferencia_dias < 0 else "up"
+            delta_text = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if diferencia_dias < 0 else "para pagar")
+        else:
+            delta_color = "gray"
+            delta_arrow = "off"
+            delta_text = "No Brindada"
+    
+        st.metric(
+            label="**Fecha Límite de Pago:**",
+            value=fecha_limite_pago.strftime("%Y-%m-%d") if pd.notnull(fecha_limite_pago) else "No Brindada",
+            help = "La Fecha Límite de Pago de la solicitud",
+            width="stretch",
+            delta=delta_text,
+            delta_color=delta_color,
+            delta_arrow=delta_arrow,
+        )
+    with colPagoTotal:
+        aplica_pto = solicitud.get("Metadata_Solicitud", {}).get("Pago_Total_Obligatorio", False)
+        st.metric(
+            label="**Pago Total Obligatorio:**",
+            value="Sí" if aplica_pto else "No",
+            help = "El monto total obligatorio de la solicitud",
+            delta= "Necesitas pagar todas las deudas" if aplica_pto else "Se pueden pagar deudas de forma individual",
+            width="stretch",
+        )
+    if solicitud["Tipo_Solicitud"] != "Validación":
+        with colMetodoPago:  # type: ignore
+            st.metric(
+                label="**Método de Pago:**",
+                value=solicitud.get("Metadata_Solicitud", {}).get("Metodo_Pago", "No Brindado"),
+                help = "El Método de Pago de la solicitud",
+                width="stretch",
+            )
+
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
@@ -1974,6 +2075,9 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         id=solicitud["ID_Solicitud"]
     )
     expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
+
+    # Por Último: Mostramos el Botón para Responder la Solicitud
+    solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main, key=expander_key, on_change="rerun"):
@@ -2125,7 +2229,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="ejecutivo")
 
-        if st.session_state.get(expander_key, False):
+        if st.session_state.get(expander_key, False) and not (solicitud_ya_gestionada):
             mostrar_mensaje_actualizado(solicitud=solicitud, origen="ejecutivo")
 
         # Por Último: Mostramos el Botón para Responder la Solicitud
@@ -2152,6 +2256,8 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 key="responder_solicitud_{}".format(solicitud['ID_Solicitud']),
                 disabled=solicitud_ya_gestionada,
                 type = "primary",
+                width="stretch",
+                icon="✅",
                 help="Haga clic para responder la solicitud. Esta acción abrirá un diálogo donde podrá ingresar su respuesta.",
             ):
                 dialog_respuesta_solicitud(solicitud=solicitud)
@@ -2181,7 +2287,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
 
         # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
-        colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], vertical_alignment="center")
+        colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], border=True)
         with colReferencia:
             st.metric(
                 label="**Referencia:**", value=solicitud["Referencia"],
@@ -2189,7 +2295,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 delta = "CC: {}".format(solicitud["Cedula"]) if pd.notnull(solicitud["Cedula"]) else "No Brindada",
                 delta_color="gray",
                 delta_arrow="off",
-                border=True,
             )
         with colMontoTotal:
             monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
@@ -2198,14 +2303,18 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 label="**Monto Total:**", value=formatNumber(monto_total_solicitud),
                 help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
                 delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
-                border=True,
             )
         with colEjecutivo:
+            # Definimos los Nombres y los Apellidos
+            nombres = ' '.join(solicitud["Ejecutivo"].split()[:2]) if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar"
+            apellidos = ' '.join(solicitud["Ejecutivo"].split()[2:]) if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar"
             st.metric(
                 label="**Ejecutivo:**",
-                value=solicitud["Ejecutivo"] if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar",
+                value=nombres,
+                delta=apellidos,
+                delta_arrow="off",
+                delta_color="gray",
                 help = "El Ejecutivo que atiende la solicitud",
-                border=True,
             )
         with colFechaSolicitud:
             dias_delta = getBDDaysDiffFloat(
@@ -2216,7 +2325,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 value=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
                 help = "La fecha y hora en que se realizó la solicitud",
                 delta = "{:.1f} días atrás".format(dias_delta),
-                border=True,
                 delta_color="red" if dias_delta > 7 else "green",
                 delta_arrow="down" if dias_delta > 7 else "up",
             )
@@ -2279,9 +2387,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
 
-        # Mostramos el Comentario del Negociador
-        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo if comentario_ejecutivo else "Sin Comentario"), icon="ℹ️")
-
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
         if es_solicitud_sin_responder(solicitud):
             st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
@@ -2330,100 +2435,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
             return 
 
-        # Siguiente Paso: Mostramos la Info de la Respuesta
-        st.subheader("**📋 Información de la Respuesta a la Solicitud**")
-
-        # Creamos Columnas para Mostrar: Fecha de Respuesta, Estado de Solicitud, Monto Respuesta (Si Hay)
-        if solicitud["Estado_Solicitud"] == "Exitosa":
-            colFechaResp, colEstadoSolicitud, colMontoRespuesta = st.columns([2, 2, 2], vertical_alignment="center")
-        else:
-            colFechaResp, colEstadoSolicitud = st.columns([2, 2], vertical_alignment="center")
-
-        with colFechaResp:
-            st.metric(
-                label="**Fecha de Respuesta:**",
-                value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
-                help = "La Fecha de Respuesta de la solicitud",
-                width="stretch",
-            )
-        with colEstadoSolicitud:
-            st.metric(
-                label="**Estado de Solicitud:**",
-                value=solicitud["Estado_Solicitud"],
-                help = "El Estado de la solicitud",
-                width="stretch",
-            )
-
-        if solicitud["Estado_Solicitud"] == "Exitosa":
-            with colMontoRespuesta: # type: ignore
-                deudas_respuesta = solicitud.get("JSON_Respuesta", []) + solicitud.get("Metadata_Solicitud", {}).get("Addendums", [])
-                deudas_respuesta = [d['Id_Deuda'] for d in deudas_respuesta]
-                monto_total_respuesta = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["JSON_Respuesta"] + solicitud.get("Metadata_Solicitud", {}).get("Addendums", []) if d['Id_Deuda'] in deudas_respuesta)
-                monto_actual_respuesta = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in deudas_respuesta)
-                st.metric(
-                    label="**Monto Respuesta:**", value=formatNumber(monto_total_respuesta),
-                    help = "El monto total de la respuesta (La Suma de los Valores Propuestos por Deuda) que se envió al Aliado",
-                    delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
-                    width="stretch",
-                )
-
-        # Si la Solicitud no es Exitosa, todo finaliza aquí
-        if solicitud["Estado_Solicitud"] != "Exitosa":
-            st.info("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
-            return
-
-        # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
-        with st.expander("**💰 Detalles de la Respuesta por Deuda**", expanded=True):
-            mostrar_detalles_respuesta_deuda(solicitud=solicitud)
-
-        # Siguiente: Mostrar Fecha_Limite_Pago, Pago Total Obligatorio y Metodo de Pago si no es Validación
-        if solicitud["Tipo_Solicitud"] == "Validación":
-            colFechaLimite, colPagoTotal = st.columns([2, 2], border=True)
-        else:
-            colFechaLimite, colPagoTotal, colMetodoPago = st.columns([2, 2, 2], border=True)
-
-        with colFechaLimite:
-            fecha_limite_pago = pd.to_datetime(solicitud.get("Fecha_Limite_Pago", None), errors='coerce')
-            # Calculamos la Diferencia a Hoy
-            if pd.notnull(fecha_limite_pago):
-                diferencia_dias = getBDDaysDiffFloat(fecha_limite_pago, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
-                delta_color = "red" if diferencia_dias < 0 else "green"
-                delta_arrow = "down" if diferencia_dias < 0 else "up"
-                delta_text = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if diferencia_dias < 0 else "para pagar")
-            else:
-                delta_color = "gray"
-                delta_arrow = "off"
-                delta_text = "No Brindada"
-
-            st.metric(
-                label="**Fecha Límite de Pago:**",
-                value=fecha_limite_pago.strftime("%Y-%m-%d") if pd.notnull(fecha_limite_pago) else "No Brindada",
-                help = "La Fecha Límite de Pago de la solicitud",
-                width="stretch",
-                delta=delta_text,
-                delta_color=delta_color,
-                delta_arrow=delta_arrow,
-            )
-        with colPagoTotal:
-            aplica_pto = solicitud.get("Metadata_Solicitud", {}).get("Pago_Total_Obligatorio", False)
-            st.metric(
-                label="**Pago Total Obligatorio:**",
-                value="Sí" if aplica_pto else "No",
-                help = "El monto total obligatorio de la solicitud",
-                delta= "Necesitas pagar todas las deudas" if aplica_pto else "Puedes pagar deudas de forma individual",
-                width="stretch",
-            )
-        if solicitud["Tipo_Solicitud"] != "Validación":
-            with colMetodoPago:  # type: ignore
-                st.metric(
-                    label="**Método de Pago:**",
-                    value=solicitud.get("Metadata_Solicitud", {}).get("Metodo_Pago", "No Brindado"),
-                    help = "El Método de Pago de la solicitud",
-                    width="stretch",
-                )
-
-        if st.session_state.get(expander_key, False):
-            mostrar_mensaje_actualizado(solicitud=solicitud, origen="nego")
+        mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
