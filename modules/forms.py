@@ -167,13 +167,13 @@ def obtener_correo_lider_negociador(*, email: str) -> Optional[str]:
         return None
 
     # Obtenemos el nombre del líder
-    lider_name = negociador_row.values[0]['Lider']
+    lider_name = negociador_row['Lider'].values[0]
     # Buscamos el Lider ahora
     lider_row = headcount_df[headcount_df['Nombre'] == lider_name]
     if lider_row.empty:
         return None
     # Si existe la Fila entonces devolvemos el Correo
-    return lider_row.values[0]['Correo']
+    return lider_row['Correo'].values[0]
 
 # Función para Obtener el Aliado en Base dado un Conjunto de Deudas y Aliados Posibles
 def obtener_aliado_en_base(*, deudas: list[str], aliados_posibles: list[str]) -> str:

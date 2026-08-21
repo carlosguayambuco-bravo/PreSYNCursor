@@ -101,13 +101,6 @@ if tabSolicitudes.open:
             ):
                 dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
 
-        st.write(
-            generar_plantilla_masiva_solicitudes(
-                solicitudes_df=solicitudes_filtered,
-                modo_portafolio=modo_plantilla,
-            )
-        )
-
         if subido_sheets:
             success = subir_masivo_plantilla_solicitudes(
                 solicitudes_df=solicitudes_filtered,
