@@ -107,7 +107,7 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
             str_portafolio = f"**Portafolio**: {monto_portafolio:,.0f}"
         else:
             str_portafolio = "***No es Portafolio***"
-        descuento_formateado = f"**{casa_cobro}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
+        descuento_formateado = f"(*{debt}*) **{casa_cobro}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
         descuentos_formateados.append(descuento_formateado)
 
     return descuentos_formateados
@@ -349,6 +349,69 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
 
     return success
 
+def redistribuir_resultado_solicitud(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
+    """
+    Re-Distribuye el resultado actualizado de una solicitud a las Solicitudes Espejo
+    que comparten el mismo 'Id_Respuesta_Autom'.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud actualizada.
+        pdf_bytes (Optional[bytes]): Bytes del PDF. No se usa, se mantiene por
+            compatibilidad con mostrar_boton_actualizar_solicitudes.
+
+    Returns:
+        bool: True si la re-distribución fue exitosa, False en caso contrario.
+    """
+    # Paso 1: Cargar las Solicitudes del Mes en Curso
+    solicitudes_df = load_current_month_solicitudes()
+
+    # Paso 2: Inicializamos la Lista de Filas a Actualizar con la Solicitud Actual
+    need_update_rows = [solicitud]
+
+    # Paso 3: Buscar el Trace de la Respuesta Automática en la Metadata de la Solicitud
+    id_respuesta_autom = solicitud['Metadata_Solicitud'].get('Id_Respuesta_Autom', None)
+
+    # Paso 4: Si existe el Trace, buscamos y actualizamos las Solicitudes Espejo
+    if id_respuesta_autom is not None:
+        maskMismaRespuesta = solicitudes_df['Metadata_Solicitud'].apply(lambda x: x.get('Id_Respuesta_Autom', None) == id_respuesta_autom)
+        maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
+        maskFinal = maskMismaRespuesta & maskDiffID
+
+        for _, solicitud_espejo in solicitudes_df[maskFinal].iterrows():
+
+            # Obtenemos los IDs de Deuda de la Solicitud Espejo
+            # Los Resultados por Deuda se aplican solo para las Deudas de estas Sub-Solicitudes
+            ids_deudas_espejo = set(d['Id_Deuda'] for d in solicitud_espejo['Datos_Solicitud'])
+
+            solicitud_espejo['Estado_Solicitud'] = solicitud['Estado_Solicitud']
+            solicitud_espejo['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
+            solicitud_espejo['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
+            solicitud_espejo['Metadata_Solicitud']['Pago_Total_Obligatorio'] = solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', True)
+            solicitud_espejo['JSON_Respuesta'] = [d for d in solicitud['JSON_Respuesta'] if d['Id_Deuda'] in ids_deudas_espejo]
+            solicitud_espejo['Fecha_Limite_Pago'] = solicitud.get('Fecha_Limite_Pago', '')
+            solicitud_espejo['Ejecutivo'] = solicitud['Ejecutivo']
+            solicitud_espejo['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+
+            # Mantenemos el Trace de la Respuesta Automática en la Metadata
+            solicitud_espejo['Metadata_Solicitud']['Id_Respuesta_Autom'] = id_respuesta_autom
+
+            # Actualizamos Addendums si hay
+            if 'Addendums' in solicitud['Metadata_Solicitud']:
+                solicitud_espejo['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
+
+            # Actualizamos Fecha_Solicitado si hay
+            if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
+                solicitud_espejo['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
+
+            # Agregamos la Solicitud Espejo a la Lista de Filas a Actualizar
+            need_update_rows.append(solicitud_espejo)
+
+    # Paso 5: Actualizar cada Solicitud en Google Sheets usando update_solicitud_in_google_sheets
+    need_update_df = pd.DataFrame(need_update_rows).reset_index(drop=True)
+    success =  update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)
+
+    return success
+
 def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
     # Paso 1: Definir todos los Destinatarios Principales
     main_recipients = list(set([sol['Correo'] for sol in solicitudes]))
@@ -518,6 +581,9 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame) -> pd.Dat
 
     # Creamos el DataFrame
     plantilla_df = pd.DataFrame(filas)
+
+    if plantilla_df.empty:
+        return PlantillaSolicitudesSchema.empty()
 
     # Quitamos Datos donde no haya Propuesta
     plantilla_df = plantilla_df.dropna(subset=['Propuesta'])

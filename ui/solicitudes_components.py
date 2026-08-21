@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -402,7 +402,7 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
     return solicitudes_df
 
 # Función Auxiliar para mostrar el Botón que va a Finalizar la Solicitud y mantener toda la Lógica de forma Interna
-def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> None:
+def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None, funcion_actualizar: Callable = distribuir_resultado_solicitud) -> None:
     # Primero: Mostrar el Boton de la Solicitud y el Botón de Cancelar
     colCancelar, colBoton = st.columns([1, 1])
 
@@ -434,9 +434,11 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             else:
                 success = True  # No hay PDF para subir, consideramos que la subida fue exitosa
             # Actualizamos la Solicitud en Google Sheets
-            success = distribuir_resultado_solicitud(solicitud, pdf_bytes=pdf_bytes) and success
+            if success:
+                success = funcion_actualizar(solicitud=solicitud, pdf_bytes=pdf_bytes)
             # Actualizamos los Datos de Addendums
-            upload_massive_addendums(solicitud=solicitud)
+            if success:
+                upload_massive_addendums(solicitud=solicitud)
         if success:
             st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
             sleep(1)
@@ -618,9 +620,21 @@ def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecut
         elif origen == "nego":
             st.success("Actualizaste el Cliente 😁", icon="✅")
 
-# Función para Abrir el Dialogo de Respuesta de una Solicitud
-@st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large",on_dismiss="rerun")
-def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
+# Función Auxiliar para Limpiar las Keys de Edición del Session State al Cerrar el Diálogo de Modificación
+def limpiar_estado_edicion_solicitud() -> None:
+    # Eliminamos todas las Keys del Session State que terminen en '_edit'
+    for key in list(st.session_state.keys()):
+        if key.endswith('_edit'): # type: ignore
+            del st.session_state[key]
+
+# Función Auxiliar para Construir la Respuesta de una Solicitud
+# Mantiene la Estructura de los Componentes Relevantes para la Validación y
+# devuelve la solicitud_respuesta construida (Los componentes de otros tipos
+# de Solicitud se manejan por fuera de esta función)
+def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edicion: bool = False, funcion_actualizar: Callable = distribuir_resultado_solicitud) -> pd.Series:
+    # Definimos el Sufijo de las Keys para evitar Colisiones entre el Diálogo de Respuesta y el de Modificación
+    sufijo = '_edit' if modo_edicion else ''
+
     # Creamos una Copia de la solicitud que será la respuesta
     solicitud_respuesta = solicitud.copy()
 
@@ -647,7 +661,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             label="**🥸 Aliado - Casa de Cobro**",
             options=list(st.session_state["aliados_dict"].keys()),
             index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]) if solicitud["Casa_Cobro"] in st.session_state["aliados_dict"] else 0,
-            key="aliado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            key="aliado_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             accept_new_options=True,
         )
         if not solicitud["Casa_Cobro"] in st.session_state["aliados_dict"]:
@@ -656,18 +670,24 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             ), icon="⚠️")
 
     with colEstado:
+        estado_options = [e for e in ESTADOS_POSIBLES_SOLICITUD if e not in ["Sin Tocar","Vencida"]]
+        # En Modo Edición dejamos el Estado Actual por Defecto
+        if modo_edicion and (solicitud["Estado_Solicitud"] in estado_options):
+            index_estado = estado_options.index(solicitud["Estado_Solicitud"])
+        else:
+            index_estado = None
         estado_final = st.selectbox(
             label="**📊 Estado de Solicitud**",
-            options=[e for e in ESTADOS_POSIBLES_SOLICITUD if e not in ["Sin Tocar","Vencida"]],
-            index=None,
-            key="estado_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            options=estado_options,
+            index=index_estado,
+            key="estado_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
         )
 
     with colLlamada:
         llamada_final = st.toggle(
             label="**📞 ¿Fue Llamada?**",
-            value=False,
-            key="llamada_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            value=solicitud["Metadata_Solicitud"].get("Fue_Llamada", False) if modo_edicion else False,
+            key="llamada_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
         )
 
     # Verificamos que ambos esten seleccionados para habilitar el botón de enviar respuesta
@@ -697,8 +717,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Añadimos la Posibilidad de Comentario
         cm_final = st.text_area(
             label="**Comentarios de la Solicitud**",
-            value="",
-            key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+            value=solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "") if modo_edicion else "",
+            key="comentario_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese cualquier comentario adicional sobre la solicitud.",
         )
         # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
@@ -706,7 +726,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
         st.success("La solicitud está en un estado que permite finalizarla.")
         # Mostramos el Botón para Finalizar la Solicitud
-        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, funcion_actualizar=funcion_actualizar)
         st.stop()
 
     # En caso que no (es Exitosa), se requiere poner el Monto por Deuda, Cuotas y Fecha Límite de Pago
@@ -714,10 +734,16 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([2, 2, 1, 1], vertical_alignment="center")
 
     # Paso 2: Inicializar Valores en el Session_State por Primera Vez
-    monto_propuesto_total = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
-    key_monto_total = 'monto_total_{}_respuesta'.format(solicitud['ID_Solicitud'])
-    key_usar_monto_total = 'usar_monto_total_{}'.format(solicitud['ID_Solicitud'])
-    key_deudas_dist_monto = 'deudas_dist_monto_{}'.format(solicitud['ID_Solicitud'])
+    # En Modo Edición usamos el JSON_Respuesta como Base de los Montos (si existe)
+    if modo_edicion and len(solicitud["JSON_Respuesta"]) > 0:
+        datos_montos = solicitud["JSON_Respuesta"]
+    else:
+        datos_montos = solicitud["Datos_Solicitud"]
+
+    monto_propuesto_total = sum(cleanNumber(d['Monto_Propuesto']) for d in datos_montos)
+    key_monto_total = 'monto_total_{}_respuesta{}'.format(solicitud['ID_Solicitud'], sufijo)
+    key_usar_monto_total = 'usar_monto_total_{}{}'.format(solicitud['ID_Solicitud'], sufijo)
+    key_deudas_dist_monto = 'deudas_dist_monto_{}{}'.format(solicitud['ID_Solicitud'], sufijo)
     deudas_posibles = [d['Id_Deuda'] for d in solicitud["Datos_Solicitud"]]
 
     if not (key_usar_monto_total in st.session_state):
@@ -727,15 +753,24 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     if not (key_deudas_dist_monto in st.session_state):
         st.session_state[key_deudas_dist_monto] = deudas_posibles
     for d in solicitud["Datos_Solicitud"]:
-        key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-        key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+        key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
+        key_cuotas = 'cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
         if not (key_monto in st.session_state):
-            st.session_state[key_monto] = formatNumber(d['Monto_Propuesto'])
+            if modo_edicion:
+                respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
+                st.session_state[key_monto] = formatNumber(respuesta_deuda['Monto_Propuesto']) if respuesta_deuda is not None else "Sin Oferta"
+            else:
+                st.session_state[key_monto] = formatNumber(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
-            st.session_state[key_cuotas] = d['Num_Cuotas']
+            if modo_edicion:
+                respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
+                st.session_state[key_cuotas] = int(respuesta_deuda.get('Num_Cuotas', 1)) if respuesta_deuda is not None else 1
+            else:
+                st.session_state[key_cuotas] = d['Num_Cuotas']
 
+    # En Modo Edición el Portafolio se Calcula con Base en el JSON_Respuesta
     monto_propuesto_portafolio = sum(
-        cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
+        cleanNumber(d['Monto_Propuesto']) for d in datos_montos if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
     )
 
     # Paso 3: Aplicar Lógica de Recálculo basado en los Session States
@@ -746,34 +781,43 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.session_state[key_monto_total] = formatNumber(monto_total)
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
-            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
             if not (d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]):
                 # Actualizamos el Session State dejando el Monto Propuesto como "Sin Oferta"
                 st.session_state[key_monto] = "Sin Oferta"
                 continue
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            porcentaje_propuesto_original = cleanNumber(d['Monto_Propuesto']) / monto_propuesto_portafolio if monto_propuesto_portafolio > 0 else 0
+            if modo_edicion:
+                respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
+                monto_base = cleanNumber(respuesta_deuda['Monto_Propuesto']) if respuesta_deuda is not None else 0.0
+            else:
+                monto_base = cleanNumber(d['Monto_Propuesto'])
+            porcentaje_propuesto_original = monto_base / monto_propuesto_portafolio if monto_propuesto_portafolio > 0 else 0
             monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
             st.session_state[key_monto] = formatNumber(monto_propuesto_nuevo)
     else:
         # La Actualización del Monto Total se hace basado en la Suma de los Montos Propuestos por Deuda
         monto_total = sum(
-            cleanNumber(st.session_state['monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
+            cleanNumber(st.session_state['monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
             )
         st.session_state[key_monto_total] = formatNumber(monto_total)
         # Actualizamos a cada Deuda el Monto Propuesto basado en el Session State
         for d in solicitud["Datos_Solicitud"]:
-            key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
             estado_deuda = st.session_state[key_monto]
             # Actualizamos el Session State del Monto Propuesto por Deuda
             st.session_state[key_monto] = formatNumber(estado_deuda)
 
     with colFechaLimite:
+        if modo_edicion and pd.notna(solicitud["Fecha_Limite_Pago"]):
+            fecha_limite_default = solicitud["Fecha_Limite_Pago"]
+        else:
+            fecha_limite_default = None
         fecha_limite_pago = st.date_input(
             label="**Fecha Límite de Pago**",
-            value=None,
-            key="fecha_limite_pago_{}".format(solicitud['ID_Solicitud']),
+            value=fecha_limite_default,
+            key="fecha_limite_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese la fecha límite de pago para la solicitud. Es Decir, fecha en que se vence el descuento.",
         )
         # La Convertimos a Timestamp para poder guardarla en la Solicitud
@@ -800,7 +844,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             label="**Número de Cuotas**",
             options=["No", "Por Deuda", "Para Todas las Deudas"],
             index=0,
-            key="cuotas_{}".format(solicitud['ID_Solicitud']),
+            key="cuotas_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Seleccione si desea establecer el número de cuotas para todas las deudas o por deuda individual.",
         )
 
@@ -821,12 +865,16 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     num_coutas_global = 1
     if cuotas_input == "Para Todas las Deudas":
+        default_cuotas_global = 1
+        if modo_edicion and len(solicitud["JSON_Respuesta"]) > 0:
+            default_cuotas_global = max(1, int(cleanNumber(solicitud["JSON_Respuesta"][0].get('Num_Cuotas', 1), default_nan=1)))
         num_coutas_global = st.number_input(
             label="**Número de Cuotas para Todas las Deudas**",
             min_value=1,
             max_value=60,
             step=1,
-            key="num_cuotas_global_{}".format(solicitud['ID_Solicitud']),
+            value=default_cuotas_global,
+            key="num_cuotas_global_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese el número de cuotas para todas las deudas.",
             width="stretch",
         )
@@ -860,7 +908,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     label="ID Deuda",
                     value=d['Id_Deuda'],
                     disabled=True,
-                    key="id_deuda_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="id_deuda_{}_{}_response{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                     label_visibility="collapsed",
                 )
             with colNumCredito:
@@ -868,7 +916,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     label="Número de Crédito",
                     value=d['Numero_Credito'],
                     disabled=True,
-                    key="numero_credito_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="numero_credito_{}_{}_response{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                     label_visibility="collapsed",
                 )
             with colMontoActual:
@@ -876,7 +924,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     label="Monto Actual",
                     value=formatNumber(d['Monto_Actual']),
                     disabled=True,
-                    key="monto_actual_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="monto_actual_{}_{}_response{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                     label_visibility="collapsed",
                 )
             with colSolicitado:
@@ -884,11 +932,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     label="$Solicitado",
                     value=formatNumber(d['Monto_Propuesto']),
                     disabled=True,
-                    key="monto_solicitado_{}_{}_response".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="monto_solicitado_{}_{}_response{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                     label_visibility="collapsed",
                 )
             with colMontoPropuesto:
-                key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
                 st.text_input(
                     label="Monto Propuesto",
                     key=key_monto,
@@ -898,7 +946,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 )
             if cuotas_input == "Por Deuda":
                 with colCuotasDeuda: # type: ignore
-                    key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+                    key_cuotas = 'cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
                     st.number_input(
                         label="Número de Cuotas",
                         value=1,
@@ -913,10 +961,20 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         # Siguiente: Mostramos Posibilidad de Agregar Addendums
         with st.expander("**📝 Agregar Addendums a la Solicitud**", expanded=False):
 
-            # Inicializamos la Cantidad de Addendums con 0 en el Session State si no existe
-            key_addendums_count = 'addendums_count_{}'.format(solicitud['ID_Solicitud'])
+            # Inicializamos la Cantidad de Addendums en el Session State si no existe
+            key_addendums_count = 'addendums_count_{}{}'.format(solicitud['ID_Solicitud'], sufijo)
             if not (key_addendums_count in st.session_state):
-                st.session_state[key_addendums_count] = 0
+                if modo_edicion:
+                    addendums_existentes = solicitud["Metadata_Solicitud"].get("Addendums", [])
+                    st.session_state[key_addendums_count] = len(addendums_existentes)
+                    for i, addendum in enumerate(addendums_existentes, start=1):
+                        st.session_state['addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] = addendum.get('Banco', '')
+                        st.session_state['addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] = addendum.get('Numero_Credito', '')
+                        st.session_state['addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] = formatNumber(addendum.get('Monto_Actual', 0))
+                        st.session_state['addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] = formatNumber(addendum.get('Monto_Propuesto', 0))
+                        st.session_state['addendums_cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] = int(addendum.get('Num_Cuotas', 1))
+                else:
+                    st.session_state[key_addendums_count] = 0
 
             # Creamos las mismas columnas que antes sin Monto_Solicitado (Quitando Id Deuda y añadiendo Banco y Monto Actual)
             if cuotas_input == "Por Deuda":
@@ -940,11 +998,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             for i in range(1,st.session_state[key_addendums_count]+1):
 
                 # Inicializamos los Session States de los Addendums si no existen
-                key_banco_add = 'addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i)
-                key_numero_credito_add = 'addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i)
-                key_monto_actual_add = 'addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i)
-                key_monto_propuesto_add = 'addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i)
-                key_cuotas_add = 'addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i)
+                key_banco_add = 'addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)
+                key_numero_credito_add = 'addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)
+                key_monto_actual_add = 'addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)
+                key_monto_propuesto_add = 'addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)
+                key_cuotas_add = 'addendums_cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)
                 if not (key_banco_add in st.session_state):
                     st.session_state[key_banco_add] = ""
                 if not (key_numero_credito_add in st.session_state):
@@ -960,7 +1018,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     st.selectbox(
                         label="Banco",
                         options=BANCOS_UNICOS,
-                        key='addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        key='addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el banco para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                         accept_new_options = True, # Permitimos agregar bancos por si no están
@@ -968,21 +1026,21 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 with colNumCreditoAdd:
                     st.text_input(
                         "Número de Crédito",
-                        key='addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        key='addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el número de crédito para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                     )
                 with colMontoActualAdd:
                     st.text_input(
                         "Monto Actual",
-                        key='addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        key='addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el monto actual para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                     )
                 with colMontoPropuestoAdd:
                     st.text_input(
                         "Monto Propuesto",
-                        key='addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                        key='addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el monto propuesto para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                     )
@@ -990,7 +1048,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     with colCuotasDeudaAdd: # type: ignore
                         st.number_input(
                             label="Número de Cuotas",
-                            key='addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i),
+                            key='addendums_cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                             help="Ingrese el número de cuotas para el addendum {}.".format(i+1),
                             label_visibility="collapsed",
                             value=1,
@@ -1005,7 +1063,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             with colAddendumQuitar:
                 if st.button(
                     label="Quitar Addendum",
-                    key="quitar_addendum_{}".format(solicitud['ID_Solicitud']),
+                    key="quitar_addendum_{}{}".format(solicitud['ID_Solicitud'], sufijo),
                     help="Haga clic para quitar un addendum de la solicitud.",
                     type="secondary",
                 ):
@@ -1018,7 +1076,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
             with colAddendumAgregar:
                 if st.button(
                     label="Agregar Addendum",
-                    key="agregar_addendum_{}".format(solicitud['ID_Solicitud']),
+                    key="agregar_addendum_{}{}".format(solicitud['ID_Solicitud'], sufijo),
                     help="Haga clic para agregar un addendum a la solicitud.",
                     type="primary",
                 ):
@@ -1028,8 +1086,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Siguiente: Generamos el JSON_Respuesta con: Monto Propuesto por Deuda, Cuotas por Deuda
     json_respuesta = []
     for d in solicitud["Datos_Solicitud"]:
-        key_monto = 'monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
-        key_cuotas = 'cuotas_{}_{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+        key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
+        key_cuotas = 'cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
         monto_propuesto = cleanNumber(st.session_state[key_monto], default_nan=0.0)
         if cuotas_input == "Por Deuda":
             num_cuotas = int(st.session_state[key_cuotas])
@@ -1050,12 +1108,12 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     addendums = []
     for i in range(1, st.session_state[key_addendums_count]+1):
 
-        addendum_banco = st.session_state['addendums_banco_{}_{}'.format(solicitud['ID_Solicitud'], i)]
-        addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}'.format(solicitud['ID_Solicitud'], i)]
-        addendum_monto_actual = cleanNumber(st.session_state['addendums_monto_actual_{}_{}'.format(solicitud['ID_Solicitud'], i)], default_nan=0.0)
-        addendum_monto_propuesto = cleanNumber(st.session_state['addendums_monto_propuesto_{}_{}'.format(solicitud['ID_Solicitud'], i)], default_nan=0.0)
+        addendum_banco = st.session_state['addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)]
+        addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)]
+        addendum_monto_actual = cleanNumber(st.session_state['addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)], default_nan=0.0)
+        addendum_monto_propuesto = cleanNumber(st.session_state['addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)], default_nan=0.0)
         if cuotas_input == "Por Deuda":
-            addendum_num_cuotas = int(st.session_state['addendums_cuotas_{}_{}'.format(solicitud['ID_Solicitud'], i)])
+            addendum_num_cuotas = int(st.session_state['addendums_cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)])
         else:
             addendum_num_cuotas = num_coutas_global
 
@@ -1094,8 +1152,8 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         with colToggle:
             pago_total_obligatorio = st.toggle(
                 label="**Pago Total Obligatorio**",
-                value=False,
-                key="pago_total_obligatorio_{}".format(solicitud['ID_Solicitud']),
+                value=solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) if modo_edicion else False,
+                key="pago_total_obligatorio_{}{}".format(solicitud['ID_Solicitud'], sufijo),
                 help="Seleccione esta opción si el pago total es obligatorio para la solicitud.",
             )
             # Guardamos el Pago Total Obligatorio en la solicitud_respuesta
@@ -1106,12 +1164,22 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     # Añadimos la Posibilidad de Comentario
     cm_final = st.text_area(
         label="**Comentarios de la Solicitud**",
-        value="",
-        key="comentario_solicitud_respuesta_input_{}".format(solicitud['ID_Solicitud']),
+        value=solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "") if modo_edicion else "",
+        key="comentario_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
         help="Ingrese cualquier comentario adicional sobre la solicitud.",
     )
     # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
     solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
+
+    # Devolvemos la Solicitud Respuesta Construida
+    return solicitud_respuesta
+
+# Función para Abrir el Dialogo de Respuesta de una Solicitud
+@st.dialog("🗒️ Respuesta a Solicitud",dismissible=True,width="large",on_dismiss="rerun")
+def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
+
+    # Construimos la Respuesta de la Solicitud usando los Componentes de Validación
+    solicitud_respuesta = construir_respuesta_solicitud_validacion(solicitud=solicitud, modo_edicion=False)
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
@@ -1232,6 +1300,31 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
+
+# Función para Abrir el Diálogo de Modificación de la Respuesta de una Solicitud (Solo Validaciones)
+@st.dialog("🗒️ Modificar Respuesta de Solicitud", dismissible=True, width="large", on_dismiss=limpiar_estado_edicion_solicitud)
+def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
+
+    # Restricción 1: La Solicitud ya se respondió
+    if es_solicitud_sin_responder(solicitud):
+        st.warning("La Solicitud `{}` no ha sido respondida aún, por lo que no se puede modificar su respuesta.".format(solicitud['ID_Solicitud']), icon="⚠️")
+        st.stop()
+
+    # Restricción 2: Es una Solicitud de Validación
+    if solicitud["Tipo_Solicitud"] != "Validación":
+        st.warning("La modificación de respuestas solo está disponible para Solicitudes de Validación.", icon="⚠️")
+        st.stop()
+
+    # Construimos la Respuesta de la Solicitud en Modo Edición usando los Componentes de Validación
+    solicitud_respuesta = construir_respuesta_solicitud_validacion(
+        solicitud=solicitud,
+        modo_edicion=True,
+        funcion_actualizar=redistribuir_resultado_solicitud,
+    )
+
+    # Siguiente: Mostramos el Botón de Finalizar que Re-Distribuye el Resultado a las Solicitudes Espejo
+    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, funcion_actualizar=redistribuir_resultado_solicitud)
+    st.stop()
 
 # Diálogo para subir automáticamente una solicitud de acuerdo de pago después de una validación
 @st.dialog("🗒️ Subir Solicitud de Acuerdo de Pago", dismissible=True, width="large", on_dismiss="rerun")
@@ -1992,13 +2085,26 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         casas_en_base = obtener_casas_cobro_base(deudas = deudas_actuales)
         # Añadimos markdown
         casas_en_base = ["**{}**".format(casa.title().strip()) for casa in casas_en_base]
+        # Traemos los Descuentos en Base
+        descuentos_en_base = [
+            get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
+            for d in solicitud['Datos_Solicitud']
+        ]
+        # Volvemos los Descuentos Uniendolos por '|'
+        descuentos_en_base = [
+            ' | '.join(desc) for desc in descuentos_en_base
+            if len(desc)>0
+        ]
 
         if casas_en_base:
-            st.markdown("### 💼 Casas que Registran en Base")
-            mensaje_casas = ' | '.join(
-                np.unique(casas_en_base)
-            )
-            st.markdown("## -> "+mensaje_casas)
+            with st.container(border=True, vertical_alignment="center", horizontal_alignment="center"):
+                st.markdown("### 💼 Casas que Registran en Base")
+                mensaje_casas = ' | '.join(
+                    np.unique(casas_en_base)
+                )
+                st.markdown("## -> "+mensaje_casas)
+                for desc in descuentos_en_base:
+                    st.markdown("- "+desc)
         else:
             st.warning("No Registran Descuentos en Base", icon="❌")
             
@@ -2025,12 +2131,18 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         # Por Último: Mostramos el Botón para Responder la Solicitud
         solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
 
-        # Creamos Dos Columnas: Una para Informacion y otra para el Boton
-        colInfo, colBoton = st.columns([4, 2], vertical_alignment="top")
+        # Definimos si la Solicitud se Puede Modificar (Solo Validaciones ya Respondidas)
+        puede_modificar = solicitud_ya_gestionada and (solicitud["Tipo_Solicitud"] == "Validación")
+
+        # Creamos Tres Columnas: Una para Información, Otra para Responder y Otra para Modificar
+        colInfo, colBoton, colBotonModificar = st.columns([3, 1.5, 1.5], vertical_alignment="top")
 
         with colInfo:
             if solicitud_ya_gestionada:
-                st.success("Esta solicitud ya ha sido respondida o está en espera de comité/ilocalizable.", icon="✅")
+                if puede_modificar:
+                    st.success("Esta solicitud ya ha sido respondida. Puedes modificar su respuesta.", icon="✅")
+                else:
+                    st.success("Esta solicitud ya ha sido respondida o está en espera de comité/ilocalizable.", icon="✅")
             else:
                 st.info("Haz click para responder la solicitud.", icon="ℹ️")
 
@@ -2043,6 +2155,16 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 help="Haga clic para responder la solicitud. Esta acción abrirá un diálogo donde podrá ingresar su respuesta.",
             ):
                 dialog_respuesta_solicitud(solicitud=solicitud)
+
+        with colBotonModificar:
+            if st.button(
+                label="Modificar Respuesta",
+                key="modificar_respuesta_solicitud_{}".format(solicitud['ID_Solicitud']),
+                disabled=not puede_modificar,
+                type = "secondary",
+                help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes de Validación ya respondidas.",
+            ):
+                dialog_modificar_respuesta_solicitud(solicitud=solicitud)
 
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):
@@ -2790,6 +2912,21 @@ def mostrar_solicitudes_paginadas(
         )
     )
 
+    # Paso 5: Aplicar la Navegación Seleccionada
+    if total_paginas > 1:
+        if st.session_state.get("paginacion_ir_inicio_{}".format(key)):
+            st.session_state[key_pagina_actual] = 1
+            st.rerun()
+        elif st.session_state.get("paginacion_anterior_{}".format(key)):
+            st.session_state[key_pagina_actual] = max(1, pagina_actual - 1)
+            st.rerun()
+        elif st.session_state.get("paginacion_siguiente_{}".format(key)):
+            st.session_state[key_pagina_actual] = min(total_paginas, pagina_actual + 1)
+            st.rerun()
+        elif st.session_state.get("paginacion_ir_final_{}".format(key)):
+            st.session_state[key_pagina_actual] = total_paginas
+            st.rerun()
+
     # Paso 3: Controles de Paginación (Izquierda: Registros por Página)
     colRegistros, colEspacio, colSelectPag, colNavegacion = st.columns([2,1,1,2], vertical_alignment="center", gap="large")
 
@@ -2826,7 +2963,7 @@ def mostrar_solicitudes_paginadas(
             )
 
             with colInicio:
-                ir_inicio = st.button(
+                st.button(
                     "<<",
                     key="paginacion_ir_inicio_{}".format(key),
                     disabled=(pagina_actual == 1),
@@ -2834,7 +2971,7 @@ def mostrar_solicitudes_paginadas(
                     width="stretch",
                 )
             with colAnterior:
-                ir_anterior = st.button(
+                st.button(
                     str(max(1, pagina_actual - 1)) if pagina_actual-1>0 else "N/A",
                     key="paginacion_anterior_{}".format(key),
                     disabled=(pagina_actual == 1),
@@ -2851,7 +2988,7 @@ def mostrar_solicitudes_paginadas(
                     on_click=None,
                 )
             with colSiguiente:
-                ir_siguiente = st.button(
+                st.button(
                     str(min(total_paginas, pagina_actual + 1)),
                     key="paginacion_siguiente_{}".format(key),
                     disabled=(pagina_actual >= total_paginas),
@@ -2859,7 +2996,7 @@ def mostrar_solicitudes_paginadas(
                     width="stretch",
                 )
             with colFinal:
-                ir_final = st.button(
+                st.button(
                     ">>",
                     key="paginacion_ir_final_{}".format(key),
                     disabled=(pagina_actual >= total_paginas),
@@ -2876,18 +3013,3 @@ def mostrar_solicitudes_paginadas(
                 help="Página actual de solicitudes.",
                 width="stretch",
             )
-
-    # Paso 5: Aplicar la Navegación Seleccionada
-    if total_paginas > 1:
-        if ir_inicio:
-            st.session_state[key_pagina_actual] = 1
-            st.rerun()
-        elif ir_anterior:
-            st.session_state[key_pagina_actual] = max(1, pagina_actual - 1)
-            st.rerun()
-        elif ir_siguiente:
-            st.session_state[key_pagina_actual] = min(total_paginas, pagina_actual + 1)
-            st.rerun()
-        elif ir_final:
-            st.session_state[key_pagina_actual] = total_paginas
-            st.rerun()
