@@ -276,6 +276,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
             solicitud_to_update['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
 
+        if 'Id_Acuerdo_Pago' in solicitud['Metadata_Solicitud']:
+            solicitud_to_update['Metadata_Solicitud']['Id_Acuerdo_Pago'] = solicitud['Metadata_Solicitud']['Id_Acuerdo_Pago']
+
         # Agregamos el ID de la Solicitud Actualizada al Set de IDs Actualizados
         updated_ids.add(solicitud_to_update['ID_Solicitud'])
         need_update_rows.append(solicitud_to_update)
@@ -315,6 +318,13 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             # Actualizamos Addendums si hay
             if 'Addendums' in solicitud['Metadata_Solicitud']:
                 sub_solicitud['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
+
+            if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
+                solicitud_to_update['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
+
+            # Actualizamos el Acuerdo de Pago si Hay
+            if 'Id_Acuerdo_Pago' in solicitud['Metadata_Solicitud']:
+                solicitud_to_update['Metadata_Solicitud']['Id_Acuerdo_Pago'] = solicitud['Metadata_Solicitud']['Id_Acuerdo_Pago']
 
             # Agregamos el ID de la Sub-Solicitud Actualizada al Set de IDs Actualizados
             updated_ids.add(sub_solicitud['ID_Solicitud'])

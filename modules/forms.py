@@ -173,7 +173,7 @@ def obtener_correo_lider_negociador(*, email: str) -> Optional[str]:
     if lider_row.empty:
         return None
     # Si existe la Fila entonces devolvemos el Correo
-    return lider_row['Correo'].values[0]
+    return str(lider_row['Correo'].values[0])
 
 # Función para Obtener el Aliado en Base dado un Conjunto de Deudas y Aliados Posibles
 def obtener_aliado_en_base(*, deudas: list[str], aliados_posibles: list[str]) -> str:

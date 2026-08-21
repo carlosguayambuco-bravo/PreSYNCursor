@@ -2092,7 +2092,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
             monto_actual_solicitud = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"])
             st.metric(
-                label="**Monto Total:**", value=formatNumber(monto_total_solicitud),
+                label="**Monto Total**", value=formatNumber(monto_total_solicitud),
                 help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
                 delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
                 border=True,
@@ -2101,7 +2101,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         with colPersona:
             nombre_nego = obtener_nombre_negociador(email=solicitud["Correo"], full_name=False)
             st.metric(
-                label="**Persona que Solicita:**", value=nombre_nego,
+                label="**Persona que Solicita**", value=nombre_nego,
                 help = "El Nombre del Negociador que realizó la solicitud",
                 border=True,
                 delta = "{}".format(solicitud["Correo"]),
@@ -2113,7 +2113,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             bancos_list = set([d['Banco'] for d in solicitud["Datos_Solicitud"]])
             bancos_str = ", ".join(bancos_list)
             st.metric(
-                label="**Bancos:**", value=bancos_str,
+                label="**Bancos**", value=bancos_str,
                 help = "Los Bancos involucrados en la solicitud",
                 border=True,
                 delta = "Número de Bancos: {}".format(len(bancos_list)),
@@ -2122,12 +2122,9 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             )
 
         with colCedula:
-            # Primero Creamos una Cedula Limpia:
-            cedula_limpia = "{:,.0f}".format(cleanNumber(solicitud["Cedula"])) if pd.notnull(cleanNumber(solicitud["Cedula"])) else "No Brindada"
-            # Reemplazamos las comas por puntos
-            cedula_limpia = cedula_limpia.replace(",", ".")
             st.metric(
-                label="**Cédula:**", value=cedula_limpia,
+                label="**Cédula**", 
+                value=solicitud['Cedula'] if pd.notnull(solicitud['Cedula']) else "No Brindada",
                 help = "El Número de Cedula del titular Solicitado",
                 border=True,
                 delta = "{}".format(solicitud["Metadata_Solicitud"]["Nombre_Cliente"]),
@@ -2144,7 +2141,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
                 ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
                 st.metric(
-                    label="**Fecha de Pago:**", 
+                    label="**Fecha de Pago**", 
                     value=fecha_pago,
                     help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
                     border=True,
@@ -2155,7 +2152,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
             with colTipoPago:
                 st.metric(
-                    label="**Tipo de Pago:**", 
+                    label="**Tipo de Pago**", 
                     value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
                     help = "El Método de Pago del Acuerdo u Oferta de Pago",
                     border=True,
