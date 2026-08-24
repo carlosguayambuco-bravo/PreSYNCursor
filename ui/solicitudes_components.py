@@ -56,6 +56,11 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             key="filtros_recomendados_solicitudes",
             help="Haga clic para aplicar los filtros recomendados.",
         )
+        dejar_sin_responder = st.toggle(
+            label="**Dejar Solicitudes sin Responder**",
+            key="dejar_sin_responder_ejecutivos",
+            help="Activar para dejar solicitudes sin Respuesta"
+        )
 
     # Paso 1: Crear 4 Columnas (Tipo de Solicitud, Aliado , Estado de Solicitud, Ejecutivo)
     colTipo, colAliado, colEstado, colEjecutivo = st.columns(4)
@@ -211,18 +216,22 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
         # Paso 5: Aplicar este orden a solicitudes_df para obtener el DataFrame final ordenado
         solicitudes_df = solicitudes_df.iloc[sorted_indices]
     else:
+        # Creamos la Máscara de solicitudes sin responder
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
+        # Dejamos las Sin Responder si es Necesario
+        if dejar_sin_responder:
+            solicitudes_df = solicitudes_df[mask_sin_responder]
         # Ordenamos los más antiguos primero
         if organizar_abc:
             solicitudes_df = solicitudes_df.sort_values(by=["Casa_Cobro","Timestamp"], ascending=True)
         else:
             solicitudes_df = solicitudes_df.sort_values(by="Timestamp", ascending=True)
-        # Creamos la Máscara de solicitudes sin responder
-        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
         # Ordenamos los Datos para que la mascara quede de ultimas
-        solicitudes_df = pd.concat([
-            solicitudes_df.loc[mask_sin_responder],  # Respondidas (No máscara)
-            solicitudes_df.loc[~mask_sin_responder]   # Sin responder (Máscara)
-        ])
+        if not dejar_sin_responder:
+            solicitudes_df = pd.concat([
+                solicitudes_df.loc[mask_sin_responder],  # Respondidas (No máscara)
+                solicitudes_df.loc[~mask_sin_responder]   # Sin responder (Máscara)
+            ])
 
     # Por Último devolvemos el DataFrame de Solicitudes filtrado
     return solicitudes_df
@@ -2554,6 +2563,28 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
 
+# Función Auxiliar para convertir un Color a RGBA con Transparencia
+def _color_a_rgba(color: str, alpha: float) -> str:
+    """
+    Convierte un color en formato hexadecimal (#RRGGBB) o RGB (rgb(r, g, b)) a
+    un string RGBA con la transparencia indicada.
+
+    Args:
+        color (str): Color en formato hexadecimal o RGB.
+        alpha (float): Transparencia a aplicar al color (0.0 a 1.0).
+
+    Returns:
+        str: Color en formato rgba(r, g, b, alpha).
+    """
+    color = str(color).strip()
+    if color.startswith("#"):
+        color = color.lstrip("#")
+        r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+    else:
+        componentes = color.replace("rgba(", "").replace("rgb(", "").replace(")", "").split(",")[:3]
+        r, g, b = (int(componente) for componente in componentes)
+    return "rgba({}, {}, {}, {})".format(r, g, b, alpha)
+
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     st.title("😎 Resumen de Solicitudes")
@@ -2621,7 +2652,9 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                 ))
 
         # 1.3 Días de Respuesta Promedio y Máximo por Tipo de Solicitud
-        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes)
+        # Leemos el Toggle de Simulación desde el Session State (se instancia debajo de los KPIs)
+        simular_respuestas_hoy = st.session_state.get("simular_respuestas_hoy_kpi", False)
+        tiempos_respuesta = obtener_promedio_tiempos_respuesta(solicitudes, simular_respuestas_hoy=simular_respuestas_hoy)
 
         with colRepDias:
             st.metric(
@@ -2654,6 +2687,14 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
 
             if not respuestas_por_dia['promedio_por_tipo']:
                 st.info("No hay Respuestas", icon="ℹ️")
+
+        # 1.5 Control de Simulación de Respuestas a Hoy (Debajo de los KPIs)
+        st.toggle(
+            label="**Simular Respuestas a Hoy**",
+            value=False,
+            key="simular_respuestas_hoy_kpi",
+            help="Simula que todas las solicitudes sin responder se respondieran en este instante para calcular los tiempos de respuesta.",
+        )
 
     # Añadimos un Divisor
     st.divider()
@@ -2750,29 +2791,132 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                 )
                 st.plotly_chart(fig_pie_estado)
 
-        # 2.3 Timeline de Solicitudes Sin Responder por Tipo de Solicitud
-        with st.container(border=True):
-            # Creamos un Timeline de Solicitudes Sin Responder por Tipo de Solicitud
-            solicitudes_sin_responder['Fecha'] = solicitudes_sin_responder['Timestamp'].dt.date
-            resumen_timeline = solicitudes_sin_responder.groupby(['Fecha', 'Tipo_Solicitud']).size().reset_index(name='count')
+    # Añadimos un Divisor
+    st.divider()
 
-            fig_timeline = px.line(
-                resumen_timeline,
-                x='Fecha',
-                y='count',
-                color='Tipo_Solicitud',
-                markers=True,
-                title="Timeline de Solicitudes Sin Responder por Tipo de Solicitud",
-                labels={'count': 'Número de Solicitudes', 'Fecha': 'Fecha', 'Tipo_Solicitud': 'Tipo de Solicitud'},
-                color_discrete_sequence=px.colors.qualitative.Set2,
+    # Paso 3: Panorama General de Solicitudes en el Tiempo - Se muestra:
+    # Un gráfico de líneas (timeline) que permite hacer seguimiento a las tendencias
+    # de subida de solicitudes en el tiempo y de sus respuestas, con los controles:
+    # - Acumular Solicitudes: Acumula por día las solicitudes en el tiempo (por cada línea que haya).
+    # - Por Tipo de Solicitud: Divide los resultados de las solicitudes por tipo de solicitud.
+    # - Suavizar Líneas: Suaviza las líneas para que no se vean tan cuadradas.
+    # La línea de Respuestas a Solicitudes se incluye en el mismo gráfico (sin distinguir
+    # por tipo de solicitud) para entender si la capacidad operativa es suficiente.
+
+    with st.expander("📈 **Panorama General de Solicitudes**", expanded=False):
+        if solicitudes.empty:
+            st.info("No hay solicitudes disponibles para mostrar en el timeline.", icon="ℹ️")
+        else:
+            # 3.1 Controles del Gráfico (Toggles)
+            colAcumular, colPorTipo, colSuavizar = st.columns(3, border=True, vertical_alignment="center")
+
+            with colAcumular:
+                acumular_solicitudes = st.toggle(
+                    label="**Acumular Solicitudes**",
+                    value=False,
+                    key="acumular_solicitudes_timeline_ejecutivo",
+                    help="Acumula por día las solicitudes en el tiempo (por cada línea que haya).",
+                )
+
+            with colPorTipo:
+                por_tipo_solicitud = st.toggle(
+                    label="**Por Tipo de Solicitud**",
+                    value=False,
+                    key="por_tipo_solicitud_timeline_ejecutivo",
+                    help="Divide los resultados de las solicitudes por tipo de solicitud. Las respuestas a solicitudes se mantienen en una sola línea.",
+                )
+
+            with colSuavizar:
+                suavizar_lineas = st.toggle(
+                    label="**Suavizar Líneas**",
+                    value=False,
+                    key="suavizar_lineas_timeline_ejecutivo",
+                    help="Suaviza las líneas para que no se vean tan cuadradas.",
+                )
+
+            # Definimos la Forma de las Líneas según el Toggle de Suavizado
+            line_shape = "spline" if suavizar_lineas else "linear"
+            smoothing = 1.3 if suavizar_lineas else 0
+
+            # 3.2 Gráfico de Solicitudes y Respuestas en el Tiempo
+            # Paso 1: Crear el DataFrame de Conteos Diarios de Solicitudes (por Timestamp)
+            df_solicitudes = solicitudes[solicitudes["Timestamp"].notna()].copy()
+            df_solicitudes["Fecha"] = df_solicitudes["Timestamp"].dt.date
+
+            if por_tipo_solicitud:
+                # Paso 2: Agrupar por Fecha y Tipo de Solicitud
+                resumen_solicitudes = df_solicitudes.groupby(["Fecha", "Tipo_Solicitud"]).size().reset_index(name="Conteo")
+                if acumular_solicitudes:
+                    resumen_solicitudes["Conteo"] = resumen_solicitudes.groupby("Tipo_Solicitud")["Conteo"].cumsum()
+            else:
+                resumen_solicitudes = df_solicitudes.groupby("Fecha").size().reset_index(name="Conteo")
+                if acumular_solicitudes:
+                    resumen_solicitudes["Conteo"] = resumen_solicitudes["Conteo"].cumsum()
+
+            # Paso 3: Crear el DataFrame de Conteos Diarios de Respuestas (por Fecha_Respuesta)
+            # Las Respuestas no se distinguen por tipo de solicitud, siempre se mantienen iguales
+            df_respuestas = solicitudes[solicitudes["Fecha_Respuesta"].notna()].copy()
+            df_respuestas["Fecha"] = df_respuestas["Fecha_Respuesta"].dt.date
+            resumen_respuestas = df_respuestas.groupby("Fecha").size().reset_index(name="Conteo")
+            if acumular_solicitudes:
+                resumen_respuestas["Conteo"] = resumen_respuestas["Conteo"].cumsum()
+
+            # Paso 4: Crear el Gráfico de Líneas de Solicitudes con el Área Rellenada por Línea
+            fig_solicitudes = go.Figure()
+
+            if por_tipo_solicitud:
+                colores_tipos = px.colors.qualitative.Set2
+                for idx, tipo in enumerate(resumen_solicitudes["Tipo_Solicitud"].unique()):
+                    df_tipo = resumen_solicitudes[resumen_solicitudes["Tipo_Solicitud"] == tipo]
+                    color_linea = colores_tipos[idx % len(colores_tipos)]
+                    fig_solicitudes.add_trace(go.Scatter(
+                        x=df_tipo["Fecha"],
+                        y=df_tipo["Conteo"],
+                        mode="lines+markers",
+                        name="Solicitudes: {}".format(tipo),
+                        line=dict(color=color_linea, width=2, shape=line_shape, smoothing=smoothing),
+                        marker=dict(size=5),
+                        fill="tozeroy",
+                        fillcolor=_color_a_rgba(color_linea, 0.10),
+                        hovertemplate="<b>Solicitudes: {}</b><br>Fecha: %{{x|%Y-%m-%d}}<br>Cantidad: %{{y}}<extra></extra>".format(tipo),
+                    ))
+            else:
+                fig_solicitudes.add_trace(go.Scatter(
+                    x=resumen_solicitudes["Fecha"],
+                    y=resumen_solicitudes["Conteo"],
+                    mode="lines+markers",
+                    name="Solicitudes",
+                    line=dict(color="#4C72B0", width=2, shape=line_shape, smoothing=smoothing),
+                    marker=dict(size=5),
+                    fill="tozeroy",
+                    fillcolor="rgba(76, 114, 176, 0.15)",
+                    hovertemplate="<b>Solicitudes</b><br>Fecha: %{x|%Y-%m-%d}<br>Cantidad: %{y}<extra></extra>",
+                ))
+
+            # Paso 5: Agregar la Línea de Respuestas en el Mismo Gráfico
+            fig_solicitudes.add_trace(go.Scatter(
+                x=resumen_respuestas["Fecha"],
+                y=resumen_respuestas["Conteo"],
+                mode="lines+markers",
+                name="Respuestas",
+                line=dict(color="#55A868", width=2, shape=line_shape, smoothing=smoothing),
+                marker=dict(size=5),
+                fill="tozeroy",
+                fillcolor="rgba(85, 168, 104, 0.15)",
+                hovertemplate="<b>Respuestas</b><br>Fecha: %{x|%Y-%m-%d}<br>Cantidad: %{y}<extra></extra>",
+            ))
+
+            # Actualizamos el Layout del Gráfico
+            fig_solicitudes.update_layout(
+                title="Solicitudes y Respuestas en el Tiempo{}".format(" (Acumuladas)" if acumular_solicitudes else ""),
+                xaxis_title="Fecha",
+                yaxis_title="Cantidad{}".format(" Acumulada" if acumular_solicitudes else ""),
+                legend_title="Serie",
+                hovermode="x unified",
             )
 
-            fig_timeline.update_traces(
-                hovertemplate="<b>Fecha:</b> %{x}<br><b>Tipo de Solicitud:</b> %{customdata[0]}<br><b>Número de Solicitudes:</b> %{y}<extra></extra>",
-                customdata=resumen_timeline[['Tipo_Solicitud']].values
-            )
-
-            st.plotly_chart(fig_timeline)
+            with st.container(border=True):
+                st.plotly_chart(fig_solicitudes, width="stretch", key="timeline_solicitudes_ejecutivo")
 
 # Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
 def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True) -> None:

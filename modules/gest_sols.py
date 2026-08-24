@@ -773,19 +773,31 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         else:
             st.session_state[key] = None
 
-def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
+def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame, *, simular_respuestas_hoy: bool = False) -> dict[str, Any]:
     """
     Calcula el promedio de tiempos de respuesta para las solicitudes.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+        simular_respuestas_hoy (bool, default False): Si es True, las solicitudes sin
+            Fecha de Respuesta se simulan como respondidas en este instante (Zona Horaria
+            America/Bogota) para incluirlas en el cálculo de los tiempos de respuesta.
 
     Returns:
         dict[str, float]: Diccionario con los promedios de tiempos de respuesta.
             - 'promedio_general': Promedio general de días de respuesta.
             - 'promedio_por_tipo': Promedio de días de respuesta por tipo de solicitud.
     """
-    # Paso 1: Crear Columna de Tiempos Respuesta como Diferencia en Días entre Fecha_Respuesta y Timestamp
+    # Paso 1: Si se simula, rellenar las Fechas de Respuesta vacías con la fecha/hora actual
+    if simular_respuestas_hoy:
+        solicitudes_df = solicitudes_df.copy()
+        mask_sin_respuesta = solicitudes_df['Fecha_Respuesta'].isna()
+        # Usamos Zona Horaria America/Bogota y luego la quitamos para no mezclar
+        # datos con y sin Zona Horaria en las comparaciones
+        fecha_hoy = pd.Timestamp.now('America/Bogota').tz_localize(None)
+        solicitudes_df.loc[mask_sin_respuesta, 'Fecha_Respuesta'] = fecha_hoy
+
+    # Paso 2: Crear Columna de Tiempos Respuesta como Diferencia en Días entre Fecha_Respuesta y Timestamp
     solicitudes_aux = solicitudes_df.reset_index(drop=True).assign(
         Tiempo_Respuesta_Dias=getBDDaysDiffFloat_vectorized(
             solicitudes_df['Fecha_Respuesta'],
@@ -793,10 +805,10 @@ def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame) -> dict[str
         )
     )
 
-    # Paso 2: Calcular el Promedio General de Tiempos de Respuesta
+    # Paso 3: Calcular el Promedio General de Tiempos de Respuesta
     promedio_general = solicitudes_aux['Tiempo_Respuesta_Dias'].mean()
 
-    # Paso 3: Calcular el Promedio de Tiempos de Respuesta por Tipo de Solicitud
+    # Paso 4: Calcular el Promedio de Tiempos de Respuesta por Tipo de Solicitud
     promedio_por_tipo = solicitudes_aux.groupby('Tipo_Solicitud')['Tiempo_Respuesta_Dias'].mean().to_dict()
 
     return {
