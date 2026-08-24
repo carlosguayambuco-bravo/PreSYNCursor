@@ -205,7 +205,7 @@ class DeudasActivasSchema(pa.DataFrameModel):
     """
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
     Referencia: str
-    Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,12}$")  # Validación de cédula
+    Cedula: str = pa.Field(nullable=True)  # Validación de cédula
     Nombre_Cliente: str
     Numero_Credito: str
     Banco: str

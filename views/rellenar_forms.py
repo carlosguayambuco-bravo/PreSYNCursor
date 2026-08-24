@@ -428,7 +428,7 @@ st.subheader("✅ Envío del Formulario")
 response_info = {
     "Referencia": referencia_cliente,
     'Cedula': deudas_seleccionadas_df['Cedula'].iloc[0],
-    'Ids_Deuda': '-'.join(deudas_seleccionadas_df['Id_Deuda'].tolist()),
+    'Ids_Deuda': '-'.join(sorted(deudas_seleccionadas_df['Id_Deuda'].tolist())),
     'Casa_Cobro': aliado_seleccionado,
     'Tipo_Solicitud': tipo_solicitud,
     'Datos_Solicitud': json.dumps(info_completa_deudas, ensure_ascii=False),

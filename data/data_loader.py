@@ -12,9 +12,10 @@ import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from modules.bank_normalizer import normalizar_banco
 from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT, MIN_10_WAIT
 from services.google_sheets import GoogleSheetsService
-from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict
+from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
 
 # ----- Funciones de Carga de Información ---
@@ -655,3 +656,47 @@ def load_logs() -> DataFrame[LogsSchema]:
 
     # Devolvemos el DataFrame de Logs
     return logs_df
+
+# Función Auxiliar para Cargar la Cartera Activa Backup
+@st.cache_data(show_spinner="Cargando Cartera Activa de Respaldo (berex malo :( )", ttl=WEEK_WAIT)
+def load_cartera_backup() -> DataFrame[DeudasActivasSchema]:
+    # Primero obtenemos el Servicio de Google Sheets desde el Session State
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja Backup_DB de la Hoja de Configuraciones
+    backup_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Backup_DB')
+
+    # Aplicamos la Limpieza a la Base
+    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+    backup_df.dropna(subset=['Id_Deuda'], inplace=True)
+    backup_df['Id_Deuda'] = backup_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Referencia y Cedula a String
+    backup_df['Referencia'] = backup_df['Referencia'].apply(lambda x: str(x).replace(".0", "").strip())
+    backup_df['Cedula'] = backup_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos las Columnas PaB_Origen y PaB_PL a Números
+    backup_df['PaB_Origen'] = pd.to_numeric(backup_df['PaB_Origen'], errors='coerce')
+    backup_df['PaB_PL'] = pd.to_numeric(backup_df['PaB_PL'], errors='coerce')
+    # Imputamos los Valores Nulos de PaB_Origen con 0
+    imputeNans(backup_df, col='PaB_Origen', value=0)
+    # Imputamos los Valores Nulos de PaB_PL como: PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
+    maskPLNaN = backup_df['PaB_PL'].isna()
+    backup_df.loc[maskPLNaN, 'PaB_PL'] = backup_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
+    # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
+    backup_df['Pricing'] = backup_df['Pricing'].apply(parsePercentage)
+    # Volvemos Numero_Credito a String usando astype
+    backup_df['Numero_Credito'] = backup_df['Numero_Credito'].astype(str)
+
+    # Importante: Normalizamos los Bancos
+    backup_df['Banco'] = backup_df['Banco'].apply(normalizar_banco)
+
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    backup_df['Referencia'] = backup_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
+    # Validamos el Esquema
+    if backup_df.empty:
+        return DeudasActivasSchema.empty()
+    else:
+        backup_df = DeudasActivasSchema.validate(backup_df)
+
+    return backup_df

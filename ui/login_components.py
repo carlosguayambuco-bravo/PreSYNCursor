@@ -8,7 +8,7 @@ from core.auth import are_cookies_saved, delete_saved_credentials
 from core.users import User
 from data.data_loader import load_solicitudes_mec
 from modules.classes import get_banned_manager
-from modules.forms import obtener_deudas_activas
+from modules.forms import obtener_deudas_activas_con_retry
 
 def show_user_info():
     # Primero Cargamos la Información del Usuario desde el estado de sesión
@@ -69,7 +69,7 @@ def show_user_info():
             help="Botón para Reiniciar la Query de Deudas Activas",
             type="primary",
         ):
-            obtener_deudas_activas.clear()
+            obtener_deudas_activas_con_retry.clear()
 
         st.sidebar.markdown("**Cambios Locales:** {}".format(
             len(st.session_state.get('local_changes', []))

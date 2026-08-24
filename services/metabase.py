@@ -7,7 +7,7 @@ import time
 import pandas as pd
 import requests
 
-MAX_QUERY_ATTEMPTS = 3
+MAX_QUERY_ATTEMPTS_EXTRA = 1
 SESSION_TIMEOUT_SECONDS = 900  # 15 minutos
 
 # Clase de MetabaseService para interactuar con la API de Metabase
@@ -91,12 +91,12 @@ class MetabaseService:
 
             return queryDF
 
-        # Primer Error: Timeout, Se aplican reintentos hasta MAX_QUERY_ATTEMPTS
+        # Primer Error: Timeout, Se aplican reintentos hasta MAX_QUERY_ATTEMPTS_EXTRA
         except (requests.exceptions.Timeout, requests.exceptions.HTTPError) as err:
             if response.status_code == 504 or isinstance(err,requests.exceptions.Timeout):
-                if self.query_attempts >= MAX_QUERY_ATTEMPTS:
+                if self.query_attempts >= MAX_QUERY_ATTEMPTS_EXTRA:
                     print('🚯Error por Timeout: Metabase esta lento, se alcanzó el máximo de intentos ({}).'.format(
-                        MAX_QUERY_ATTEMPTS
+                        MAX_QUERY_ATTEMPTS_EXTRA
                     ))
                     raise LookupError("🔴Hubó un error al obtener las Deudas Activas (berex caído)")
         
@@ -152,10 +152,10 @@ class MetabaseService:
         # Segundo Error: Timeout
         except requests.exceptions.Timeout:
             # Verificamos si hemos alcanzado el máximo de intentos
-            if self.query_attempts >= MAX_QUERY_ATTEMPTS:
+            if self.query_attempts >= MAX_QUERY_ATTEMPTS_EXTRA:
                 print(
                     "🚯 Error por Timeout: Metabase esta lento, se alcanzó el máximo de intentos ({}).".format(
-                        MAX_QUERY_ATTEMPTS
+                        MAX_QUERY_ATTEMPTS_EXTRA
                     )
                 )
                 return pd.DataFrame()

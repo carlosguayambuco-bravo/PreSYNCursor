@@ -8,7 +8,7 @@ import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_app_config, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
+from data.data_loader import load_app_config, load_cartera_backup, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
 from data.data_models import DeudasActivasSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
@@ -222,52 +222,29 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
         return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
     return ""
 
-def _ejecutar_logica_deudas(*, referencia: str, estado_key: str) -> DataFrame[DeudasActivasSchema]:
-    """Función auxiliar interna que maneja el flujo del botón y el reintento."""
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
+def obtener_deudas_activas_con_retry(*, referencia: str) -> DataFrame[DeudasActivasSchema]:
+    """
+    Función principal que intenta obtener las Deudas Activas desde Metabase.
+    Si la consulta falla, se cargan las Deudas Activas desde la Cartera Backup.
+    """
     try:
-        # Intentamos obtener los datos
-        df = obtener_deudas_activas(referencia=referencia)
-        # Si funciona, limpiamos el contador de esta llamada específica
-        st.session_state[estado_key] = 0 
-        return df
+        # Intentamos obtener los datos desde Metabase
+        return obtener_deudas_activas(referencia=referencia)
     except LookupError:
-        # Si falla, sumamos un intento al contador específico de esta llamada
-        st.session_state[estado_key] += 1
-        
-        st.error('Error en Carga de Deudas Activas', icon="🔴")
-        
-        # Validamos si ya superó el límite
-        if st.session_state[estado_key] >= 5:
-            st.error('🔴 Demasiados Intentos - Por favor comunicarse con Administrador')
-            st.stop()
+        # Si la consulta a Metabase falla, cargamos la Cartera Backup
+        st.warning('Berex no se encuentra disponible, cargando la Cartera Backup', icon="⚠️")
 
-        # Mostramos el botón. Al hacer clic, Streamlit recargará el script,
-        # volverá a entrar a la función, pero ahora el contador tendrá +1.
-        st.button(
-            label=f"Reintentar Búsqueda de Deudas Activas (Intento {st.session_state[estado_key]}/5)",
-            key=f"btn_{estado_key}",  # Key único para que el botón no choque con otros
-            type="primary",
-            icon="🔴"
-        )
-        st.stop()
+        # Paso 1: Cargamos la Cartera Backup (Contiene la info de todos los clientes)
+        backup_df = load_cartera_backup()
 
-def obtener_deudas_activas_con_retry(*, referencia: str, id_llamada: str = "") -> DataFrame[DeudasActivasSchema]:
-    """
-    Función principal autónoma. 
-    id_llamada: Úsalo sólo si llamas a la función dos veces seguidas con la misma referencia 
-                en la misma pantalla, para evitar que compartan el mismo estado.
-    """
-    # Creamos un identificador único en el session_state para esta llamada en particular
-    estado_key = f"intentos_deudas_{referencia}_{id_llamada}"
-    
-    # Inicializamos el contador para esta llamada si no existe
-    if estado_key not in st.session_state:
-        st.session_state[estado_key] = 0
+        # Paso 2: Filtramos la Cartera Backup por la Referencia dada
+        deudas_backup_df = backup_df[backup_df['Referencia'] == referencia]
 
-    return _ejecutar_logica_deudas(referencia=referencia, estado_key=estado_key)
+        # Paso 3: Devolvemos el DataFrame con las Deudas Activas desde la Cartera Backup
+        return deudas_backup_df
 
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia
-@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
 def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]

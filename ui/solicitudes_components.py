@@ -1833,8 +1833,25 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
     if ya_existe_contraoferta:
         st.warning("Ya existe una contraoferta para esta solicitud. No se puede subir otra.", icon="⚠️")
 
+# Prefijo de las Keys del Session State para la Selección de Solicitudes a Marcar como "Solicitado"
+_PREFIJO_SELECCION_SOLICITADO = "sel_solicitado_"
+
+# Función Auxiliar para Obtener la Key de Selección de una Solicitud en el Diálogo de Solicitado
+def _get_key_seleccion_solicitado(id_solicitud) -> str:
+    return "{}{}".format(_PREFIJO_SELECCION_SOLICITADO, id_solicitud)
+
+# Función Auxiliar para Seleccionar de Forma Masiva las Solicitudes del Diálogo de Solicitado
+def _seleccionar_masivo_solicitado(ids_solicitudes: list) -> None:
+    for id_solicitud in ids_solicitudes:
+        st.session_state[_get_key_seleccion_solicitado(id_solicitud)] = True
+
+# Función Auxiliar para Deseleccionar de Forma Masiva las Solicitudes del Diálogo de Solicitado
+def _deseleccionar_masivo_solicitado(ids_solicitudes: list) -> None:
+    for id_solicitud in ids_solicitudes:
+        st.session_state[_get_key_seleccion_solicitado(id_solicitud)] = False
+
 # Díalogo para Confirmar la Actualización de las Solicitudes a "Solicitado"
-@st.dialog("🫡 Confirmar Actualización de Solicitudes", dismissible=True, width="large", on_dismiss="rerun")
+@st.dialog("🫡 Confirmar Actualización de Solicitudes a `Solicitado`", dismissible=True, width="large", on_dismiss="rerun")
 def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> None:
     st.markdown("### **ℹ️ Información de la Actualización de Solicitudes**")
     st.divider()
@@ -1846,13 +1863,38 @@ def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> 
     )
     st.info("Las Solicitudes ya respondidas no se van a marcar",icon="ℹ️")
 
-    # Mostramos un Resumen de las Solicitudes a Actualizar
-    st.markdown("### **Resumen de Solicitudes a Actualizar**")
-    # Creamos 3 Métricas: Número de Solicitudes, Número de Deudas y Monto Total Propuesto
-    num_solicitudes = len(solicitudes)
-    num_deudas = sum(len(s['Datos_Solicitud']) for _, s in solicitudes.iterrows())
-    monto_total_propuesto = sum(sum(cleanNumber(d['Monto_Propuesto']) for d in s['Datos_Solicitud']) for _, s in solicitudes.iterrows())
+    # Paso 0: Aplicamos la Máscara de Solicitudes sin Responder desde el Principio
+    solicitudes = solicitudes[obtener_mascara_sin_responder(solicitudes)].copy()
 
+    # Si no hay Solicitudes sin Responder no tiene sentido continuar
+    if solicitudes.empty:
+        st.error("No hay Solicitudes sin Responder para marcar como `Solicitado`.", icon="❌")
+        st.stop()
+
+    # Paso 1: Inicializar la Selección de las Solicitudes (Todas Seleccionadas por Defecto)
+    for id_solicitud in solicitudes["ID_Solicitud"]:
+        key_seleccion = _get_key_seleccion_solicitado(id_solicitud)
+        if key_seleccion not in st.session_state:
+            st.session_state[key_seleccion] = True
+    # Limpiamos las Keys de Selección de Solicitudes que ya no existen en la Base Actual
+    keys_seleccion_actuales = {_get_key_seleccion_solicitado(i) for i in solicitudes["ID_Solicitud"]}
+    for key in list(st.session_state.keys()):
+        if key.startswith(_PREFIJO_SELECCION_SOLICITADO) and key not in keys_seleccion_actuales: # type: ignore
+            del st.session_state[key]
+
+    # Paso 2: Calcular las Solicitudes Seleccionadas y Mostrar el Resumen (KPIs)
+    ids_seleccionados = [
+        id_solicitud for id_solicitud in solicitudes["ID_Solicitud"]
+        if st.session_state.get(_get_key_seleccion_solicitado(id_solicitud), True)
+    ]
+    solicitudes_seleccionadas = solicitudes[solicitudes["ID_Solicitud"].isin(ids_seleccionados)]
+
+    # Creamos 3 Métricas: Número de Solicitudes, Número de Deudas y Monto Total Propuesto
+    num_solicitudes = len(solicitudes_seleccionadas)
+    num_deudas = sum(len(s['Datos_Solicitud']) for _, s in solicitudes_seleccionadas.iterrows())
+    monto_total_propuesto = sum(sum(cleanNumber(d['Monto_Propuesto']) for d in s['Datos_Solicitud']) for _, s in solicitudes_seleccionadas.iterrows())
+
+    st.markdown("### **Resumen de Solicitudes a Actualizar**")
     colNumSolicitudes, colNumDeudas, colMontoTotal = st.columns(3, vertical_alignment="center", border=True)
     with colNumSolicitudes:
         st.metric(
@@ -1878,7 +1920,118 @@ def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> 
 
     st.space("medium")
 
-    # Mostramos 2 Botones: Uno para Cancelar y Otro para Confirmar
+    # Paso 3: Buscador de Solicitudes con Filtros Personalizados y Selección/Deselección Masiva
+    st.markdown("### **🔎 Escogencia de Solicitudes a Marcar**")
+
+    colTipo, colCedula, colIdDeuda, colSeleccionar, colDeseleccionar = st.columns(5, vertical_alignment="bottom")
+
+    with colTipo:
+        tipo_solicitud_filtro = st.selectbox(
+            label="**📋 Tipo de Solicitud**",
+            options=["Todos"] + list(solicitudes["Tipo_Solicitud"].unique()),
+            key="tipo_solicitud_filtro_solicitado",
+            help="Filtre las solicitudes por el tipo de solicitud.",
+        )
+
+    with colCedula:
+        cedula_filtro = st.text_input(
+            label="**🆔 Cédula**",
+            key="cedula_filtro_solicitado",
+            help="Filtre las solicitudes por la cédula del cliente.",
+        )
+
+    with colIdDeuda:
+        id_deuda_filtro = st.text_input(
+            label="**🔢 Id Deuda**",
+            key="id_deuda_filtro_solicitado",
+            help="Filtre las solicitudes por el ID de deuda (puede ingresar parte del ID).",
+        )
+
+    # Aplicamos los Filtros Personalizados al DataFrame de Solicitudes
+    solicitudes_filtradas = solicitudes
+    if tipo_solicitud_filtro != "Todos":
+        solicitudes_filtradas = solicitudes_filtradas[solicitudes_filtradas["Tipo_Solicitud"] == tipo_solicitud_filtro]
+    if cedula_filtro:
+        solicitudes_filtradas = solicitudes_filtradas[solicitudes_filtradas["Cedula"].astype(str).str.contains(cedula_filtro, case=False, na=False)]
+    if id_deuda_filtro:
+        solicitudes_filtradas = solicitudes_filtradas[solicitudes_filtradas["Ids_Deuda"].str.contains(id_deuda_filtro, case=False, na=False)]
+
+    ids_filtrados = list(solicitudes_filtradas["ID_Solicitud"])
+
+    with colSeleccionar:
+        st.button(
+            label="**✅ Seleccionar**",
+            key="seleccionar_todas_solicitado",
+            type="secondary",
+            width="stretch",
+            help="Selecciona todas las solicitudes que cumplen los filtros actuales.",
+            disabled=(len(ids_filtrados) == 0),
+            on_click=_seleccionar_masivo_solicitado,
+            args=(ids_filtrados,),
+        )
+
+    with colDeseleccionar:
+        st.button(
+            label="**❌ Deseleccionar**",
+            key="deseleccionar_todas_solicitado",
+            type="secondary",
+            width="stretch",
+            help="Deselecciona todas las solicitudes que cumplen los filtros actuales.",
+            disabled=(len(ids_filtrados) == 0),
+            on_click=_deseleccionar_masivo_solicitado,
+            args=(ids_filtrados,),
+        )
+
+    # Paso 4: Listado Paginado de Solicitudes con Checkbox de Selección (Máximo 30 por Página)
+    solicitudes_por_pagina = 30
+    num_paginas = max(1, math.ceil(len(solicitudes_filtradas) / solicitudes_por_pagina))
+    if "pagina_solicitado" not in st.session_state:
+        st.session_state["pagina_solicitado"] = 0
+    st.session_state["pagina_solicitado"] = min(max(st.session_state["pagina_solicitado"], 0), num_paginas - 1)
+    pagina_actual = st.session_state["pagina_solicitado"]
+
+    colAnterior, colInfoPagina, colSiguiente = st.columns([1, 2, 1], vertical_alignment="center")
+    with colAnterior:
+        if st.button(
+            label="⬅️ Anterior",
+            key="pagina_anterior_solicitado",
+            width="stretch",
+            help="Ir a la página anterior de solicitudes.",
+            disabled=(pagina_actual == 0),
+        ):
+            st.session_state["pagina_solicitado"] = pagina_actual - 1
+            st.rerun(scope='fragment')
+    with colInfoPagina:
+        st.caption("Página **{}** de **{}**".format(pagina_actual + 1, num_paginas))
+    with colSiguiente:
+        if st.button(
+            label="Siguiente ➡️",
+            key="pagina_siguiente_solicitado",
+            width="stretch",
+            help="Ir a la siguiente página de solicitudes.",
+            disabled=(pagina_actual >= num_paginas - 1),
+        ):
+            st.session_state["pagina_solicitado"] = pagina_actual + 1
+            st.rerun(scope='fragment')
+
+    # Mostramos las Solicitudes de la Página Actual dentro de un Contenedor con Altura Definida
+    inicio = pagina_actual * solicitudes_por_pagina
+    solicitudes_pagina = solicitudes_filtradas.iloc[inicio:inicio + solicitudes_por_pagina]
+
+    if solicitudes_pagina.empty:
+        st.info("No hay solicitudes que coincidan con los filtros aplicados.", icon="ℹ️")
+    else:
+        with st.container(height=360, border=True):
+            for _, row in solicitudes_pagina.iterrows():
+                st.checkbox(
+                    label=" ({}) - {} | Cedula: {}, Ids: {}".format(row["Casa_Cobro"], row["Tipo_Solicitud"], row['Cedula'], row["Ids_Deuda"]),
+                    key=_get_key_seleccion_solicitado(row["ID_Solicitud"]),
+                    persist_state="page",
+                )
+
+    st.space("medium")
+
+    # Paso 5: Mostramos 2 Botones: Uno para Cancelar y Otro para Confirmar
     colCancelar, colConfirmar = st.columns(2, vertical_alignment="center", gap="large")
     with colCancelar:
         if st.button(
@@ -1897,15 +2050,14 @@ def dialog_confirmar_actualizacion_solicitudes(*, solicitudes: pd.DataFrame) -> 
             help="Haga clic para confirmar la actualización de solicitudes.",
             type="primary",
             width="stretch",
+            disabled=(num_solicitudes == 0),
         ):
-            # Obtenemos la Máscara sin Responder para esas solicitudes
-            mask_sin_responder = obtener_mascara_sin_responder(solicitudes)
-            # Actualizamos las Solicitudes a "Solicitado"
-            success = update_solicitudes_to_solicitado(solicitudes=solicitudes[mask_sin_responder])
+            # Actualizamos las Solicitudes Seleccionadas a "Solicitado"
+            success = update_solicitudes_to_solicitado(solicitudes=solicitudes_seleccionadas)
             upload_log_to_sheets(
                 info="Marcación Masiva de Solicitados",
                 detail="Se suben {} solicitudes como Solicitados ({})".format(
-                    np.sum(mask_sin_responder),
+                    num_solicitudes,
                     'Éxito' if success else "Error"
                 )
             )
