@@ -2081,7 +2081,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
                     width="stretch",
                 )
-        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo), icon="ℹ️")
+        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="ℹ️")
 
     if st.session_state.get(expander_key, False):
         mostrar_mensaje_actualizado(solicitud=solicitud, origen=origen)
@@ -2346,6 +2346,15 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes de Validación ya respondidas.",
             ):
                 dialog_modificar_respuesta_solicitud(solicitud=solicitud)
+        
+        if solicitud_ya_gestionada:
+            st.space("medium")
+            mostrar_detalles_respuesta_solicitud(
+                solicitud=solicitud,
+                origen='ejecutivo',
+                default_expand_debts=True,
+                expander_key=expander_key
+            )
 
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):

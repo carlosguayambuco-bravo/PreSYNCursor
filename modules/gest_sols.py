@@ -596,6 +596,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_port
                 deuda_dict['Numero_Obligacion'] = deuda['Numero_Credito']
                 deuda_dict['Propuesta'] = cleanNumber(deuda.get('Monto_Propuesto', np.nan), default_nan=np.nan)
                 deuda_dict['Plazos'] = deuda.get('Num_Cuotas', '')
+                deuda_dict['Id_Deuda'] = deuda.get('Id_Deuda','')
                 filas.append(deuda_dict)
                 continue
         else:
@@ -603,6 +604,7 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_port
             nueva_fila['Numero_Obligacion'] = ' | '.join([str(d['Numero_Credito']) for d in solicitud['Datos_Solicitud']])
             nueva_fila['Propuesta'] = sum([cleanNumber(d.get('Monto_Propuesto', 0)) for d in solicitud['Datos_Solicitud']])
             nueva_fila['Plazos'] = max([d.get('Num_Cuotas',1) for d in solicitud['Datos_Solicitud']])
+            nueva_fila['Id_Deuda'] = solicitud['Ids_Deuda']
 
             filas.append(nueva_fila)
             continue
