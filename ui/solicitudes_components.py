@@ -440,6 +440,8 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             if success:
                 upload_massive_addendums(solicitud=solicitud)
         if success:
+            # Limpiamos los Session States de los Diálogos de Respuesta y Modificación para no saturar la RAM
+            limpiar_estado_respuesta_solicitud(id_solicitud=solicitud['ID_Solicitud'])
             st.toast("Solicitud Finalizada y Actualizada a Google Sheets con Éxito.",icon="✅")
             sleep(1)
             st.rerun()
@@ -468,6 +470,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
             key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
             selection_mode="multi",
             width="stretch",
+            persist_state="page",
         )
 
         if selected_ids is None or not selected_ids:
@@ -627,6 +630,48 @@ def limpiar_estado_edicion_solicitud() -> None:
         if key.endswith('_edit'): # type: ignore
             del st.session_state[key]
 
+# Función Auxiliar para Limpiar los Session States de los Diálogos de Respuesta y Modificación de una Solicitud
+def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
+    # Definimos los Prefijos de las Keys que pertenecen a los Diálogos de Respuesta y Modificación de la Solicitud
+    prefijos = [
+        'aliado_solicitud_respuesta_input_{}',
+        'estado_solicitud_respuesta_input_{}',
+        'llamada_solicitud_respuesta_input_{}',
+        'comentario_solicitud_respuesta_input_{}',
+        'monto_total_{}_respuesta',
+        'usar_monto_total_{}',
+        'deudas_dist_monto_{}',
+        'monto_propuesto_{}',
+        'cuotas_{}',
+        'fecha_limite_pago_{}',
+        'num_cuotas_global_{}',
+        'id_deuda_{}_',
+        'numero_credito_{}_',
+        'monto_actual_{}_',
+        'monto_solicitado_{}_',
+        'addendums_count_{}',
+        'addendums_banco_{}_',
+        'addendums_numero_credito_{}_',
+        'addendums_monto_actual_{}_',
+        'addendums_monto_propuesto_{}_',
+        'addendums_cuotas_{}_',
+        'quitar_addendum_{}',
+        'agregar_addendum_{}',
+        'pago_total_obligatorio_{}',
+        'metodo_pago_{}',
+        'formato_pago_{}',
+        'deudas_addendums_solicitud_info_{}',
+        'subir_acuerdo_pago_{}',
+        'pdf_password_{}',
+        'cancelar_solicitud_{}',
+        'finalizar_solicitud_{}',
+    ]
+    # Generamos los Prefijos con el ID de la Solicitud (Con y Sin el Sufijo '_edit')
+    prefijos_con_id = [p.format(id_solicitud) for p in prefijos]
+    for key in list(st.session_state.keys()):
+        if any(key.startswith(prefix) for prefix in prefijos_con_id): # type: ignore
+            del st.session_state[key]
+
 # Función Auxiliar para Construir la Respuesta de una Solicitud
 # Mantiene la Estructura de los Componentes Relevantes para la Validación y
 # devuelve la solicitud_respuesta construida (Los componentes de otros tipos
@@ -663,6 +708,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             index=list(st.session_state["aliados_dict"].keys()).index(solicitud["Casa_Cobro"]) if solicitud["Casa_Cobro"] in st.session_state["aliados_dict"] else 0,
             key="aliado_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             accept_new_options=True,
+            persist_state="page",
         )
         if not solicitud["Casa_Cobro"] in st.session_state["aliados_dict"]:
             st.warning("El aliado original (**{}**) no se encuentra en la lista de aliados disponibles. Se ha seleccionado el primer aliado por defecto.".format(
@@ -681,6 +727,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             options=estado_options,
             index=index_estado,
             key="estado_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+            persist_state="page",
         )
 
     with colLlamada:
@@ -688,6 +735,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             label="**📞 ¿Fue Llamada?**",
             value=solicitud["Metadata_Solicitud"].get("Fue_Llamada", False) if modo_edicion else False,
             key="llamada_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+            persist_state="page",
         )
 
     # Verificamos que ambos esten seleccionados para habilitar el botón de enviar respuesta
@@ -720,6 +768,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             value=solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "") if modo_edicion else "",
             key="comentario_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese cualquier comentario adicional sobre la solicitud.",
+            persist_state="page",
         )
         # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
         solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
@@ -819,6 +868,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             value=fecha_limite_default,
             key="fecha_limite_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese la fecha límite de pago para la solicitud. Es Decir, fecha en que se vence el descuento.",
+            persist_state="page",
         )
         # La Convertimos a Timestamp para poder guardarla en la Solicitud
         if fecha_limite_pago:
@@ -830,6 +880,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             key=key_monto_total,
             help="Ingrese el monto total propuesto para la solicitud. Este monto se distribuirá proporcionalmente entre las deudas.",
             disabled= not st.session_state[key_usar_monto_total],
+            persist_state="page",
         )
 
     with colUsarMontoTotal:
@@ -837,6 +888,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             label="**Usar el Monto de Portafolio**",
             key=key_usar_monto_total,
             help="Seleccione esta opción para distribuir el monto total propuesto entre las deudas.",
+            persist_state="page",
         )
 
     with colCuotas:
@@ -846,6 +898,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             index=0,
             key="cuotas_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Seleccione si desea establecer el número de cuotas para todas las deudas o por deuda individual.",
+            persist_state="page",
         )
 
     # Paso Siguiente: Mostrar el Pills de las deudas a escoger del Portafolio (Solo si se usa el monto total)
@@ -858,6 +911,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             key=key_deudas_dist_monto,
             selection_mode="multi",
             width="stretch",
+            persist_state="page",
         )
 
     # Paso Siguiente: Mostrar los Inputs por Deuda
@@ -877,6 +931,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             key="num_cuotas_global_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             help="Ingrese el número de cuotas para todas las deudas.",
             width="stretch",
+            persist_state="page",
         )
 
     # Siguiente: Expander para mostrar los Inputs por Deuda
@@ -942,7 +997,8 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                     key=key_monto,
                     help="Ingrese el monto propuesto para la deuda {}.".format(d['Id_Deuda']),
                     label_visibility="collapsed",
-                    disabled = usar_monto_total
+                    disabled = usar_monto_total,
+                    persist_state="page",
                 )
             if cuotas_input == "Por Deuda":
                 with colCuotasDeuda: # type: ignore
@@ -956,6 +1012,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                         key=key_cuotas,
                         help="Ingrese el número de cuotas para la deuda {}.".format(d['Id_Deuda']),
                         label_visibility="collapsed",
+                        persist_state="page",
                     )
 
         # Siguiente: Mostramos Posibilidad de Agregar Addendums
@@ -1022,6 +1079,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                         help="Ingrese el banco para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
                         accept_new_options = True, # Permitimos agregar bancos por si no están
+                        persist_state="page",
                     )
                 with colNumCreditoAdd:
                     st.text_input(
@@ -1029,6 +1087,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                         key='addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el número de crédito para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
+                        persist_state="page",
                     )
                 with colMontoActualAdd:
                     st.text_input(
@@ -1036,6 +1095,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                         key='addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el monto actual para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
+                        persist_state="page",
                     )
                 with colMontoPropuestoAdd:
                     st.text_input(
@@ -1043,6 +1103,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                         key='addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo),
                         help="Ingrese el monto propuesto para el addendum {}.".format(i+1),
                         label_visibility="collapsed",
+                        persist_state="page",
                     )
                 if cuotas_input == "Por Deuda":
                     with colCuotasDeudaAdd: # type: ignore
@@ -1055,6 +1116,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                             min_value=1,
                             max_value=60,
                             step=1,
+                            persist_state="page",
                         )
 
             # Añadimos dos Botones: Uno para Agregar Addendum y Otro para Quitar Addendum
@@ -1155,6 +1217,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                 value=solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) if modo_edicion else False,
                 key="pago_total_obligatorio_{}{}".format(solicitud['ID_Solicitud'], sufijo),
                 help="Seleccione esta opción si el pago total es obligatorio para la solicitud.",
+                persist_state="page",
             )
             # Guardamos el Pago Total Obligatorio en la solicitud_respuesta
             solicitud_respuesta['Metadata_Solicitud']["Pago_Total_Obligatorio"] = pago_total_obligatorio
@@ -1167,6 +1230,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
         value=solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "") if modo_edicion else "",
         key="comentario_solicitud_respuesta_input_{}{}".format(solicitud['ID_Solicitud'], sufijo),
         help="Ingrese cualquier comentario adicional sobre la solicitud.",
+        persist_state="page",
     )
     # Guardamos el Comentario en el Metadata de la Solicitud Respuesta
     solicitud_respuesta["Metadata_Solicitud"]["Comentario_Ejecutivo"] = cm_final
@@ -1200,6 +1264,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 index=0,
                 key="metodo_pago_{}".format(solicitud['ID_Solicitud']),
                 help="Seleccione el método de pago para la solicitud.",
+                persist_state="page",
             )
 
         # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
@@ -1212,6 +1277,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 index=0,
                 key="formato_pago_{}".format(solicitud['ID_Solicitud']),
                 help="Seleccione el formato de pago para la solicitud.",
+                persist_state="page",
             )
 
         # Siguiente: Definir el formato_pago
@@ -1232,6 +1298,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                 key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
                 selection_mode="multi",
                 width="stretch",
+                persist_state="page",
             )
 
             acuerdo_pdf_list = st.file_uploader(
@@ -1269,6 +1336,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
                     key="pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']),
                     type="password",
                     help="Ingresa la contraseña del PDF para guardarlo correctamente",
+                    persist_state="page",
                 )
                 if isinstance(e, WrongPasswordError):
                     st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
@@ -1302,7 +1370,7 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
     mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
 
 # Función para Abrir el Diálogo de Modificación de la Respuesta de una Solicitud (Solo Validaciones)
-@st.dialog("🗒️ Modificar Respuesta de Solicitud", dismissible=True, width="large", on_dismiss=limpiar_estado_edicion_solicitud)
+@st.dialog("🗒️ Modificar Respuesta de Solicitud", dismissible=True, width="large", on_dismiss="rerun")
 def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Restricción 1: La Solicitud ya se respondió
@@ -1350,6 +1418,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
         selection_mode="multi",
         width="stretch",
+        persist_state="page",
         disabled = solicitud['Metadata_Solicitud'].get("Pago_Total_Obligatorio", False)
     )
 
