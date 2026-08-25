@@ -2590,7 +2590,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 dialog_modificar_respuesta_solicitud(solicitud=solicitud)
 
         mostrar_subestado_transitorio(solicitud=solicitud)
-        comentario_ejecutivo = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+        comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','')
         if not solicitud_ya_gestionada and comentario_ejecutivo:
             st.info(comentario_ejecutivo, title="Comentario del Ejecutivo", icon="💬")
 
@@ -2726,7 +2726,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if es_solicitud_aprobacion_necesaria(solicitud):
 
             # Mostramos el Comentario del Ejecutivo
-            comentario_ejecutivo = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo')
             st.info("{}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="💬", title="Comentario del Ejecutivo")
 
             mostrar_subestado_transitorio(solicitud=solicitud)
