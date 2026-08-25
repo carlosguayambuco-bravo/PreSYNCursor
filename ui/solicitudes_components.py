@@ -2248,7 +2248,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
                     width="stretch",
                 )
-        st.info("**Comentario del Ejecutivo:** {}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="ℹ️")
+        st.info("{}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="💬", title="Comentario del Ejecutivo")
 
     if st.session_state.get(expander_key, False):
         mostrar_mensaje_actualizado(solicitud=solicitud, origen=origen)
@@ -2308,6 +2308,78 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
                 width="stretch",
             )
 
+# Función Auxiliar para Obtener el Sub-Estado Transitorio de una Solicitud
+def obtener_subestado_transitorio(solicitud: pd.Series) -> Optional[int]:
+    """
+    Devuelve el Sub-Estado Transitorio de la Solicitud cuando su Estado Actual
+    es 'Bajo Comité' o 'Titular Ilocalizable'.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        Optional[int]: 1 (Pendiente de Confirmación), 2 (Petición Denegada),
+        3 (Petición Aceptada), 0 (Sin Información) o None si el Estado de la
+        Solicitud no es Transitorio.
+    """
+    if solicitud["Estado_Solicitud"] == "Bajo Comité":
+        return solicitud["Metadata_Solicitud"].get("Estado_Comite") or 0
+    if solicitud["Estado_Solicitud"] == "Titular Ilocalizable":
+        return solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable") or 0
+    return None
+
+# Función Auxiliar para Obtener la Etiqueta del Sub-Estado Transitorio para el Título del Expander
+def obtener_etiqueta_subestado_transitorio(subestado: Optional[int]) -> str:
+    """
+    Devuelve la Etiqueta del Sub-Estado Transitorio que se muestra en el
+    Título del Expander de la Solicitud.
+
+    Args:
+        subestado (Optional[int]): Sub-Estado Transitorio de la Solicitud.
+
+    Returns:
+        str: Etiqueta del Sub-Estado Transitorio (Vacía si no aplica).
+    """
+    etiquetas_subestado = {
+        1: "Pendiente de Confirmación",
+        2: "Petición Denegada",
+        3: "Petición Aceptada",
+    }
+    return etiquetas_subestado.get(subestado, "") # type: ignore
+
+# Función Auxiliar para Mostrar el Sub-Estado Transitorio con su Contexto en los Datos de la Solicitud
+def mostrar_subestado_transitorio(solicitud: pd.Series) -> None:
+    """
+    Muestra el Sub-Estado Transitorio de la Solicitud ('Bajo Comité' o
+    'Titular Ilocalizable') con su contexto correspondiente.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+    """
+    subestado = obtener_subestado_transitorio(solicitud)
+    if subestado is None:
+        return
+    if subestado == 1:
+        st.info(
+            "A la Espera de que el Negociador acepte o rechace la Petición de 'Bajo Comité o Titular Ilocalizable'.",
+            icon="ℹ️",
+        )
+    elif subestado == 2:
+        st.error(
+            "El Negociador ha Rechazado la Petición de 'Bajo Comité o Titular Ilocalizable'.",
+            icon="❌",
+        )
+    elif subestado == 3:
+        st.success(
+            "La Petición de 'Bajo Comité o Titular Ilocalizable' ha sido aceptada correctamente.",
+            icon="✅",
+        )
+    else:
+        st.info(
+            "No tiene sub-estado: Sin Información de Petición de 'Bajo Comité o Titular Ilocalizable'.",
+            icon="ℹ️",
+        )
+
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
@@ -2319,6 +2391,9 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         aliado=solicitud["Casa_Cobro"],
         id=solicitud["ID_Solicitud"]
     )
+    etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))
+    if etiqueta_subestado:
+        expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
     expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
 
     # Por Último: Mostramos el Botón para Responder la Solicitud
@@ -2410,7 +2485,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         if "Comentario_Negociador" in solicitud["Metadata_Solicitud"]:
             comentario_negociador = solicitud["Metadata_Solicitud"]["Comentario_Negociador"]
             if comentario_negociador:
-                st.info("**Comentario del Negociador:** {}".format(comentario_negociador), icon="ℹ️")
+                st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
 
         # Si hay Fecha_Solicitado se muestra (calculando la diferencia en días hábiles)
         if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
@@ -2513,7 +2588,12 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes de Validación ya respondidas.",
             ):
                 dialog_modificar_respuesta_solicitud(solicitud=solicitud)
-        
+
+        mostrar_subestado_transitorio(solicitud=solicitud)
+        comentario_ejecutivo = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+        if not solicitud_ya_gestionada and comentario_ejecutivo:
+            st.info(comentario_ejecutivo, title="Comentario del Ejecutivo", icon="💬")
+
         if solicitud_ya_gestionada:
             st.space("medium")
             mostrar_detalles_respuesta_solicitud(
@@ -2533,6 +2613,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         aliado=solicitud["Casa_Cobro"],
         id=solicitud["ID_Solicitud"]
     )
+    etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))
+    if etiqueta_subestado:
+        expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
 
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
@@ -2582,10 +2665,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Mostramos el Comentario del Negociadoor y el Ejecutivo
         comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "")
-        comentario_ejecutivo = solicitud["Metadata_Solicitud"].get("Comentario_Ejecutivo", "")
 
         if comentario_negociador:
-            st.info("**Comentario del Negociador:** {}".format(comentario_negociador), icon="ℹ️")
+            st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
 
         # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
@@ -2638,16 +2720,27 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
             mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
 
-        # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
-        if es_solicitud_sin_responder(solicitud):
-            st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
-            return
+        subestado = obtener_subestado_transitorio(solicitud)
 
-        # Siguiente verificación: SI neceista aprobación es necesario que se aprube o desapruebe
+        # Siguiente verificación: Si necesita aprobación es necesario que se apruebe o desapruebe
         if es_solicitud_aprobacion_necesaria(solicitud):
+
+            # Mostramos el Comentario del Ejecutivo
+            comentario_ejecutivo = solicitud['Metadata_Solicitud']['Comentario_Ejecutivo']
+            st.info("{}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="💬", title="Comentario del Ejecutivo")
+
+            mostrar_subestado_transitorio(solicitud=solicitud)
             # Definimos el Tipo de AProbación
             tipo_aprobacion = obtener_tipo_aprobacion_necesaria(solicitud)
             st.info("Esta solicitud requiere aprobación de tipo: {}".format(tipo_aprobacion), icon="ℹ️")
+
+            cm_aprobacion = st.text_area(
+                label="**Comentario de la Aprobación**",
+                value=solicitud["Metadata_Solicitud"].get("Comentario_Negociador", ""),
+                key="comentario_aprobacion_solicitud_{}".format(solicitud['ID_Solicitud']),
+                help="Ingrese un comentario para enriquecer el entendimiento de la aprobación o rechazo de la petición.",
+                persist_state="page",
+            )
 
             # Creamos 2 Botones: Uno para Aprobar y Otro para Desaprobar la Solicitud
             colAprobar, colDesaprobar = st.columns(2, vertical_alignment="center", gap="large")
@@ -2670,21 +2763,32 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 )
 
             if hacer_aprobacion or hacer_desaprobacion:
-                aprobado = hacer_aprobacion
-                # Subimos la Aprobación
+                aceptar_peticion = hacer_aprobacion
                 success = actualizar_aprobacion_necesaria(
                     solicitud=solicitud,
                     tipo_aprobacion=tipo_aprobacion,
-                    aprobado=aprobado
+                    aprobado=aceptar_peticion,
+                    comentario=str(cm_aprobacion),
                 )
                 if success:
-                    st.toast("Solicitud {} {} correctamente.".format(solicitud['ID_Solicitud'], "aprobada" if aprobado else "desaprobada"), icon="✅")
+                    st.toast("Solicitud {} {} correctamente.".format(solicitud['ID_Solicitud'], "aprobada" if aceptar_peticion else "desaprobada"), icon="✅")
                     st.rerun()
                 else:
-                    st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aprobado else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
+                    st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aceptar_peticion else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
 
             # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
             return 
+
+        mostrar_subestado_transitorio(solicitud=solicitud)
+
+        if subestado is not None:
+            mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
+            return
+
+        # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
+        if es_solicitud_sin_responder(solicitud):
+            st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
+            return
 
         mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
 

@@ -203,13 +203,14 @@ def obtener_mascara_aprobacion_necesaria(solicitudes_df: pd.DataFrame) -> pd.Ser
     maskAprobIlocalizado = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 1) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
     return (maskAprobComite | maskAprobIlocalizado)
 
-def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Optional[Literal["Comité", "Titular Ilocalizable"]], aprobado: bool) -> bool:
+def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Optional[Literal["Comité", "Titular Ilocalizable"]], aprobado: bool, comentario: str = "") -> bool:
     """
     Actualiza el estado de aprobación de una solicitud específica.
 
     Args:
         solicitud (pd.Series): Información de la solicitud.
         aprobado (bool): Indica si la solicitud fue aprobada o no.
+        comentario (str): Comentario del Negociador que enriquece el entendimiento de la aprobación o rechazo.
 
     Returns:
         bool: True si la actualización fue exitosa, False en caso contrario.
@@ -220,8 +221,10 @@ def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Opt
         return False
     # Paso 1: Definir la Llave de Metadata según el Tipo de Aprobación
     llave_metadata = "Estado_Comite" if tipo_aprobacion == "Comité" else "Estado_Titular_Ilocalizable"
-    # Paso 2: Actualizar el Estado (2 = Aprobado, 3 = Desaprobado)
-    solicitud['Metadata_Solicitud'][llave_metadata] = 2 if aprobado else 3
+    # Paso 2: Actualizar el Estado (2 = Rechazado, 3 = Aprobado)
+    solicitud['Metadata_Solicitud'][llave_metadata] = 3 if aprobado else 2
+    # Paso 2.1: Actualizar el Comentario del Negociador con el Comentario de la Aprobación o Rechazo
+    solicitud['Metadata_Solicitud']["Comentario_Negociador"] = comentario
 
     # Paso 3: Actualizar la Solicitud en Google Sheets
     return update_solicitud_in_google_sheets(solicitud=solicitud)
