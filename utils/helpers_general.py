@@ -67,11 +67,12 @@ def cleanNumber(value, default_nan: float = 0.0) -> float:
                 # If there are multiple commas acting as decimals, replacing them all with '.' will still error out.
                 clean_val = clean_val.replace(',', '.')
         elif '.' in clean_val and clean_val.count('.') == 1:
-            # 2 Possible Cases: Decimal Separator or Thousand Separator
-            # Detecting case thousand by: splitting and Confirming len of all == 3
-            if all([len(s) == 3 for s in clean_val.split('.')]):
+            parts = clean_val.split('.')
+            # The first part can be 1-3 digits; all following parts MUST be exactly 3 digits
+            if 1 <= len(parts[0]) <= 3 and all(len(s) == 3 for s in parts[1:]):
                 clean_val = clean_val.replace('.', '')
-            # Else it's decimal so its ignored
+            else:
+                pass
         return float(clean_val)
     except ValueError:
         clean_val = pd.to_numeric(clean_val, errors='coerce')
