@@ -434,10 +434,22 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
         )
     if actualizar_solicitud:
         with st.spinner("Subiendo Solicitud a Google Sheets..."):
+            # Definimos las Keys del Session State para rastrear el Estado de la Subida del Acuerdo
+            key_acuerdo_subido = 'acuerdo_pago_subido_{}'.format(solicitud['ID_Solicitud'])
+            key_id_acuerdo_pago = 'id_acuerdo_pago_subido_{}'.format(solicitud['ID_Solicitud'])
             # Subimos el Acuerdo de Pago si es necesario
             if (pdf_bytes is not None) and len(pdf_bytes) > 0:
-                file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
-                success = bool(file_id)
+                # Verificamos si el Acuerdo de Pago ya fue subido en un intento anterior para no duplicarlo
+                if st.session_state.get(key_acuerdo_subido, False):
+                    file_id = st.session_state.get(key_id_acuerdo_pago, '')
+                    success = bool(file_id)
+                else:
+                    file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
+                    success = bool(file_id)
+                    # Guardamos el Estado de la Subida del Acuerdo en el Session State
+                    if success:
+                        st.session_state[key_acuerdo_subido] = True
+                        st.session_state[key_id_acuerdo_pago] = file_id
                 # Guardamos el Id del Acuerdo en la Metadata de la Solicitud
                 solicitud["Metadata_Solicitud"]["Id_Acuerdo_Pago"] = file_id
             else:
@@ -672,6 +684,9 @@ def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
         'deudas_addendums_solicitud_info_{}',
         'subir_acuerdo_pago_{}',
         'pdf_password_{}',
+        'acuerdo_pago_subido_{}',
+        'id_acuerdo_pago_subido_{}',
+        'correo_acuerdo_enviado_{}',
         'cancelar_solicitud_{}',
         'finalizar_solicitud_{}',
     ]

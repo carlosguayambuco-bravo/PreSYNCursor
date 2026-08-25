@@ -12,23 +12,12 @@ import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco
-from modules.constants import DEFAULT_DISCOUNT_PL, HOUR_WAIT, DAY_WAIT, WEEK_WAIT, MIN_10_WAIT
+from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
-
-# ----- Funciones de Carga de Información ---
-SOLICITUDES_SHEET_ID = '1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk'
-SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
-REFCHANGES_SHEET_ID = '1jcPPhtF2YK3Kr7P_A0Mgh2OqhOfnVWB2to3UPoSH5tE'
-PABIDEAL_SHEET_ID = '1Obm0O5hfIIzCMy5RvdX5b1JBf3pmzIrYdYa1vPOB83M'
-ALIADOS_SHEET_ID = '1px7MX8zMKPe-PeCTvpNkX4kFMp1XL5IuBUrP1oGftiw'
-MASIVAS_SHEET_ID = '1sOIk9BAa2VE-P-wnMPDJh8_hYLGgO5WaJL7m9LIM2is'
-LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
-HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
-CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
-CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
 
 #--> Carga de Solicitudes del Mes en Curso
 @st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=MIN_10_WAIT)
@@ -61,6 +50,9 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
 
+    # Corregimos los IDs de Solicitud Duplicados (si existen) antes de validar el esquema
+    solicitudes_df = fix_duplicated_solicitud_ids(solicitudes_df)
+
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
         solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
@@ -76,6 +68,41 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     st.session_state['local_changes'] = []
 
     # Devolvemos el DataFrame
+    return solicitudes_df
+
+# Función Auxiliar para Corregir los IDs de Solicitud Duplicados en la Worksheet y en el DF
+def fix_duplicated_solicitud_ids(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
+    # Verificamos si existen IDs Duplicados en las Solicitudes (dejando el primero de cada grupo)
+    duplicated_mask = solicitudes_df['ID_Solicitud'].duplicated(keep='first')
+
+    # Si no hay duplicados, devolvemos el DF tal cual
+    if not duplicated_mask.any():
+        return solicitudes_df
+
+    # Obtenemos la Worksheet de Solicitudes para corregir los IDs directamente en Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+    solicitudes_ws = google_sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
+
+    # Calculamos el último ID de la secuencia (el más alto) para mantener el orden
+    numeric_ids = pd.to_numeric(solicitudes_df['ID_Solicitud'], errors='coerce')
+    last_id = int(numeric_ids.max()) if numeric_ids.notna().any() else 0
+
+    # Corregimos cada ID duplicado (siempre el último de cada grupo) con last_id + 1
+    for idx in solicitudes_df.loc[duplicated_mask].index:
+        last_id += 1
+        new_id = str(last_id)
+
+        # Actualizamos el ID en el DF
+        solicitudes_df.loc[idx, 'ID_Solicitud'] = new_id
+
+        # Actualizamos el ID en Sheets (la fila es index + 2 y la columna del ID siempre es A)
+        sheet_row = idx + 2
+        _retry(lambda nid=new_id, row=sheet_row: solicitudes_ws.update(range_name=f"A{row}", values=[[nid]]), label=f"Fix duplicated ID row {sheet_row}")
+
+    # Reiniciamos el cache del mapeo de IDs a Filas para evitar errores de mapeo
+    get_solicitud_id_to_row_mapping.clear()
+
+    # Devolvemos el DF corregido
     return solicitudes_df
 
 # --> Carga de Solicitudes del Mes en Curso (Aplicando los Cambios locales)

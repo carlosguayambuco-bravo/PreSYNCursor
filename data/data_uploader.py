@@ -7,9 +7,8 @@ from pandera.typing import DataFrame
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from data.data_models import SolicitudesSchema
-from modules.constants import SOLICITUDES_ID_DELAY
+from modules.constants import SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
 
@@ -33,8 +32,9 @@ def get_solicitud_id_to_row_mapping() -> dict[str, int]:
     # Fila 1 es el header, así que empezamos desde fila 2
     mapping = {}
     for row_num, solicitud_id in enumerate(id_column[1:], start=2):
-        if solicitud_id:  # Si no está vacío
-            mapping[str(solicitud_id).replace('.0','').strip()] = row_num
+        id_cleaned = str(solicitud_id).replace('.0','').strip()
+        if solicitud_id and not (id_cleaned in mapping):  # Si no está vacío y no esta ya presente
+            mapping[id_cleaned] = row_num
     
     return mapping
 

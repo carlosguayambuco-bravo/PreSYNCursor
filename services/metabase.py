@@ -7,7 +7,7 @@ import time
 import pandas as pd
 import requests
 
-MAX_QUERY_ATTEMPTS_EXTRA = 1
+MAX_QUERY_ATTEMPTS_EXTRA = 0
 SESSION_TIMEOUT_SECONDS = 900  # 15 minutos
 
 # Clase de MetabaseService para interactuar con la API de Metabase

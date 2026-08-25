@@ -341,8 +341,16 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     # Si la Solicitud Inicial es Exitosa, Es Acuerdo de Pago u Oferta de Acuerdo y tenemos bytes del PDF
     # Se envia el correo correspondiente
     if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
-        if not send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes):
-            st.error("No se pudo enviar el correo con el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="❌")
+        # Definimos la Key del Session State para rastrear el Estado del Envío del Correo
+        key_correo_enviado = 'correo_acuerdo_enviado_{}'.format(solicitud['ID_Solicitud'])
+        # Verificamos si el Correo ya fue enviado en un intento anterior para no duplicarlo
+        if st.session_state.get(key_correo_enviado, False):
+            st.info("El correo con el Acuerdo de Pago ya fue enviado anteriormente, por lo que no se volverá a enviar.", icon="📧")
+        elif send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes):
+            # Guardamos el Estado del Envío del Correo en el Session State
+            st.session_state[key_correo_enviado] = True
+        else:
+            st.error("No se pudo enviar el correo con el Acuerdo de Pago. Reintentar", icon="❌")
     elif pdf_bytes is None and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
         st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
 
