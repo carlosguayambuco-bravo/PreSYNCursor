@@ -313,7 +313,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             sub_solicitud['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
 
             # Guardamos un trace en la Metadata
-            solicitud_to_update['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
+            sub_solicitud['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
             # Actualizamos Addendums si hay
             if 'Addendums' in solicitud['Metadata_Solicitud']:
