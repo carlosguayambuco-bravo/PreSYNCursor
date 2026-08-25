@@ -2614,8 +2614,21 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         id=solicitud["ID_Solicitud"]
     )
     etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))
+    # Añadimos Coloraciones según Estados
     if etiqueta_subestado:
         expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
+    elif solicitud['Estado_Solicitud'] == 'Exitosa':
+        expander_name = "{} | :green-background[{}]".format(expander_name, 'Solicitud Aprobada')
+    elif solicitud['Estado_Solicitud'] == 'Solicitado':
+        expander_name = "{} | :blue-background[{}]".format(expander_name, 'Solicitado a Aliado')
+    elif solicitud['Estado_Solicitud'] == 'Sin Tocar':
+        expander_name = "{} | :orange-background[{}]".format(expander_name, 'Sin Gestionar')
+    else:
+        expander_name = "{} | :red-background[{}]".format(expander_name, 'Solicitud Rechazada')
+
+    # Añadimos Nombre de Cliente
+    expander_name = "{} | :gray-background[{}]".format(expander_name, solicitud['Metadata_Solicitud'].get('Nombre_Cliente','Nombre no Encontrado'))
+
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
 
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
@@ -2791,6 +2804,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             return
 
         mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
+
+        if solicitud['Estado_Solicitud'] != 'Exitosa':
+            return
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:

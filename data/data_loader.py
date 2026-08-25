@@ -37,7 +37,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
         solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)
 
     # Volvemos las Columnas Referencia, ID_Solicitud y Cedula a String
-    for col in ['Referencia', 'ID_Solicitud', 'Cedula']:
+    for col in ['Referencia', 'ID_Solicitud', 'Cedula', 'Ids_Deuda']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
     # Cargamos los Cambios de Referencia y los Aplicamos
