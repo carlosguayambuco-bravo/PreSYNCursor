@@ -9,7 +9,7 @@ from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_app_config, load_cartera_backup, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
-from data.data_models import DeudasActivasSchema, InputCruceSchema
+from data.data_models import DeudasActivasSchema #, InputCruceSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
