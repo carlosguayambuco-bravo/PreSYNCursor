@@ -60,6 +60,24 @@ WHERE
     bcrd.id = {debt_id}
 """
 
+QUERY_TOTAL_REPARADORAS = """
+SELECT
+    bcrd.id AS Id_Deuda,
+    bcr.document_number AS Cedula,
+    bcr.full_name AS Nombre_Cliente,
+    bcrd.financial_entity_name AS Banco,
+    bcrd.credit_number AS Numero_Credito,
+    bcrd.amount AS Monto_Actual,
+
+FROM dealer_public.berex_credit_repair_debts bcrd
+
+LEFT JOIN dealer_public.berex_credit_repairs AS bcr
+    ON bcr.id = bcrd.credit_repair_id
+
+WHERE 
+    bcr.status IN ('active','partial_credito')
+"""
+
 QUERY_ACTIVE_DEBTS = """
 WITH PLvanex AS (
     SELECT
