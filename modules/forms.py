@@ -9,7 +9,7 @@ from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_app_config, load_cartera_backup, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
-from data.data_models import DeudasActivasSchema #, InputCruceSchema
+from data.data_models import DeudasActivasSchema, InputCruceSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
@@ -317,30 +317,30 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
         return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
 
 # Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
-# @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
-# def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
-#     # Paso 1: Obtener El Servicio de Metabase
-#     metabase_service: MetabaseService = st.session_state["metabase_service"]
-#     # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
-#     completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
+@st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
+def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+    # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
+    completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
 
-#     # Paso 3: Limpieza de Datos
-#     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
-#     completo_df.dropna(subset=['Id_Deuda'], inplace=True)
-#     completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
-#     # Volvemos la Columna Referencia y Cedula a String
-#     completo_df['Cedula'] = completo_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
-#     # Volvemos la Columna Monto_Actual a Números
-#     completo_df['Monto_Actual'] = pd.to_numeric(completo_df['Monto_Actual'], errors='coerce')
-#     # Volvemos Numero_Credito, Nombre_Cliente y Banco a String usando astype
-#     completo_df['Numero_Credito'] = completo_df['Numero_Credito'].astype(str)
-#     completo_df['Nombre_Cliente'] = completo_df['Nombre_Cliente'].astype(str)
-#     completo_df['Banco'] = completo_df['Banco'].astype(str)
+    # Paso 3: Limpieza de Datos
+    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+    completo_df.dropna(subset=['Id_Deuda'], inplace=True)
+    completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Referencia y Cedula a String
+    completo_df['Cedula'] = completo_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Monto_Actual a Números
+    completo_df['Monto_Actual'] = pd.to_numeric(completo_df['Monto_Actual'], errors='coerce')
+    # Volvemos Numero_Credito, Nombre_Cliente y Banco a String usando astype
+    completo_df['Numero_Credito'] = completo_df['Numero_Credito'].astype(str)
+    completo_df['Nombre_Cliente'] = completo_df['Nombre_Cliente'].astype(str)
+    completo_df['Banco'] = completo_df['Banco'].astype(str)
 
-#     # Estandarizamos el Banco
-#     completo_df['Banco'] = normalizar_bancos_vectorizado(completo_df['Banco'])
+    # Estandarizamos el Banco
+    completo_df['Banco'] = normalizar_bancos_vectorizado(completo_df['Banco'])
 
-#     # Validamos el Esquema
-#     completo_df = InputCruceSchema.validate(completo_df)
-#     # Devolvemos el DF
-#     return completo_df
+    # Validamos el Esquema
+    completo_df = InputCruceSchema.validate(completo_df)
+    # Devolvemos el DF
+    return completo_df

@@ -72,7 +72,7 @@ def show_user_info():
             obtener_deudas_activas_con_retry.clear()
 
         st.sidebar.markdown("**Cambios Locales:** {}".format(
-            len(st.session_state.get('local_changes', []))
+            len(st.session_state.get('local_solicitudes_changes', []))
         ))
 
         st.sidebar.divider()
@@ -87,7 +87,7 @@ def show_user_info():
         banner_manager.reset()
 
         # Limpiamos los Cambios Locales
-        st.session_state['local_changes'] = []
+        st.session_state['local_solicitudes_changes'] = []
 
         # Recargamos la Información
         st.rerun()

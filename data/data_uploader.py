@@ -7,9 +7,9 @@ from pandera.typing import DataFrame
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_models import SolicitudesSchema
+from data.data_models import SolicitudesSchema, PendienteCruceSchema
 from modules.constants import SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
-from utils.helpers_sheets import _retry, appendDataFrameToEnd, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
+from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
 
 # Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
@@ -76,16 +76,16 @@ def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
     return mapping[solicitud_id_clean]
 
 # Función Auxiliar para Añadir cambios locales
-def add_cambios_locales_to_session_state(cambios_locales: list[pd.Series] | pd.DataFrame):
+def add_cambios_locales_to_session_state(cambios_locales: list[pd.Series] | pd.DataFrame, cambios_key: str = 'local_solicitudes_changes'):
     # Paso 1: Inicializar el Session State si no esta inicializado
-    if not ('local_changes' in st.session_state):
-        st.session_state['local_changes'] = []
+    if not (cambios_key in st.session_state):
+        st.session_state[cambios_key] = []
 
     # Paso 2: Extender la lista
     if isinstance(cambios_locales, pd.DataFrame):
-        st.session_state['local_changes'].extend([cambios_locales.iloc[i] for i in range(len(cambios_locales))])
+        st.session_state[cambios_key].extend([cambios_locales.iloc[i] for i in range(len(cambios_locales))])
     else:
-        st.session_state['local_changes'].extend(cambios_locales)
+        st.session_state[cambios_key].extend(cambios_locales)
 
     print('✅Añadidos Cambios Locales: {}'.format(len(cambios_locales)))
 
@@ -304,4 +304,61 @@ def upload_addendum_debt(*,
         return True
     except Exception as e:
         st.error(f"Error al subir el Addendum a Google Sheets: {e}")
+        return False
+
+def update_base_cruce_info(*, cruce_df: DataFrame[PendienteCruceSchema]) -> bool:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    # Paso 2: Abrir la Hoja 'Pendientes_IdAutDeud' de las Configuraciones
+    cruceWS = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Pendientes_IdAutDeud')
+    original_cruce = cruce_df.copy()
+    # Paso 3: Volvemos la Metadata a String casi por Completo
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda d: {k: convert_data_to_string(v) for k,v in d.items()})
+    # Paso 4: Volvemos la Metadata a String usando JSON
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: json.dumps(m))
+    # Paso 5: Intentar realizar la Actualización usando applyChanges
+    try:
+        result = applyChanges(
+            ws = cruceWS,
+            df = cruce_df,
+            identifierCol='Id_Cruce',
+            numericCols=['Monto_Actual'],
+            semiStrCols=['Cedula'],
+            pureStrCols=['Numero_Credito','Banco','Nombre_Cliente'],
+        )[0]
+        # Añadimos los Cambios Locales
+        add_cambios_locales_to_session_state(
+            cambios_locales=original_cruce,
+            cambios_key='local_cruce_changes'
+        )
+        return result
+    except Exception as e:
+        st.error("Error al Subir los Datos del Cruce ```{}```".format(
+            e
+        ), title="Error de Subida")
+        return False
+
+def upload_base_cruce_info(*,cruce_df: DataFrame[PendienteCruceSchema]) -> bool:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    # Paso 2: Abrir la Hoja 'Pendientes_IdAutDeud' de las Configuraciones
+    cruceWS = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Pendientes_IdAutDeud')
+    original_cruce = cruce_df.copy()
+    # Paso 3: Volvemos la Metadata a String casi por Completo
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda d: {k: convert_data_to_string(v) for k,v in d.items()})
+    # Paso 4: Volvemos la Metadata a String usando JSON
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: json.dumps(m))
+    # Paso 5: Subir la Información
+    try:
+        appendDataFrameToEnd(cruceWS, cruce_df)
+        # Añadimos los cambios locales
+        add_cambios_locales_to_session_state(
+            cambios_locales=original_cruce,
+            cambios_key='local_cruce_changes'
+        )
+        return True
+    except Exception as e:
+        st.error("Error al Subir los Datos del Cruce ```{}```".format(
+            e
+        ), title="Error de Subida")
         return False

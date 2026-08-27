@@ -111,11 +111,6 @@ def initialize_data(debugging_mode: bool = False):
         st.session_state["special_user_permissions_dict"] = load_special_user_permissions()
         if debugging_mode:
             st.success("Special User Permissions Loaded")
-    if not ("cartera_activa_df" in st.session_state):
-        anyChange = True
-        st.session_state["cartera_activa_df"] = load_cartera_activa()
-        if debugging_mode:
-            st.success("Cartera Activa Loaded")
     if not ("aliados_dict" in st.session_state):
         anyChange = True
         aliados_df = load_aliados_dataframe()

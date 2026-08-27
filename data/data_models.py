@@ -1,6 +1,8 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Any, Union
+from datetime import datetime
+from typing import Dict, List, Optional, Literal, NotRequired
+from typing_extensions import TypedDict
 # Librerías de Terceros
 import pandas as pd
 import pandera.pandas as pa
@@ -190,9 +192,10 @@ class CarteraActivaSchema(pa.DataFrameModel):
     Referencia: str 
     Cedula: str = pa.Field(nullable=True) # En este caso la Cedula puede ser Nula
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    Nombre_Cliente: str
     Numero_Credito: str
     Banco: str
-    PaB_Origen: float
+    Monto_Actual: float
 
     class Config:
         strict = True  # Validación estricta de columnas
@@ -248,3 +251,58 @@ class PlantillaSolicitudesSchema(pa.DataFrameModel):
     class Config:
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
+
+class DeudasPosiblesCruce(TypedDict):
+    Banco: str
+    Monto_Actual: float
+    Numero_Credito: str
+    Id_Deuda: str
+
+class PagosCuotasCruce(TypedDict):
+    Cuotas: int
+    Monto: float
+    En_Portafolio: bool
+
+
+class MetadataPendienteCruce(TypedDict):
+    Id_Registro: int
+    Pagos_Cuotas: List[PagosCuotasCruce]
+    Fecha_Identificacion: datetime
+    Fecha_Limite_Pago: datetime
+    Etiqueta: Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
+    Deudas_Posibles: List[DeudasPosiblesCruce]
+    Cruce_Status: Literal['Sin Reconocer','Reconocido','Subido Alianzas']
+    Casa_Cobro: str
+    Ejecutivo_Subida: str
+    Alias_Casa: NotRequired[str]
+    Id_Definitivo: NotRequired[str]
+    Portafolio_Ids: NotRequired[str]
+    Monto_Actual_Original: NotRequired[float]
+    Ultima_Actualizacion: Optional[datetime]
+
+class PendienteCruceSchema(pa.DataFrameModel):
+    Id_Cruce: str # Un UUID
+    Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
+    Nombre_Cliente: str = pa.Field(nullable=True)
+    Banco: str = pa.Field(nullable=True)
+    Monto_Actual: float = pa.Field(nullable=True)
+    Numero_Credito: str = pa.Field(nullable=True)
+    Metadata: Series[MetadataPendienteCruce]
+
+class InputCruceSchema(pa.DataFrameModel):
+    Cedula: Optional[Series[str]] = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
+    Nombre_Cliente: Optional[Series[str]] = pa.Field(nullable=True)
+    Banco: Optional[Series[str]] = pa.Field(nullable=True)
+    Monto_Actual: Optional[Series[float]] = pa.Field(nullable=True)
+    Numero_Credito: Optional[Series[str]] = pa.Field(nullable=True)
+    Id_Deuda: Optional[Series[str]]
+
+class InputFullScehma(InputCruceSchema):
+    Monto_Propuesto: Optional[Series[float]]
+    Fecha_Limite_Pago: Optional[Series[datetime]]
+
+class OutputCruceSchema(pa.DataFrameModel):
+    Id_Registro: str
+    Ids_Candidatos: Series[List[str]]
+    Etiqueta_Registro: str = pa.Field(isin=['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO'])
+    Motivos_Etiqueta: str

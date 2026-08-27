@@ -7,11 +7,12 @@ import json
 from gspread_dataframe import get_as_dataframe
 from pandera.typing import DataFrame
 import gspread
+import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco
 from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
@@ -65,7 +66,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     
 
     # Por último, reiniciamos los cambios locales
-    st.session_state['local_changes'] = []
+    st.session_state['local_solicitudes_changes'] = []
 
     # Devolvemos el DataFrame
     return solicitudes_df
@@ -115,10 +116,10 @@ def load_current_month_solicitudes() -> pd.DataFrame:
     sols_ajustadas = solicitudes_df.copy()
 
     # 2: Aplicamos los Cambios Locales
-    if ('local_changes' in st.session_state) and len(st.session_state['local_changes']) > 0:
+    if ('local_solicitudes_changes' in st.session_state) and len(st.session_state['local_solicitudes_changes']) > 0:
 
         # Paso 1: Creamos un DF con todas las Series
-        local_changes_df = pd.DataFrame(st.session_state['local_changes'])
+        local_changes_df = pd.DataFrame(st.session_state['local_solicitudes_changes'])
         # Quitamos Duplicados dejando el último
         local_changes_df = local_changes_df.drop_duplicates(subset='ID_Solicitud', keep='last')
         # Limpiamos Fechas
@@ -620,9 +621,10 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
         'Id deuda': 'Id_Deuda',
         'Referencia': 'Referencia',
         'cedula': 'Cedula',
-        'deuda bravo': 'PaB_Origen',
+        'deuda bravo': 'Monto_Actual',
         'numero_credito': 'Numero_Credito',
         'Banco Normalizado': 'Banco',
+        'Nombre Cliente': 'Nombre_Cliente',
     })
 
     # Volvemos las Columnas Referencia, Cedula y Id_Deuda a String
@@ -634,14 +636,15 @@ def load_cartera_activa() -> DataFrame[CarteraActivaSchema]:
     refChangesDict = st.session_state["changes_references_dict"]
     cartera_activa_df['Referencia'] = cartera_activa_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
 
-    # Volvemos la Columna Numero_Credito a String usando astype(str)
+    # Volvemos las Columnas Numero_Credito y Nombre_Cliente a String usando astype(str)
     cartera_activa_df['Numero_Credito'] = cartera_activa_df['Numero_Credito'].astype(str)
+    cartera_activa_df['Nombre_Cliente'] = cartera_activa_df['Nombre_Cliente'].astype(str)
 
-    # Volvemos la Columna PaB_Origen a Número
-    cartera_activa_df['PaB_Origen'] = pd.to_numeric(cartera_activa_df['PaB_Origen'], errors='coerce')
+    # Volvemos la Columna Monto_Actual a Número
+    cartera_activa_df['Monto_Actual'] = pd.to_numeric(cartera_activa_df['Monto_Actual'], errors='coerce')
 
     # Dejamos solo las Columnas Necesarias
-    cartera_activa_df = cartera_activa_df[['Id_Deuda', 'Referencia', 'Cedula', 'PaB_Origen', 'Numero_Credito', 'Banco']]
+    cartera_activa_df = cartera_activa_df[['Id_Deuda', 'Referencia', 'Cedula', 'Monto_Actual', 'Numero_Credito', 'Banco','Nombre_Cliente']]
 
     # Eliminamos Duplicados por Id_Deuda, dejando el Primer registro
     cartera_activa_df = cartera_activa_df.drop_duplicates(subset=['Id_Deuda'], keep='first')
@@ -727,3 +730,178 @@ def load_cartera_backup() -> DataFrame[DeudasActivasSchema]:
         backup_df = DeudasActivasSchema.validate(backup_df)
 
     return backup_df
+
+# Función Auxiliar para la Carga de las Deudas a Identificar
+@st.cache_data(show_spinner="Cargando Datos de Deudas a Identificar", ttl=HOUR_WAIT)
+def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
+    # Paso 1: Obtenemos el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Obtenemos el DF de la Hoja 'Pendientes_IdAutDeud'
+    cruce_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Pendientes_IdAutDeud')
+
+    # Si el DF está vacío, devolvemos el Esquema Vacío
+    if cruce_df.empty:
+        st.session_state['local_cruce_changes'] = []
+        return PendienteCruceSchema.empty()
+
+    # Paso 3: Limpieza de Columnas
+    # Dejamos solo las Columnas del Esquema
+    cols_esquema = [c for c in PendienteCruceSchema.__fields__.keys() if c in cruce_df.columns]
+    cruce_df = cruce_df[cols_esquema]
+    # Quitamos las Filas Vacías (sin Id_Cruce)
+    cruce_df = cruce_df.dropna(subset=['Id_Cruce'])
+    # Volvemos las Columnas Id_Cruce y Cedula a String
+    cruce_df['Id_Cruce'] = cruce_df['Id_Cruce'].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+    if 'Cedula' in cruce_df.columns:
+        cruce_df['Cedula'] = cruce_df['Cedula'].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+    # Volvemos Nombre_Cliente y Banco a String (vacíos a NaN)
+    for col in ['Nombre_Cliente', 'Banco']:
+        if col in cruce_df.columns:
+            cruce_df[col] = cruce_df[col].astype(str).replace(['', 'nan', 'None', '<NA>'], np.nan)
+    # Volvemos Monto_Actual a Número
+    if 'Monto_Actual' in cruce_df.columns:
+        cruce_df['Monto_Actual'] = cruce_df['Monto_Actual'].apply(cleanNumber)
+        cruce_df['Monto_Actual'] = pd.to_numeric(cruce_df['Monto_Actual'], errors='coerce')
+    # Volvemos Numero_Credito a String (vacíos a NaN)
+    if 'Numero_Credito' in cruce_df.columns:
+        cruce_df['Numero_Credito'] = cruce_df['Numero_Credito'].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+        cruce_df['Numero_Credito'] = cruce_df['Numero_Credito'].replace('', np.nan)
+
+    # Paso 4: Conversión de la Metadata a los Tipados Necesarios
+    if 'Metadata' in cruce_df.columns:
+        cruce_df['Metadata'] = cruce_df['Metadata'].apply(_parse_metadata_cruce)
+
+    # Paso 5: Dejamos la Última Versión de cada Id_Cruce (las actualizaciones se anexan al final)
+    cruce_df = cruce_df.drop_duplicates(subset=['Id_Cruce'], keep='last').reset_index(drop=True)
+
+    # Paso 6: Validamos el DF con el Esquema (Si no esta vacio)
+    if not cruce_df.empty:
+        cruce_df = PendienteCruceSchema.validate(cruce_df)
+    else:
+        cruce_df = PendienteCruceSchema.empty()
+
+    # Por último, reiniciamos los cambios locales
+    st.session_state['local_cruce_changes'] = []
+
+    # Devolvemos el DataFrame
+    return cruce_df
+
+# Función Auxiliar para Parsear la Metadata de un Registro de Cruce desde Sheets
+def _parse_metadata_cruce(mtdt_val) -> dict:
+    # Si ya es un Diccionario (Cambios Locales) lo devolvemos tal cual
+    if isinstance(mtdt_val, dict):
+        return mtdt_val
+    # Si es Vacío o no es texto devolvemos un Diccionario Vacío
+    if pd.isna(mtdt_val) or not isinstance(mtdt_val, str) or not mtdt_val.strip():
+        return {}
+    try:
+        mtdt = json.loads(mtdt_val)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(mtdt, dict):
+        return {}
+
+    # Sub-Listas que quedaron serializadas como texto dentro del JSON
+    for key in ['Pagos_Cuotas', 'Deudas_Posibles']:
+        valor = mtdt.get(key)
+        if isinstance(valor, str):
+            try:
+                mtdt[key] = json.loads(valor) if valor else []
+            except json.JSONDecodeError:
+                mtdt[key] = []
+        elif valor is None:
+            mtdt[key] = []
+
+    # Tipados de las Claves Obligatorias
+    try:
+        mtdt['Id_Registro'] = int(float(mtdt.get('Id_Registro', 0)))
+    except (TypeError, ValueError):
+        mtdt['Id_Registro'] = 0
+    for key in ['Fecha_Identificacion', 'Fecha_Limite_Pago']:
+        mtdt[key] = pd.to_datetime(mtdt.get(key,''), errors='coerce')
+    ultima_upd = mtdt.get('Ultima_Actualizacion')
+    mtdt['Ultima_Actualizacion'] = pd.to_datetime(ultima_upd, errors='coerce') if (ultima_upd not in (None, '')) else None
+
+    # Tipado de los Pagos a Cuotas
+    for pago in (mtdt.get('Pagos_Cuotas') or []):
+        if not isinstance(pago, dict):
+            continue
+        try:
+            pago['Cuotas'] = int(float(pago.get('Cuotas', 1)))
+        except (TypeError, ValueError):
+            pago['Cuotas'] = 1
+        try:
+            pago['Monto'] = float(pago.get('Monto', 0) or 0)
+        except (TypeError, ValueError):
+            pago['Monto'] = 0.0
+        pago['En_Portafolio'] = pago.get('En_Portafolio') in (True, 'True', 'true', 1, '1')
+
+    # Tipado de las Deudas Posibles
+    for deuda in (mtdt.get('Deudas_Posibles') or []):
+        if not isinstance(deuda, dict):
+            continue
+        deuda['Banco'] = str(deuda.get('Banco') or '')
+        try:
+            deuda['Monto_Actual'] = float(deuda.get('Monto_Actual','nan')) if (deuda.get('Monto_Actual') not in (None, '')) else float('nan')
+        except (TypeError, ValueError):
+            deuda['Monto_Actual'] = float('nan')
+        deuda['Numero_Credito'] = str(deuda.get('Numero_Credito') or '')
+        deuda['Id_Deuda'] = str(deuda.get('Id_Deuda') or '')
+
+    # Quitamos las Claves NotRequired que estén Vacías
+    for key in ['Alias_Casa', 'Id_Definitivo', 'Portafolio_Ids']:
+        if (key in mtdt) and (mtdt[key] in ('', None)):
+            mtdt.pop(key)
+    if ('Monto_Actual_Original' in mtdt) and (mtdt['Monto_Actual_Original'] in ('', None)):
+        mtdt.pop('Monto_Actual_Original')
+
+    # Aseguramos las Claves Obligatorias Faltantes
+    mtdt.setdefault('Pagos_Cuotas', [])
+    mtdt.setdefault('Deudas_Posibles', [])
+    mtdt.setdefault('Fecha_Identificacion', pd.NaT)
+    mtdt.setdefault('Fecha_Limite_Pago', pd.NaT)
+    mtdt.setdefault('Etiqueta', 'NULO')
+    mtdt.setdefault('Cruce_Status', 'Sin Reconocer')
+    mtdt.setdefault('Casa_Cobro', '')
+    mtdt.setdefault('Ejecutivo_Subida', '')
+    mtdt.setdefault('Ultima_Actualizacion', None)
+
+    return mtdt
+
+# --> Carga de Deudas a Identificar (Aplicando los Cambios Locales)
+def load_pendiente_cruce_con_cambios() -> pd.DataFrame:
+    # 1: Cargamos los Datos desde Google Sheets
+    cruce_df = load_pendiente_cruce()
+
+    cruce_ajustado = cruce_df.copy()
+
+    # 2: Aplicamos los Cambios Locales
+    if ('local_cruce_changes' in st.session_state) and len(st.session_state['local_cruce_changes']) > 0:
+
+        # Paso 1: Creamos un DF con todas las Series
+        local_changes_df = pd.DataFrame(st.session_state['local_cruce_changes'])
+        # Quitamos Duplicados dejando el último
+        local_changes_df = local_changes_df.drop_duplicates(subset='Id_Cruce', keep='last')
+
+        # Paso 2: Preparamos Operaciones por Índices dejando Id_Cruce
+        local_changes_df = local_changes_df.set_index('Id_Cruce', drop=False)
+        cruce_ajustado = cruce_ajustado.set_index('Id_Cruce', drop=False)
+
+        # Paso 3: Diferenciar nuevos de Existentes
+        indices_existentes = cruce_ajustado.index.intersection(local_changes_df.index)
+        indices_nuevos = local_changes_df.index.difference(cruce_ajustado.index)
+
+        # A) Actualizar los que ya existen
+        if not indices_existentes.empty:
+            cruce_ajustado.update(local_changes_df.loc[indices_existentes])
+
+        # B) Añadir los Nuevos
+        if not indices_nuevos.empty:
+            cruce_ajustado = pd.concat([cruce_ajustado, local_changes_df.loc[indices_nuevos]], axis=0)
+
+        # Restauramos el Indice
+        cruce_ajustado = cruce_ajustado.reset_index(drop=True)
+
+    # 3: Devolver el Nuevo DF
+    return cruce_ajustado
