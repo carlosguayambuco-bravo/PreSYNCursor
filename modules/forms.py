@@ -9,11 +9,11 @@ from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_app_config, load_cartera_backup, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
-from data.data_models import DeudasActivasSchema
+from data.data_models import DeudasActivasSchema, InputCruceSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
-from modules.bank_normalizer import normalizar_banco
-from modules.constants import IVA, HOUR_WAIT, DEFAULT_DISCOUNT_PL, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_LAST_UPDATE
+from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
+from modules.constants import IVA, HOUR_WAIT, DEFAULT_DISCOUNT_PL, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_LAST_UPDATE, QUERY_TOTAL_REPARADORAS, WEEK_WAIT
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
 def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago_total_original: float, descuento_pl: float):
@@ -293,22 +293,54 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
     metabase_service: MetabaseService = st.session_state["metabase_service"]
 
     # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
-    query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
+    try:
+        query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
 
-    # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
-    ultima_actualizacion_df = metabase_service.execute_query(query)
+        # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
+        ultima_actualizacion_df = metabase_service.execute_query(query)
 
-    if ultima_actualizacion_df.empty:
+        if ultima_actualizacion_df.empty:
+            return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+
+        # Paso 4: -- Limpieza de Datos --
+        # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+        ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
+        ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+        # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
+        ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+
+        # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
+        if not ultima_actualizacion_df.empty:
+            return ultima_actualizacion_df['Ultima_Actualizacion'].max()
+        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+    except:
         return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
 
-    # Paso 4: -- Limpieza de Datos --
-    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
-    ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
-    ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
-    # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
-    ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+# Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
+# @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
+# def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
+#     # Paso 1: Obtener El Servicio de Metabase
+#     metabase_service: MetabaseService = st.session_state["metabase_service"]
+#     # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
+#     completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
 
-    # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
-    if not ultima_actualizacion_df.empty:
-        return ultima_actualizacion_df['Ultima_Actualizacion'].max()
-    return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+#     # Paso 3: Limpieza de Datos
+#     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+#     completo_df.dropna(subset=['Id_Deuda'], inplace=True)
+#     completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+#     # Volvemos la Columna Referencia y Cedula a String
+#     completo_df['Cedula'] = completo_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+#     # Volvemos la Columna Monto_Actual a Números
+#     completo_df['Monto_Actual'] = pd.to_numeric(completo_df['Monto_Actual'], errors='coerce')
+#     # Volvemos Numero_Credito, Nombre_Cliente y Banco a String usando astype
+#     completo_df['Numero_Credito'] = completo_df['Numero_Credito'].astype(str)
+#     completo_df['Nombre_Cliente'] = completo_df['Nombre_Cliente'].astype(str)
+#     completo_df['Banco'] = completo_df['Banco'].astype(str)
+
+#     # Estandarizamos el Banco
+#     completo_df['Banco'] = normalizar_bancos_vectorizado(completo_df['Banco'])
+
+#     # Validamos el Esquema
+#     completo_df = InputCruceSchema.validate(completo_df)
+#     # Devolvemos el DF
+#     return completo_df
