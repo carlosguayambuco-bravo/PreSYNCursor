@@ -610,6 +610,11 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
 
 # Función Auxiliar para Mostrar el Mensaje de Cliente Actualizado/No Act 
 def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecutivo", "nego"]) -> None:
+
+    if st.secrets.get("HIDE_UPDATE_NEGO",False):
+        st.warning("Desabilitado Temporalmente la Actualización del Negociador",icon="🫡")
+        return 
+
     # Paso 1: Obtener la última Actualización
     ultima_upd = obtener_ultima_actualizacion_deudas(
         debt_ids = solicitud["Ids_Deuda"].split("-"),
