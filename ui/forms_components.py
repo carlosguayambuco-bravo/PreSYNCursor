@@ -377,8 +377,6 @@ def mostrar_resumen_solicitud(*,
             delta_color="green" if descuentoTotal < 0.7 else "yellow" if descuentoTotal < 0.90 else "red"
         )
 
-        st.info(comentario or "Sin Comentario", title="Comentario de la Solicitud", icon="🫡")
-
     # Ahora, si existe Fecha esperada de Pago y Tipo de Pago los Mostramos
     if fecha_esperada_pago and tipo_pago:
         st.markdown("#### ℹ️ **Detalles de Pago**")
@@ -408,3 +406,5 @@ def mostrar_resumen_solicitud(*,
                 delta="Pagar si es exitosa",
                 delta_color="green",
             )
+
+    st.info(comentario or "Sin Comentario", title="Comentario de la Solicitud", icon="🫡")

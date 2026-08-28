@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasSchema, PaBIdealSchema, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco
 from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
@@ -360,6 +360,14 @@ def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
     # Devolvemos el DataFrame de Aliados
     return aliados_df
 
+def process_masivas_metadata(mtdt: str):
+    if pd.isna(mtdt) or (mtdt == '') or (mtdt == 'nan'):
+        return MasivasMetadata()
+    try:
+        return MasivasMetadata(**json.loads(mtdt))
+    except:
+        return MasivasMetadata()
+
 # --> Carga de Datos de Masivas
 @st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
 def load_masivas() -> DataFrame[MasivasSchema]:
@@ -375,20 +383,33 @@ def load_masivas() -> DataFrame[MasivasSchema]:
         'Propuesta Pago': 'PaB_Propuesta',
         'Monto Pago Estructurado': 'PaB_Estructurado',
         'Plazo Estructurado': 'Plazo_Estructurado',
-        'Monto Portafolio': 'PaB_Portafolio',
         'Referencia': 'Referencia',
         'Casa': 'Casa_Cobro',
+        'Metadata': 'Metadata',
     })
 
     # Quitamos los Datos donde Id_Deuda o Casa_Cobro sea NaN
     masivasDF = masivasDF.dropna(subset=['Id_Deuda', 'Casa_Cobro'])
 
     # Dejamos solo las Columnas Necesarias
-    masivasDF = masivasDF[['Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado', 'PaB_Portafolio','Referencia','Casa_Cobro']]
+    masivasDF = masivasDF[
+        [
+            'Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado',
+            'Referencia','Casa_Cobro','Metadata'
+        ]
+    ]
 
     # Volvemos la Id_Deuda Y Referencia a String
     masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Aplicamos la inicialización de la Metadata
+    masivasDF['Metadata'] = masivasDF['Metadata'].apply(process_masivas_metadata)
+
+    # Extraemos el PaB_Portafolio a Número 
+    masivasDF['PaB_Portafolio'] = masivasDF['Metadata'].apply(
+        lambda mtdt: mtdt['PaB_Portafolio'] if 'PaB_Portafolio' in mtdt else np.nan
+    )
 
     # Aplicamos a Casa_Cobro .upper y strip
     masivasDF['Casa_Cobro'] = masivasDF['Casa_Cobro'].apply(lambda s: str(s).upper().strip() if pd.notnull(s) else '')
@@ -411,8 +432,8 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     # Quitamos Datos donde PaB_Propuesta sea Nulo
     masivasDF = masivasDF[masivasDF['PaB_Propuesta'].notna()]
 
-    # Eliminamos Duplicados por Id_Deuda, dejando el último registro (el más reciente)
-    masivasDF = masivasDF.drop_duplicates(subset=['Id_Deuda'], keep='last')
+    # Nota: Mantenemos todos los Registros por Id_Deuda (pueden existir varios descuentos por Deuda)
+    # El orden del DF nunca cambia, por lo que el último registro de cada Deuda es el más reciente
 
     # Validamos el DF (Si no esta vacío)
     if not masivasDF.empty:
@@ -788,10 +809,10 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
     return cruce_df
 
 # Función Auxiliar para Parsear la Metadata de un Registro de Cruce desde Sheets
-def _parse_metadata_cruce(mtdt_val) -> dict:
+def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
     # Si ya es un Diccionario (Cambios Locales) lo devolvemos tal cual
     if isinstance(mtdt_val, dict):
-        return mtdt_val
+        return MetadataPendienteCruce(**mtdt_val)
     # Si es Vacío o no es texto devolvemos un Diccionario Vacío
     if pd.isna(mtdt_val) or not isinstance(mtdt_val, str) or not mtdt_val.strip():
         return {}
@@ -848,6 +869,7 @@ def _parse_metadata_cruce(mtdt_val) -> dict:
             deuda['Monto_Actual'] = float('nan')
         deuda['Numero_Credito'] = str(deuda.get('Numero_Credito') or '')
         deuda['Id_Deuda'] = str(deuda.get('Id_Deuda') or '')
+        deuda['Es_Liquidada'] = deuda.get('Es_Liquidada',False)
 
     # Quitamos las Claves NotRequired que estén Vacías
     for key in ['Alias_Casa', 'Id_Definitivo', 'Portafolio_Ids']:
@@ -866,6 +888,12 @@ def _parse_metadata_cruce(mtdt_val) -> dict:
     mtdt.setdefault('Casa_Cobro', '')
     mtdt.setdefault('Ejecutivo_Subida', '')
     mtdt.setdefault('Ultima_Actualizacion', None)
+
+    # Actualizamos las Deudas a DeudasPosiblesCruce
+    mtdt['Deudas_Posibles'] = [DeudasPosiblesCruce(**ddict) for ddict in mtdt['Deudas_Posibles']]
+
+    # Lo Convertimos en el TypedDict
+    mtdt = MetadataPendienteCruce(**mtdt)
 
     return mtdt
 

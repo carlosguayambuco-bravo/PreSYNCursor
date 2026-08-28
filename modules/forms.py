@@ -13,7 +13,7 @@ from data.data_models import DeudasActivasSchema, InputCruceSchema
 from services.metabase import MetabaseService
 from utils.helpers_general import getBDDaysDiffFloat, imputeNans, parsePercentage
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import IVA, HOUR_WAIT, DEFAULT_DISCOUNT_PL, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_LAST_UPDATE, QUERY_TOTAL_REPARADORAS, WEEK_WAIT
+from modules.constants import ESTADOS_LIQUIDACION, IVA, HOUR_WAIT, DEFAULT_DISCOUNT_PL, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_LAST_UPDATE, QUERY_TOTAL_REPARADORAS, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
 def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago_total_original: float, descuento_pl: float):
@@ -72,18 +72,20 @@ def obtener_deudas_portafolio_masivas(*,deuda: str) -> list[str]:
     # Paso 1: Cargamos las Masivas y los Cambios de Referencia
     masivas_df = load_masivas()
 
-    # Paso 2: Buscamos la Deuda en las Masivas
-    masiva_row = masivas_df[(masivas_df['Id_Deuda'] == deuda) & (masivas_df['PaB_Portafolio'].notna())]
-    if not masiva_row.empty:
-        # Obtenemos la Referencia y la Casa de Cobro
-        ref_deuda = masiva_row['Referencia'].iloc[0] # type: ignore
-        casa_cobro = masiva_row['Casa_Cobro'].iloc[0] # type: ignore
-        # Ahora buscamos todas las Deudas con la misma Referencia y la misma Casa de Cobro que tengan PaB_Portafolio no nulo
-        deudas_portafolio = masivas_df[(masivas_df['Referencia'] == ref_deuda) & (masivas_df['Casa_Cobro'] == casa_cobro) & (masivas_df['PaB_Portafolio'].notna())]['Id_Deuda'].tolist() # type: ignore
-        return deudas_portafolio
+    # Paso 2: Buscamos los Registros de la Deuda en las Masivas con PaB_Portafolio no nulo
+    masivas_deuda = masivas_df[(masivas_df['Id_Deuda'] == deuda) & (masivas_df['PaB_Portafolio'].notna())]
+    if masivas_deuda.empty:
+        # Paso 3: Si no se encuentra, devolvemos una Lista Vacía
+        return []
 
-    # Paso 3: Si no se encuentra, devolvemos una Lista Vacía
-    return []
+    # Paso 4: Escogemos el Registro con el Mejor Descuento de Portafolio (menor PaB_Portafolio)
+    mejor_fila = masivas_deuda.loc[masivas_deuda['PaB_Portafolio'].idxmin()]
+    # Obtenemos la Referencia y la Casa de Cobro
+    ref_deuda = mejor_fila['Referencia'] # type: ignore
+    casa_cobro = mejor_fila['Casa_Cobro'] # type: ignore
+    # Ahora buscamos todas las Deudas con la misma Referencia y la misma Casa de Cobro que tengan PaB_Portafolio no nulo
+    deudas_portafolio = list(dict.fromkeys(masivas_df[(masivas_df['Referencia'] == ref_deuda) & (masivas_df['Casa_Cobro'] == casa_cobro) & (masivas_df['PaB_Portafolio'].notna())]['Id_Deuda'].tolist())) # type: ignore
+    return deudas_portafolio
 
 # Función Auxiliar para Obtener el Descuento por Base si Hay
 def obtener_descuento_base(*, deuda: str, portafolio: bool = False) -> float:
@@ -91,17 +93,25 @@ def obtener_descuento_base(*, deuda: str, portafolio: bool = False) -> float:
     masivas_df = load_masivas()
     addendums_df = load_addendums()
 
-    # Paso 2: Buscamos la Deuda en las Masivas
-    masiva_row = masivas_df[masivas_df['Id_Deuda'] == deuda]
-    if not masiva_row.empty:
+    # Paso 2: Buscamos los Registros de la Deuda en las Masivas
+    masivas_deuda = masivas_df[masivas_df['Id_Deuda'] == deuda]
+    if not masivas_deuda.empty:
+        # Escogemos el Registro con el Mejor Descuento (Lógica por Descuento)
         if portafolio:
-            valor_portafolio = masiva_row['PaB_Portafolio'].iloc[0] # type: ignore
-            # Si es NaN lo volvemos 0
-            if pd.isna(valor_portafolio):
+            # Para Portafolio: El mejor registro es el de menor PaB_Portafolio (entre los que lo tienen)
+            filas_portafolio = masivas_deuda[masivas_deuda['PaB_Portafolio'].notna()]
+            if filas_portafolio.empty:
+                # Si ninguna fila tiene Portafolio, usamos el de menor PaB_Propuesta
+                mejor_fila = masivas_deuda.loc[masivas_deuda['PaB_Propuesta'].idxmin()]
                 valor_portafolio = 0
+            else:
+                mejor_fila = filas_portafolio.loc[filas_portafolio['PaB_Portafolio'].idxmin()]
+                valor_portafolio = mejor_fila['PaB_Portafolio'] # type: ignore
         else:
+            # Para Individual: El mejor registro es el de menor PaB_Propuesta
+            mejor_fila = masivas_deuda.loc[masivas_deuda['PaB_Propuesta'].idxmin()]
             valor_portafolio = 0
-        return max(masiva_row['PaB_Propuesta'].iloc[0], valor_portafolio) # type: ignore
+        return max(mejor_fila['PaB_Propuesta'], valor_portafolio) # type: ignore
 
     # Paso 3: Buscamos la Deuda en los Addendums
     addendum_row = addendums_df[addendums_df['Id_Deuda'] == deuda]
@@ -179,12 +189,14 @@ def obtener_correo_lider_negociador(*, email: str) -> Optional[str]:
 def obtener_aliado_en_base(*, deudas: list[str], aliados_posibles: list[str]) -> str:
     # Paso 1: Cargamos las Masivas
     masivas_df = load_masivas()
-    # Paso 2: Buscamos las Deudas en las Masivas
+    # Paso 2: Buscamos los Registros de las Deudas en las Masivas
     masivas_locales = masivas_df[masivas_df['Id_Deuda'].isin(deudas)]
     # Paso 3: Filtramos por los Aliados Posibles
     masivas_filtradas = masivas_locales[masivas_locales['Casa_Cobro'].isin(aliados_posibles)]
-    # Paso 4: Hacemos un Agrupamiento por Casa de Cobro para dejar el Minimo PaB_Propuesta
-    aliado_en_base = masivas_filtradas.groupby('Casa_Cobro')['PaB_Propuesta'].min().idxmin() # type: ignore
+    # Paso 4: Reducimos por Deuda y Casa dejando el Registro con el Mejor Descuento (menor PaB_Propuesta)
+    masivas_mejores = masivas_filtradas.loc[masivas_filtradas.groupby(['Casa_Cobro', 'Id_Deuda'])['PaB_Propuesta'].idxmin()]
+    # Paso 5: Sumamos el PaB_Propuesta por Casa de Cobro y elegimos la Casa con la Menor Suma
+    aliado_en_base = masivas_mejores.groupby('Casa_Cobro')['PaB_Propuesta'].sum().idxmin() # type: ignore
     return str(aliado_en_base)
 
 # Función Auxiliar para Mostrar como subir la Solicitud de Aliados Diferentes
@@ -194,7 +206,7 @@ def mostrar_como_subir_solicitud_aliados_diferentes(*, ml: pd.DataFrame, es_admi
     body_info = [
         "{}: Deudas {}".format(
             casa if es_admin else "Aliado {}".format(i+1),
-            '-'.join(ml[ml['Casa_Cobro'] == casa]['Id_Deuda'].tolist())
+            '-'.join(list(dict.fromkeys(ml[ml['Casa_Cobro'] == casa]['Id_Deuda'].tolist())))
         ) for i, casa in enumerate(ml['Casa_Cobro'].unique())
     ]
     # Ahora Mostramos la Información en un st.info
@@ -324,6 +336,9 @@ def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
     completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
 
+    if completo_df.empty:
+        return InputCruceSchema.empty()
+
     # Paso 3: Limpieza de Datos
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
     completo_df.dropna(subset=['Id_Deuda'], inplace=True)
@@ -339,6 +354,15 @@ def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
 
     # Estandarizamos el Banco
     completo_df['Banco'] = normalizar_bancos_vectorizado(completo_df['Banco'])
+
+    # Siguiente: Calcular Columna Liquidada según los Estados y los Sub-Estados
+    maskEstado = completo_df['Estado_Deuda'].isin(ESTADOS_LIQUIDACION)
+    maskSubEstado = completo_df['Sub_Estado_Deuda'].isin(SUB_ESTADOS_LIQUIDACION)
+
+    completo_df['Liquidada'] = maskEstado | maskSubEstado
+
+    # Quitamos las Columnas de Estados
+    completo_df = completo_df.drop(columns=['Estado_Deuda','Sub_Estado_Deuda'])
 
     # Validamos el Esquema
     completo_df = InputCruceSchema.validate(completo_df)

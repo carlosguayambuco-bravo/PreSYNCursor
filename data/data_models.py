@@ -2,6 +2,7 @@
 # Librerías de Python
 from datetime import datetime
 from typing import Dict, List, Optional, Literal, NotRequired
+from click import Option
 from typing_extensions import TypedDict
 # Librerías de Terceros
 import pandas as pd
@@ -104,17 +105,26 @@ class AliadosSchema(pa.DataFrameModel):
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
 
+
+class MasivasMetadata(TypedDict, total=False):
+    Es_Maximo_Descuento: Optional[bool]
+    Fecha_Limite_Uso: Optional[datetime]
+    Alias: Optional[str]
+    Id_Portafolio: Optional[str]
+    PaB_Portafolio: Optional[float]
+
 class MasivasSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de masivas.
     """
-    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
-    Referencia: str
-    Casa_Cobro: str
-    PaB_Propuesta: float
-    PaB_Estructurado: float = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Plazo_Estructurado: int = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    PaB_Portafolio: float = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Id_Deuda: Series[str]  # Puede haber múltiples registros por Id_Deuda (varios descuentos por deuda)
+    Referencia: Series[str]
+    Casa_Cobro: Series[str]
+    PaB_Propuesta: Series[float]
+    PaB_Estructurado: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Plazo_Estructurado: Series[int] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    PaB_Portafolio: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Metadata: Series[MasivasMetadata]
 
     class Config:
         strict = True  # Validación estricta de columnas
@@ -257,6 +267,7 @@ class DeudasPosiblesCruce(TypedDict):
     Monto_Actual: float
     Numero_Credito: str
     Id_Deuda: str
+    Es_Liquidada: bool
 
 class PagosCuotasCruce(TypedDict):
     Cuotas: int
@@ -290,12 +301,13 @@ class PendienteCruceSchema(pa.DataFrameModel):
     Metadata: Series[MetadataPendienteCruce]
 
 class InputCruceSchema(pa.DataFrameModel):
-    Cedula: Optional[Series[str]] = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
+    Cedula: Optional[Series[str]] = pa.Field(nullable=True)
     Nombre_Cliente: Optional[Series[str]] = pa.Field(nullable=True)
     Banco: Optional[Series[str]] = pa.Field(nullable=True)
     Monto_Actual: Optional[Series[float]] = pa.Field(nullable=True)
     Numero_Credito: Optional[Series[str]] = pa.Field(nullable=True)
     Id_Deuda: Optional[Series[str]]
+    Liquidada: Optional[Series[bool]]
 
 class InputFullScehma(InputCruceSchema):
     Monto_Propuesto: Optional[Series[float]]

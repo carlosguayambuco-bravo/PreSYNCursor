@@ -502,6 +502,10 @@ def convert_data_to_string(obj: Any) -> str:
         return ""
     if isinstance(obj, (int, float)):
         return str(obj)
+    if isinstance(obj, list):
+        return json.dumps([convert_data_to_string(d) for d in obj])
+    elif isinstance(obj, dict):
+        return json.dumps({key: convert_data_to_string(value) for key, value in obj.items()})
     # For other types (like lists, dicts), we can use json.dumps for a readable format
     try:
         return json.dumps(obj, ensure_ascii=False)

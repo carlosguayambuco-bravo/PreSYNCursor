@@ -2,12 +2,15 @@
 # Librerías de Python
 from collections import defaultdict
 from itertools import combinations
+from pydoc import text
+from turtle import width
 from typing import Optional
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
 from thefuzz import fuzz
+import streamlit as st
 # Librerías Locales
 from data.data_models import InputCruceSchema, OutputCruceSchema
 from modules.id_aut_deud.helpers import *
@@ -198,7 +201,7 @@ def match_deudas(*,
     El algoritmo acota el universo de candidatos por cada registro en la secuencia:
         1. Unión por Datos del Cliente (Cédula y Nombre). Aquí se determinan las NULAS.
         2. Contraste con Datos de la Deuda excluyendo el Número de Crédito
-           (Banco, Casa de Cobro simulando el Banco y Monto).
+            (Banco, Casa de Cobro simulando el Banco y Monto).
         3. Contraste con el Número de Crédito (se determinan AMBIGUAS y ADDENDUM;
             los restantes son prospectos a EXACTO o DUPLICADO).
         4. De los prospectos a EXACTO se identifican los duplicados (2 registros con el
@@ -228,10 +231,24 @@ def match_deudas(*,
     if COL_ID_CRUCE not in df_buscar.columns:
         raise ValueError("La Cartera a Buscar no tiene la columna '{}'".format(COL_ID_CRUCE))
 
+    # Creamos una Barra de Progreso a Mostrar
+    progress_cruce = st.progress(
+        value=0,
+        text="Preparando Universo de Deudas",
+        width="stretch"
+    )
+
     # Preparación de Datos
     univ = preparar_universo(df_datos=df_datos)
+
+    # Aumentamos el Progreso #1
+    progress_cruce.progress(1/5, text="Preparando Limpieza de Datos a Coincidir")
+
     n = univ['n']
     id_registro_arr, columnas = limpiar_busqueda(df_buscar=df_buscar)
+
+    # Aumentamos el Progreso #2
+    progress_cruce.progress(2/5, text="Ejecutando Reconocimiento por Cedula y Nombre")
 
     tiene_cedula = COL_CEDULA in columnas
     tiene_nombre = COL_NOMBRE in columnas
@@ -284,6 +301,9 @@ def match_deudas(*,
             cand = mascara_cliente
         else:
             cand = np.ones(n, dtype=bool)
+
+        # Aumentamos el Progreso en #3
+        progress_cruce.progress(3/5, text="Ejecutando Reconocimiento por Características de Deuda")
 
         # Paso 2: Contraste con Datos de la Deuda (Banco, Casa de Cobro y Monto)
         banco_ok = False
@@ -372,6 +392,9 @@ def match_deudas(*,
         ids_candidatos.append(candidatos)
         motivos_lista.append('|'.join(motivos))
 
+    # Aumentamos el Proceso en 4
+    progress_cruce.progress(4/5, text="Limpiando Duplicados de Exactitud")
+
     # Paso 4: Identificación de Duplicados entre los prospectos EXACTO
     reclamaciones = defaultdict(list)
     for indice, id_deuda in prospectos_exacto:
@@ -380,6 +403,9 @@ def match_deudas(*,
         if len(indices) > 1:
             for indice in indices:
                 etiquetas[indice] = ETIQUETA_DUPLICADO
+
+    # Finalizado el Proceso en 5
+    progress_cruce.progress(5/5, text="Cruce de Datos Realizado Correctamente")
 
     return_df = pd.DataFrame({
         'Id_Registro': id_registro_arr,

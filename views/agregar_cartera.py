@@ -2,7 +2,7 @@
 # Librerías de Python
 import io
 import uuid
-from time import sleep
+from time import sleep, time
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -344,8 +344,12 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                     mask_sin_id = pd.Series([True] * len(cruce_std), index=cruce_std.index)
                 match_input = cruce_std[mask_sin_id].copy()
 
+                # Inicializamos el Tiempo de Ejecución
+                start_cruce = time()
                 # Paso 5: Ejecutar el Modelo de Identificación de Deudas
-                resultado = match_deudas(match_input, cartera_df)
+                resultado = match_deudas(df_buscar=match_input, df_datos=cartera_df, casa_cobro=casa_cobro)
+                # Finalizamos el Tiempo de Ejecución
+                end_cruce = time()
 
                 # Paso 6: Guardar el Paquete del Cruce en el Session State
                 st.session_state[key_pkg] = {
@@ -358,6 +362,10 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                     'configs_cuotas': configs_cuotas,
                 }
                 st.toast("✅ Modelo Ejecutado con Éxito", icon="⚙️")
+
+                st.caption("ℹ️ Tiempo Tomado: {:.2f} segundos".format(
+                    end_cruce - start_cruce
+                ))
 
     # Vista Previa de los Resultados del Modelo
     if key_pkg in st.session_state:

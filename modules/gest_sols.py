@@ -104,7 +104,7 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
         valor = row['PaB_Propuesta']
         descuento = 1 - valor / original_amount if original_amount != 0 else 0
         monto_portafolio = row["PaB_Portafolio"]
-        es_portafolio = "SI" if (monto_portafolio > 0) else "No"
+        es_portafolio = "SI" if (pd.notna(monto_portafolio) and monto_portafolio > 0) else "No"
         if es_portafolio == "SI":
             str_portafolio = f"**Portafolio**: {monto_portafolio:,.0f}"
         else:
@@ -1244,9 +1244,9 @@ def obtener_casas_cobro_base(*, deudas: list[str]) -> list[str]:
     massive_df = load_masivas()
     # Paso 2: Filtrar por Id_Deuda las Deudas Brindadas
     massive_debts = massive_df[massive_df['Id_Deuda'].isin(deudas)]
-    # Paso 3: Devolver la lista de Casas
+    # Paso 3: Devolver la lista de Casas (Sin Duplicados ya que puede haber varios Registros por Deuda)
     if not massive_debts.empty:
-        return massive_debts['Casa_Cobro'].tolist()
+        return list(dict.fromkeys(massive_debts['Casa_Cobro'].tolist()))
     else:
         return []
 

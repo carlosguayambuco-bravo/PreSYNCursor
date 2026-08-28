@@ -312,10 +312,8 @@ def update_base_cruce_info(*, cruce_df: DataFrame[PendienteCruceSchema]) -> bool
     # Paso 2: Abrir la Hoja 'Pendientes_IdAutDeud' de las Configuraciones
     cruceWS = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Pendientes_IdAutDeud')
     original_cruce = cruce_df.copy()
-    # Paso 3: Volvemos la Metadata a String casi por Completo
-    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda d: {k: convert_data_to_string(v) for k,v in d.items()})
-    # Paso 4: Volvemos la Metadata a String usando JSON
-    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: json.dumps(m))
+    # Paso 4: Volvemos la Metadata a String
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: convert_data_to_string(m))
     # Paso 5: Intentar realizar la Actualización usando applyChanges
     try:
         result = applyChanges(
@@ -344,11 +342,9 @@ def upload_base_cruce_info(*,cruce_df: DataFrame[PendienteCruceSchema]) -> bool:
     # Paso 2: Abrir la Hoja 'Pendientes_IdAutDeud' de las Configuraciones
     cruceWS = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Pendientes_IdAutDeud')
     original_cruce = cruce_df.copy()
-    # Paso 3: Volvemos la Metadata a String casi por Completo
-    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda d: {k: convert_data_to_string(v) for k,v in d.items()})
-    # Paso 4: Volvemos la Metadata a String usando JSON
-    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: json.dumps(m))
-    # Paso 5: Subir la Información
+    # Paso 3: Volvemos la Metadata a String
+    cruce_df['Metadata'] = cruce_df['Metadata'].apply(lambda m: convert_data_to_string(m))
+    # Paso 4: Subir la Información
     try:
         appendDataFrameToEnd(cruceWS, cruce_df)
         # Añadimos los cambios locales

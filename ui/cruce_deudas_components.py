@@ -271,9 +271,10 @@ def mostrar_deudas_cruce_paginadas(*, cruce_df: pd.DataFrame, key: str) -> None:
     with colSelectPag:
         st.number_input(
             label="Página Actual",
+            value=1,
             key=key_pagina_actual,
             min_value=1,
-            max_value=total_paginas,
+            max_value=int(total_paginas),
             disabled=total_paginas <= 1,
             help="La página actual en la que te encuentras"
         )

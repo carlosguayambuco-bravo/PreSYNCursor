@@ -68,6 +68,8 @@ SELECT
     bcrd.financial_entity_name AS Banco,
     bcrd.credit_number AS Numero_Credito,
     bcrd.amount AS Monto_Actual,
+    bcrd.state as Estado_Deuda,
+    bcrd.sub_state as Sub_Estado_Deuda
 
 FROM dealer_public.berex_credit_repair_debts bcrd
 
@@ -76,6 +78,7 @@ LEFT JOIN dealer_public.berex_credit_repairs AS bcr
 
 WHERE 
     bcr.status IN ('active','partial_credito')
+    AND bcr.country = 'co'
 """
 
 QUERY_ACTIVE_DEBTS = """
@@ -176,6 +179,9 @@ WHERE
     bda.debt_id IN ({debt_ids}) AND
     bda.end = '{email}'
 GROUP BY bda.debt_id;"""
+
+ESTADOS_LIQUIDACION = ['liquidation_structured_payment','paid_outside_of_program','liquidation','liquidation_portfolio_payment','client_settled_outside']
+SUB_ESTADOS_LIQUIDACION = ['drop_requested','cancelled','liquidated','liquidation_in_process','liquidation_structured_payment']
 
 # --- Constantes de Solicitudes ---
 

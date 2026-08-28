@@ -5,6 +5,7 @@ import json
 import streamlit as st
 import pandas as pd
 # Librerías Propias
+from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas  # pyright: ignore[reportAttributeAccessIssue]
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
@@ -15,15 +16,15 @@ from utils.helpers_general import cleanNumber
 # Aliados Actuales
 aliadosDict = st.session_state['aliados_dict']
 # Saldos y Por Cobrar
-saldosDict = st.session_state['saldos_dict']
+saldosDict = load_client_balances()
 # Addendums
-addsDF = st.session_state['addendums_df']
+addsDF = load_addendums()
 # Deudas ya Liquidadas
-debtsLiq = st.session_state['liquidations_set']
+debtsLiq = load_liquidaciones()
 # Actualizaciones Masivas
-masivasDF = st.session_state['masivas_df']
+masivasDF = load_masivas()
 # Configuración del App
-appConfig = st.session_state['app_config_dict']
+appConfig = load_app_config()
 
 
 # Inicializamos las Deudas Seleccionadas en el Session State si no Existe
@@ -265,7 +266,8 @@ masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
 
 if aliado_seleccionado.lower().strip() == 'directo base':
     # Alerta de Modificación 1: Todas las Deudas Seleccionadas tienen un Descuento en Base
-    if len(masivas_locales) < len(deudas_seleccionadas):
+    # (Contamos las Deudas Únicas ya que puede haber varios Registros de Descuento por Deuda)
+    if masivas_locales['Id_Deuda'].nunique() < len(deudas_seleccionadas):
         st.warning("No todas las deudas seleccionadas tienen un descuento en base.", icon="⚠️")
         st.stop()
 
