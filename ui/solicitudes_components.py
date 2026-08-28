@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -1239,7 +1239,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
 
     # Siguiente: Añadir el Input de Pago Total Obligatorio (Checkbox), solo si existe más de una deuda
     if len(json_respuesta) > 1:
-        colToggle, colInfo = st.columns([1, 4])
+        colToggle, colInfo = st.columns([1, 4], vertical_alignment="center")
         with colToggle:
             pago_total_obligatorio = st.toggle(
                 label="**Pago Total Obligatorio**",
@@ -1251,7 +1251,22 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             # Guardamos el Pago Total Obligatorio en la solicitud_respuesta
             solicitud_respuesta['Metadata_Solicitud']["Pago_Total_Obligatorio"] = pago_total_obligatorio
         with colInfo:
-            st.info("El Pago Obligatorio significa que se debe aplicar el pago para todas la deudas")
+            st.markdown("**Pago Obligatorio**: El Pago Obligatorio significa que se debe **APLICAR EL PAGO A TODAS LAS DEUDAS**")
+    # Siguiente (Nuevo) Añadir Máximo Descuento Otorgado (Solo si es Validación)
+    if solicitud['Tipo_Solicitud'] == 'Validación':
+        colToggleOtorg, colInfoOtorg = st.columns([1,4], vertical_alignment="center")
+        with colToggleOtorg:
+            descuento_max = st.toggle(
+                label="**Máximo Descuento Otorgado**",
+                value=False,
+                key="max_descuento_otorgado_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                help="Activado significa que no se puede hacer contra-oferta",
+                persist_state="page",
+            )
+            solicitud_respuesta['Metadata_Solicitud']['Max_Descuento_Otorgado'] = descuento_max
+
+        with colInfoOtorg:
+            st.markdown("**Máximo Descuento**: El Máximo Descuento Otorgado significa que **NO SE PODRÍA REALIZAR UNA CONTRAOFERTA** sobre el valor brindado")
 
     # Añadimos la Posibilidad de Comentario
     cm_final = st.text_area(
@@ -2835,10 +2850,19 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
         else:
 
-            # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
-            colBotonAbrir, colInfoBoton, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
+            # Mostramos la Respuesta de Max_Descuento_Otorgado
+            max_discount = solicitud['Metadata_Solicitud'].get('Max_Descuento_Otorgado',False)
+            if max_discount:
+                st.error(
+                    "El Ejecutivo ha catalogado la Solicitud como Máximo Descuento, por ende no se puede subir una contraoferta",
+                    title="Imposibilidad de Contraoferta",
+                    icon="🔴"
+                )
 
-            with colBotonAbrir:
+            # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
+            coLGenAC, colGenCO, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
+
+            with coLGenAC:
                 if st.button(
                     label="**Subir Solicitud de Acuerdo de Pago**",
                     width="stretch",
@@ -2849,7 +2873,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 ):
                     dialog_subir_acuerdo_pago(solicitud=solicitud)
 
-            with colInfoBoton:
+            with colGenCO:
                 if st.button(
                     label="**Generar ContraOferta**",
                     width="stretch",
@@ -2857,6 +2881,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
                     help = "Botón para ajustar la oferta de pago de la solicitud",
                     icon="🔄",
+                    disabled = max_discount
                 ):
                     ajustar_contraoferta_solicitud(solicitud=solicitud)
 
@@ -2898,6 +2923,8 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     # Solicitudes sin Responder por Tipo de Solicitud
     # Días de Respuesta Promedio y Máximo por Tipo de Solicitud
     # Respuestas por Día Promedio por Tipo de Solicitud
+
+    # Además, se muestran 2 Sub-Métricas más en un Segundo Expander: Respuestas Automáticas y Respuestas Vencidas
     
     with st.expander("📊 **KPIs de Solicitudes**", expanded=True):
         # Creamos las 4 Columnas
@@ -2905,9 +2932,10 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     
         # 1.1 Resumen General de Solicitudes: Sin Tocar, Solicitados y Respondidos
         num_solicitudes = len(solicitudes)
-        sols_sin_tocar = (solicitudes['Estado_Solicitud'] == 'Sin Tocar').sum()
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes)
         sols_solicitados = (solicitudes['Estado_Solicitud'] == 'Solicitado').sum()
-        sols_respondidos = (~obtener_mascara_sin_responder(solicitudes)).sum()
+        sols_sin_tocar = mask_sin_responder.sum() - sols_solicitados
+        sols_respondidos = (~mask_sin_responder).sum()
     
         with colGeneral:
             st.metric(
@@ -2997,6 +3025,52 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
             help="Simula que todas las solicitudes sin responder se respondieran en este instante para calcular los tiempos de respuesta.",
         )
 
+        # 1.6 KPIs de Respuestas Vencidas y Automáticas (Segundo Expander dentro del Expander de KPIs)
+        with st.expander("**😁 KPIs de Respuestas Vencidas y Automáticas**", expanded=True):
+            resumen_vencidas = obtener_resumen_respuestas_vencidas(solicitudes)
+            resumen_automaticas = obtener_resumen_respuestas_automaticas(solicitudes)
+
+            # Si no hay Solicitudes Respondidas, mostramos un aviso y no las columnas
+            if resumen_vencidas['total_respondidas'] == 0:
+                st.info("No hay solicitudes respondidas con los filtros aplicados.", icon="ℹ️")
+            else:
+                # Creamos las 2 Columnas: Vencidas y Automáticas
+                colVencidas, colAutomaticas = st.columns(2, border=True, gap="small")
+
+                # 1.6.1 Solicitudes Vencidas (Total y por Tipo de Solicitud)
+                with colVencidas:
+                    porcentaje_vencidas = (resumen_vencidas['total_general'] / resumen_vencidas['total_respondidas'] * 100) if resumen_vencidas['total_respondidas'] > 0 else 0
+                    es_alto_vencidas = porcentaje_vencidas > 5
+                    st.metric(
+                        label="**Solicitudes Vencidas**",
+                        value="{} Solicitudes".format(resumen_vencidas['total_general']),
+                        help="Solicitudes vencidas (más de 30 días hábiles sin gestionar) sobre el total de solicitudes respondidas.",
+                        delta="{:.1f}% del Total de Respondidas".format(porcentaje_vencidas),
+                        delta_color="red" if es_alto_vencidas else "green",
+                        delta_arrow="up" if es_alto_vencidas else "down"
+                    )
+                    if not resumen_vencidas['total_por_tipo']:
+                        st.info("No hay Solicitudes Vencidas", icon="ℹ️")
+                    for tipo, total in resumen_vencidas['total_por_tipo'].items():
+                        st.caption("**{}**: {} Solicitudes".format(tipo, total))
+
+                # 1.6.2 Respuestas Automáticas (Total y por Tipo de Solicitud)
+                with colAutomaticas:
+                    porcentaje_automaticas = (resumen_automaticas['total_general'] / resumen_automaticas['total_respondidas'] * 100) if resumen_automaticas['total_respondidas'] > 0 else 0
+                    es_alto_automaticas = porcentaje_automaticas > 10
+                    st.metric(
+                        label="**Respuestas Automáticas**",
+                        value="{} Solicitudes".format(resumen_automaticas['total_general']),
+                        help="Respuestas automáticas (respondidas en bloque junto a otra solicitud) sobre el total de solicitudes respondidas.",
+                        delta="{:.1f}% del Total de Respondidas".format(porcentaje_automaticas),
+                        delta_color="green" if es_alto_automaticas else "red",
+                        delta_arrow="up" if es_alto_automaticas else "down"
+                    )
+                    if not resumen_automaticas['total_por_tipo']:
+                        st.info("No hay Respuestas Automáticas", icon="ℹ️")
+                    for tipo, total in resumen_automaticas['total_por_tipo'].items():
+                        st.caption("**{}**: {} Solicitudes".format(tipo, total))
+
     # Añadimos un Divisor
     st.divider()
 
@@ -3006,7 +3080,6 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
 
     with st.expander("📊 **Solicitudes Sin Responder**", expanded=False):
         # 2.1 Crear el Gráfico de Barras de Solicitudes
-        mask_sin_responder = obtener_mascara_sin_responder(solicitudes)
         solicitudes_sin_responder = solicitudes[mask_sin_responder]
 
         # Agrupamos por Aliado y Tipo de Solicitud

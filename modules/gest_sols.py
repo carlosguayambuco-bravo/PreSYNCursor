@@ -21,6 +21,8 @@ from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negoci
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized
 
+METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago']
+
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
     Genera un texto descriptivo para una solicitud específica.
@@ -272,15 +274,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
         # Guardamos un trace en la Metadata
         solicitud_to_update['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
-        # Actualizamos Addendums si hay
-        if 'Addendums' in solicitud['Metadata_Solicitud']:
-            solicitud_to_update['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
-
-        if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
-            solicitud_to_update['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
-
-        if 'Id_Acuerdo_Pago' in solicitud['Metadata_Solicitud']:
-            solicitud_to_update['Metadata_Solicitud']['Id_Acuerdo_Pago'] = solicitud['Metadata_Solicitud']['Id_Acuerdo_Pago']
+        for key in METADATA_ESPECIALES_DISTRIBUIR:
+            if key in solicitud['Metadata_Solicitud']:
+                solicitud_to_update['Metadata_Solicitud'][key] = solicitud['Metadata_Solicitud'][key]
 
         # Agregamos el ID de la Solicitud Actualizada al Set de IDs Actualizados
         updated_ids.add(solicitud_to_update['ID_Solicitud'])
@@ -318,16 +314,9 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             # Guardamos un trace en la Metadata
             sub_solicitud['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
-            # Actualizamos Addendums si hay
-            if 'Addendums' in solicitud['Metadata_Solicitud']:
-                sub_solicitud['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
-
-            if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
-                solicitud_to_update['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
-
-            # Actualizamos el Acuerdo de Pago si Hay
-            if 'Id_Acuerdo_Pago' in solicitud['Metadata_Solicitud']:
-                solicitud_to_update['Metadata_Solicitud']['Id_Acuerdo_Pago'] = solicitud['Metadata_Solicitud']['Id_Acuerdo_Pago']
+            for key in METADATA_ESPECIALES_DISTRIBUIR:
+                if key in solicitud['Metadata_Solicitud']:
+                    sub_solicitud['Metadata_Solicitud'][key] = solicitud['Metadata_Solicitud'][key]
 
             # Agregamos el ID de la Sub-Solicitud Actualizada al Set de IDs Actualizados
             updated_ids.add(sub_solicitud['ID_Solicitud'])
@@ -416,13 +405,9 @@ def redistribuir_resultado_solicitud(*, solicitud: pd.Series, pdf_bytes: Optiona
             # Mantenemos el Trace de la Respuesta Automática en la Metadata
             solicitud_espejo['Metadata_Solicitud']['Id_Respuesta_Autom'] = id_respuesta_autom
 
-            # Actualizamos Addendums si hay
-            if 'Addendums' in solicitud['Metadata_Solicitud']:
-                solicitud_espejo['Metadata_Solicitud']['Addendums'] = solicitud['Metadata_Solicitud']['Addendums']
-
-            # Actualizamos Fecha_Solicitado si hay
-            if 'Fecha_Solicitado' in solicitud['Metadata_Solicitud']:
-                solicitud_espejo['Metadata_Solicitud']['Fecha_Solicitado'] = solicitud['Metadata_Solicitud']['Fecha_Solicitado']
+            for key in METADATA_ESPECIALES_DISTRIBUIR:
+                if key in solicitud['Metadata_Solicitud']:
+                    solicitud_espejo['Metadata_Solicitud'][key] = solicitud['Metadata_Solicitud'][key]
 
             # Agregamos la Solicitud Espejo a la Lista de Filas a Actualizar
             need_update_rows.append(solicitud_espejo)
@@ -811,11 +796,10 @@ def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame, *, simular_
         solicitudes_df.loc[mask_sin_respuesta, 'Fecha_Respuesta'] = fecha_hoy
 
     # Paso 2: Crear Columna de Tiempos Respuesta como Diferencia en Días entre Fecha_Respuesta y Timestamp
-    solicitudes_aux = solicitudes_df.reset_index(drop=True).assign(
-        Tiempo_Respuesta_Dias=getBDDaysDiffFloat_vectorized(
-            solicitudes_df['Fecha_Respuesta'],
-            solicitudes_df['Timestamp']
-        )
+    solicitudes_aux = solicitudes_df.reset_index(drop=True)
+    solicitudes_aux['Tiempo_Respuesta_Dias'] = getBDDaysDiffFloat_vectorized(
+        solicitudes_aux['Fecha_Respuesta'],
+        solicitudes_aux['Timestamp']
     )
 
     # Paso 3: Calcular el Promedio General de Tiempos de Respuesta
@@ -842,9 +826,8 @@ def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, A
             - 'promedio_por_tipo': Promedio de respuestas por día por tipo de solicitud.
     """
     # Paso 1: Crear Columna de Fecha de Respuesta como Fecha sin Hora
-    solicitudes_aux = solicitudes_df.reset_index(drop=True).assign(
-        Fecha_Respuesta_Solo_Fecha=solicitudes_df['Fecha_Respuesta'].dt.date
-    )
+    solicitudes_aux = solicitudes_df.reset_index(drop=True)
+    solicitudes_aux['Fecha_Respuesta_Solo_Fecha'] = solicitudes_aux['Fecha_Respuesta'].dt.date
 
     # Paso 2: Calcular el Promedio General de Respuestas por Día
     promedio_general = solicitudes_aux.groupby('Fecha_Respuesta_Solo_Fecha').size().mean()
@@ -855,6 +838,94 @@ def obtener_promedio_respuestas_dia(solicitudes_df: pd.DataFrame) -> dict[str, A
     return {
         'promedio_general': promedio_general,
         'promedio_por_tipo': promedio_por_tipo
+    }
+
+def obtener_resumen_respuestas_vencidas(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Calcula el resumen de respuestas vencidas entre las solicitudes ya respondidas.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, Any]: Diccionario con el resumen de respuestas vencidas.
+            - 'total_general': Total de solicitudes vencidas con respuesta.
+            - 'total_por_tipo': Total de solicitudes vencidas por tipo de solicitud.
+            - 'total_respondidas': Total de solicitudes con respuesta consideradas.
+    """
+    # Paso 1: Dejar solo las Solicitudes con Respuesta (Opuesto a la Máscara de Sin Responder)
+    mask_respondidas = ~obtener_mascara_sin_responder(solicitudes_df)
+    solicitudes_respondidas = solicitudes_df[mask_respondidas].reset_index(drop=True)
+
+    # Si no hay Solicitudes Respondidas, devolvemos el Resumen Vacío
+    if solicitudes_respondidas.empty:
+        return {
+            'total_general': 0,
+            'total_por_tipo': {},
+            'total_respondidas': 0,
+        }
+
+    # Paso 2: Identificar las Solicitudes Vencidas por su Estado
+    mask_vencidas = (solicitudes_respondidas['Estado_Solicitud'] == 'Vencida')
+
+    # Paso 3: Calcular el Total General de Solicitudes Vencidas
+    total_general = int(mask_vencidas.sum())
+
+    # Paso 4: Calcular el Total de Solicitudes Vencidas por Tipo de Solicitud
+    total_por_tipo = solicitudes_respondidas[mask_vencidas].groupby('Tipo_Solicitud').size().to_dict()
+
+    return {
+        'total_general': total_general,
+        'total_por_tipo': total_por_tipo,
+        'total_respondidas': len(solicitudes_respondidas),
+    }
+
+def obtener_resumen_respuestas_automaticas(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Calcula el resumen de respuestas automáticas entre las solicitudes ya respondidas.
+
+    Una respuesta es automática cuando el Id_Respuesta_Autom guardado en la Metadata
+    difiere del ID_Solicitud de la fila. Si la llave no existe, se asume que la
+    respuesta no fue automática (se compara contra el mismo ID_Solicitud).
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, Any]: Diccionario con el resumen de respuestas automáticas.
+            - 'total_general': Total de respuestas automáticas.
+            - 'total_por_tipo': Total de respuestas automáticas por tipo de solicitud.
+            - 'total_respondidas': Total de solicitudes con respuesta consideradas.
+    """
+    # Paso 1: Dejar solo las Solicitudes con Respuesta (Opuesto a la Máscara de Sin Responder)
+    mask_respondidas = ~obtener_mascara_sin_responder(solicitudes_df)
+    solicitudes_respondidas = solicitudes_df[mask_respondidas].reset_index(drop=True)
+
+    # Si no hay Solicitudes Respondidas, devolvemos el Resumen Vacío
+    if solicitudes_respondidas.empty:
+        return {
+            'total_general': 0,
+            'total_por_tipo': {},
+            'total_respondidas': 0,
+        }
+
+    # Paso 2: Identificar las Respuestas Automáticas
+    # Si Id_Respuesta_Autom difiere del ID_Solicitud, la respuesta fue automática
+    mask_automaticas = solicitudes_respondidas.apply(
+        lambda row: str(row['Metadata_Solicitud'].get('Id_Respuesta_Autom', row['ID_Solicitud'])) != str(row['ID_Solicitud']),
+        axis=1
+    )
+
+    # Paso 3: Calcular el Total General de Respuestas Automáticas
+    total_general = int(mask_automaticas.sum())
+
+    # Paso 4: Calcular el Total de Respuestas Automáticas por Tipo de Solicitud
+    total_por_tipo = solicitudes_respondidas[mask_automaticas].groupby('Tipo_Solicitud').size().to_dict()
+
+    return {
+        'total_general': total_general,
+        'total_por_tipo': total_por_tipo,
+        'total_respondidas': len(solicitudes_respondidas),
     }
 
 def obtener_df_bancos_sin_responder(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
