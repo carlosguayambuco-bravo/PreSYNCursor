@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 import streamlit as st
 # Librerías Locales
 from core.auth import SCOPES, load_saved_credentials
-from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions # type: ignore
+from data.data_loader import load_addendums, load_aliados_dataframe, load_app_config, load_client_balances, load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal, load_reference_changes, load_special_user_permissions # type: ignore
 from modules.classes import crear_diccionario_aliados
 from services import MetabaseService, GoogleSheetsService, GoogleMailService, GoogleDriveService
 

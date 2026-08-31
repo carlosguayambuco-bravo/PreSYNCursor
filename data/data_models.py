@@ -273,8 +273,6 @@ class DeudasPosiblesCruce(TypedDict):
 class PagosCuotasCruce(TypedDict):
     Cuotas: int
     Monto: float
-    En_Portafolio: bool
-
 
 class MetadataPendienteCruce(TypedDict):
     Id_Registro: str
@@ -284,6 +282,7 @@ class MetadataPendienteCruce(TypedDict):
     Fecha_Limite_Pago: datetime
     Maximo_Descuento: bool
     Etiqueta: Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
+    Motivos_Cruce: list[str]
     Deudas_Posibles: List[DeudasPosiblesCruce]
     Cruce_Status: Literal['Sin Reconocer','Reconocido','Subido Alianzas']
     Casa_Cobro: str
@@ -295,12 +294,12 @@ class MetadataPendienteCruce(TypedDict):
     Ultima_Actualizacion: Optional[datetime]
 
 class PendienteCruceSchema(pa.DataFrameModel):
-    Id_Cruce: str # Un UUID
-    Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
-    Nombre_Cliente: str = pa.Field(nullable=True)
-    Banco: str = pa.Field(nullable=True)
-    Monto_Actual: float = pa.Field(nullable=True)
-    Numero_Credito: str = pa.Field(nullable=True)
+    Id_Cruce: Series[str] # Un UUID
+    Cedula: Series[str]
+    Nombre_Cliente: Series[str] = pa.Field(nullable=True)
+    Banco: Series[str] = pa.Field(nullable=True)
+    Monto_Actual: Series[float] = pa.Field(nullable=True)
+    Numero_Credito: Series[str] = pa.Field(nullable=True)
     Metadata: Series[MetadataPendienteCruce]
 
 class InputCruceSchema(pa.DataFrameModel):

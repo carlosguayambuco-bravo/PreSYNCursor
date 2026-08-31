@@ -2,7 +2,7 @@
 # Librerías de Python
 from time import sleep
 from typing import Any
-from unittest import result
+from datetime import datetime
 import json
 # Librerías de Terceros
 from gspread.exceptions import APIError
@@ -484,6 +484,19 @@ def get_column_letter(col_idx: int) -> str:
         result = chr(65 + remainder) + result
     return result
 
+# Función Auxiliar para Limpiar Datos antes de Volver String
+def sanitize_json(obj: Any):
+    if isinstance(obj, dict):
+        return {k:sanitize_json(v) for k,v in obj.items()}
+    elif isinstance(obj, (list,set)):
+        return [sanitize_json(v) for v in list(obj)]
+    elif pd.isna(obj):
+        return obj
+    elif isinstance(obj, (datetime, pd.Timestamp)):
+        return obj.strftime("%Y-%m-%d %H:%M:%S").replace("NaT","")
+    else:
+        return obj
+
 # Función Auxiliar para Convertir los Datos a String
 def convert_data_to_string(obj: Any) -> str:
     """
@@ -502,10 +515,8 @@ def convert_data_to_string(obj: Any) -> str:
         return ""
     if isinstance(obj, (int, float)):
         return str(obj)
-    if isinstance(obj, list):
-        return json.dumps([convert_data_to_string(d) for d in obj])
-    elif isinstance(obj, dict):
-        return json.dumps({key: convert_data_to_string(value) for key, value in obj.items()})
+    if isinstance(obj, (list,dict)):
+        return json.dumps(sanitize_json(obj))
     # For other types (like lists, dicts), we can use json.dumps for a readable format
     try:
         return json.dumps(obj, ensure_ascii=False)

@@ -244,3 +244,50 @@ LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
 HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
+
+# --- Configuraciones del Cruce de Deudas ---
+# --- Constantes del Algoritmo ---
+COL_ID_CRUCE = 'Id_Cruce'
+COL_ID_DEUDA = 'Id_Deuda'
+COL_CEDULA = 'Cedula'
+COL_NOMBRE = 'Nombre_Cliente'
+COL_BANCO = 'Banco'
+COL_MONTO_ACTUAL = 'Monto_Actual'
+COL_MONTO_PROPUESTO = 'Monto_Propuesto'
+COL_CREDITO = 'Numero_Credito'
+COL_FECHA_LIMITE_PAGO = 'Fecha_Limite_Pago'
+
+COLUMNAS_UNIVERSO = [COL_CEDULA, COL_NOMBRE, COL_BANCO, COL_MONTO_ACTUAL, COL_CREDITO, COL_ID_DEUDA]
+
+ETIQUETA_EXACTO = 'EXACTO'
+ETIQUETA_DUPLICADO = 'DUPLICADO'
+ETIQUETA_AMBIGUO = 'AMBIGUO'
+ETIQUETA_ADDENDUM = 'ADDENDUM'
+ETIQUETA_NULO = 'NULO'
+MOTIVO_CASA_COBRO = 'Casa de Cobro'  # Motivo exclusivo de la acotación por Casa de Cobro
+
+DIF_MONTO_MAX = 1000.0      # Diferencia absoluta máxima aceptada entre montos
+MIN_LEN_TEXTO = 4           # Longitud mínima para aplicar contención / fuzzy / crop
+MIN_PALABRAS_NOMBRE = 3     # Palabras mínimas en ambos registros para aplicar contención de nombres
+RATIO_FUZZY_BANCO = 85      # Umbral de ratio fuzzy para el Banco
+RATIO_FUZZY_CREDITO = 90    # Umbral de ratio fuzzy para el Número de Crédito
+UMBRAL_BLOQUEO = 1000       # Si hay más candidatos se usan las rutas bloqueadas (más eficientes)
+LIMITE_VERIFICACION = 20000 # Tope de filas a verificar en las rutas bloqueadas
+MAX_COMB_NOMBRE = 6         # Tamaño máximo de subconjuntos de palabras para la contención de nombres
+
+ETIQUETAS_CRUCE = [ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO]
+
+MIMETYPES = {
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'csv': 'text/csv',
+}
+
+COLUMNAS_MAPEABLES = [
+    (COL_CEDULA, 'Cedula', ['cedula', 'documento', 'identificacion','cédula']),
+    (COL_NOMBRE, 'Nombre del Cliente', ['nombre', 'cliente']),
+    (COL_BANCO, 'Banco', ['banco', 'entidad','portafolio']),
+    (COL_CREDITO, 'Número de Crédito', ['credito', 'numero crédito','numero_producto','numero_credito']),
+    (COL_MONTO_ACTUAL, 'Monto Actual', ['monto actual', 'deuda', 'saldo', 'saldo insoluto']),
+    (COL_ID_DEUDA, 'Id_Deuda (Opcional)', ['id deuda', 'id_deuda', 'id de la deuda']),
+    (COL_MONTO_PROPUESTO, 'Monto Propuesto (Opcional)', ['monto propuesto', 'propuesta', 'descuento']),
+]

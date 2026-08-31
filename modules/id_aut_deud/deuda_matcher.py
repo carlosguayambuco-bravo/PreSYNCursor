@@ -2,8 +2,6 @@
 # Librerías de Python
 from collections import defaultdict
 from itertools import combinations
-from pydoc import text
-from turtle import width
 from typing import Optional
 # Librerías de Terceros
 import numpy as np
@@ -13,6 +11,7 @@ from thefuzz import fuzz
 import streamlit as st
 # Librerías Locales
 from data.data_models import InputCruceSchema, OutputCruceSchema
+from modules.constants import COLUMNAS_UNIVERSO, DIF_MONTO_MAX, ETIQUETA_ADDENDUM, ETIQUETA_AMBIGUO, ETIQUETA_DUPLICADO, LIMITE_VERIFICACION, MAX_COMB_NOMBRE, MIN_PALABRAS_NOMBRE, MOTIVO_CASA_COBRO, RATIO_FUZZY_BANCO, RATIO_FUZZY_CREDITO, UMBRAL_BLOQUEO
 from modules.id_aut_deud.helpers import *
 
 # --- Funciones de Match por Columna ---

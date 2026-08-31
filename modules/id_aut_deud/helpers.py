@@ -12,54 +12,23 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MetadataPendienteCruce, PendienteCruceSchema
+from modules.constants import (
+    COL_BANCO,
+    COL_CEDULA,
+    COL_CREDITO,
+    COL_ID_CRUCE,
+    COL_ID_DEUDA,
+    COL_MONTO_ACTUAL,
+    COL_MONTO_PROPUESTO,
+    COL_NOMBRE,
+    COLUMNAS_MAPEABLES,
+    ETIQUETA_EXACTO,
+    ETIQUETA_NULO,
+    MIN_LEN_TEXTO
+)
 from services import GoogleDriveService
 from utils.helpers_general import cleanNumber
-
-# --- Constantes del Algoritmo ---
-COL_ID_CRUCE = 'Id_Cruce'
-COL_ID_DEUDA = 'Id_Deuda'
-COL_CEDULA = 'Cedula'
-COL_NOMBRE = 'Nombre_Cliente'
-COL_BANCO = 'Banco'
-COL_MONTO_ACTUAL = 'Monto_Actual'
-COL_MONTO_PROPUESTO = 'Monto_Propuesto'
-COL_CREDITO = 'Numero_Credito'
-COL_FECHA_LIMITE_PAGO = 'Fecha_Limite_Pago'
-
-COLUMNAS_UNIVERSO = [COL_CEDULA, COL_NOMBRE, COL_BANCO, COL_MONTO_ACTUAL, COL_CREDITO, COL_ID_DEUDA]
-
-ETIQUETA_EXACTO = 'EXACTO'
-ETIQUETA_DUPLICADO = 'DUPLICADO'
-ETIQUETA_AMBIGUO = 'AMBIGUO'
-ETIQUETA_ADDENDUM = 'ADDENDUM'
-ETIQUETA_NULO = 'NULO'
-MOTIVO_CASA_COBRO = 'Casa de Cobro'  # Motivo exclusivo de la acotación por Casa de Cobro
-
-DIF_MONTO_MAX = 1000.0      # Diferencia absoluta máxima aceptada entre montos
-MIN_LEN_TEXTO = 4           # Longitud mínima para aplicar contención / fuzzy / crop
-MIN_PALABRAS_NOMBRE = 3     # Palabras mínimas en ambos registros para aplicar contención de nombres
-RATIO_FUZZY_BANCO = 85      # Umbral de ratio fuzzy para el Banco
-RATIO_FUZZY_CREDITO = 90    # Umbral de ratio fuzzy para el Número de Crédito
-UMBRAL_BLOQUEO = 1000       # Si hay más candidatos se usan las rutas bloqueadas (más eficientes)
-LIMITE_VERIFICACION = 20000 # Tope de filas a verificar en las rutas bloqueadas
-MAX_COMB_NOMBRE = 6         # Tamaño máximo de subconjuntos de palabras para la contención de nombres
-
-ETIQUETAS_CRUCE = [ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO]
-
-MIMETYPES = {
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'csv': 'text/csv',
-}
-
-COLUMNAS_MAPEABLES = [
-    (COL_CEDULA, 'Cedula', ['cedula', 'documento', 'identificacion','cédula']),
-    (COL_NOMBRE, 'Nombre del Cliente', ['nombre', 'cliente']),
-    (COL_BANCO, 'Banco', ['banco', 'entidad','portafolio']),
-    (COL_CREDITO, 'Número de Crédito', ['credito', 'numero crédito','numero_producto','numero_credito']),
-    (COL_MONTO_ACTUAL, 'Monto Actual', ['monto actual', 'deuda', 'saldo', 'saldo insoluto']),
-    (COL_ID_DEUDA, 'Id_Deuda (Opcional)', ['id deuda', 'id_deuda', 'id de la deuda']),
-    (COL_MONTO_PROPUESTO, 'Monto Propuesto (Opcional)', ['monto propuesto', 'propuesta', 'descuento']),
-]
+from utils.helpers_sheets import convert_data_to_string
 
 # Función Auxiliar para Buscar Cortes
 def is_generalized_crop(original, target):
@@ -289,6 +258,9 @@ def cleanNumeroCredito(nc: Any) -> str:
     return nc_cleaned
 
 def cleanText(txt):
+    # Verificamos que no sea NaN
+    if pd.isna(txt) or not (isinstance(txt,str)):
+        return 'NAN'
     # Primero Quitamos tildes y dejamos Upper
     txt = txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
     # Ahora Reemplazamos #N/A con NO_HAY_INFORMACION
@@ -384,10 +356,9 @@ def adivinar_columna(columnas: list, candidatos: list) -> str:
     return 'Sin Columna'
 
 # Función Auxiliar para Limpiar las Keys de los Widgets de Columnas (al subir un archivo nuevo)
-def resetear_widgets_columnas() -> None:
-    prefijos = ['cruce_col_', 'cruce_separador_csv_', 'cruce_portafolio_', 'cruce_tipo_cuota_', 'cruce_cuotas_input_', 'cruce_col_cuotas_', 'cruce_fecha_', 'cruce_montos_cuotas_']
+def resetear_widgets_columnas(base_key: str) -> None:
     for key in list(st.session_state.keys()):
-        if any(key.startswith(p) for p in prefijos): # type: ignore
+        if key.endswith(base_key): # type: ignore
             del st.session_state[key]
 
 def mostrar_seleccion_columnas(*,label: str, start_idx: int, end_idx: int, opciones_columnas: list[str], column_mapper: dict[str,str], columnas_df: list[str]):
@@ -501,40 +472,20 @@ def uploadDBtoDrive(base_bytes: bytes, mimetype: str, file_name: str) -> str:
 
 # --- Funciones de Metadata y Formateo del Cruce ---
 
-# Función Auxiliar para Sanitizar Valores Anidados antes de Serializar a JSON
-def _sanitize_para_json(valor):
-    if isinstance(valor, dict):
-        return {k: _sanitize_para_json(v) for k, v in valor.items()}
-    if isinstance(valor, (list, tuple)):
-        return [_sanitize_para_json(v) for v in valor]
-    if isinstance(valor, pd.Timestamp):
-        return valor.strftime('%Y-%m-%d %H:%M:%S')
-    if valor is None:
-        return None
-    try:
-        if pd.isna(valor):
-            return None
-    except (TypeError, ValueError):
-        pass
-    if isinstance(valor, (np.bool_, bool)):
-        return bool(valor)
-    if isinstance(valor, (np.integer, int)):
-        return int(valor)
-    if isinstance(valor, (np.floating, float)):
-        return float(valor)
-    return str(valor)
-
 # Función Auxiliar para Crear la Metadata de un Registro de Cruce
 def create_metadata_cruce(*,
-        id_registro: int,
+        id_registro: str,
+        nombre_archivo: str,
         pagos_cuotas: list[PagosCuotasCruce],
         fecha_identificacion: pd.Timestamp,
         fecha_limite_pago: pd.Timestamp,
+        descuento_maximo: bool,
         etiqueta: str,
+        motivos_cruce: list[str],
         deudas_posibles: list[DeudasPosiblesCruce],
+        cruce_status: str = 'Sin Reconocer',
         casa_cobro: str,
         ejecutivo_subida: str,
-        cruce_status: str = 'Sin Reconocer',
         alias_casa: Optional[str] = None,
         id_definitivo: Optional[str] = None,
         portafolio_ids: Optional[str] = None,
@@ -543,12 +494,15 @@ def create_metadata_cruce(*,
     ) -> MetadataPendienteCruce:
     # Paso 1: Crear la Metadata con las Claves Obligatorias
     mtdt = MetadataPendienteCruce(
-        Id_Registro=int(id_registro),
-        Pagos_Cuotas=[_sanitize_para_json(p) for p in (pagos_cuotas or [])], # type: ignore
+        Id_Registro=str(id_registro),
+        Archivo_Origen = nombre_archivo,
+        Pagos_Cuotas=pagos_cuotas, # type: ignore
         Fecha_Identificacion=fecha_identificacion,
         Fecha_Limite_Pago=(fecha_limite_pago if pd.notna(fecha_limite_pago) else pd.NaT),
+        Maximo_Descuento=descuento_maximo,
         Etiqueta=etiqueta, # type: ignore
-        Deudas_Posibles=[_sanitize_para_json(d) for d in (deudas_posibles or [])], # type: ignore
+        Motivos_Cruce=motivos_cruce,
+        Deudas_Posibles=deudas_posibles, # type: ignore
         Cruce_Status=cruce_status, # type: ignore
         Casa_Cobro=casa_cobro,
         Ejecutivo_Subida=ejecutivo_subida,
@@ -600,11 +554,12 @@ def build_pendiente_cruce_df(*,
         cruce_df: pd.DataFrame,
         match_result: Optional[pd.DataFrame],
         cartera_df: pd.DataFrame,
-        pagos_cuotas_lista: list,
+        pagos_cuotas_dict: dict[str,list],
         fecha_limite_serie: pd.Series,
         casa_cobro: str,
         ejecutivo_subida: str,
-        portafolio_serie: Optional[pd.Series] = None,
+        descuento_maximo: bool,
+        nombre_archivo: str,
         alias_casa: Optional[str] = None,
         id_deuda_col: Optional[str] = None,
     ) -> DataFrame[PendienteCruceSchema]:
@@ -621,6 +576,7 @@ def build_pendiente_cruce_df(*,
             COL_MONTO_ACTUAL: (float(fila[COL_MONTO_ACTUAL]) if (COL_MONTO_ACTUAL in fila.index) and pd.notna(fila[COL_MONTO_ACTUAL]) else float('nan')),
             COL_CREDITO: (str(fila[COL_CREDITO]).replace('.0','').strip() if (COL_CREDITO in fila.index) and pd.notna(fila[COL_CREDITO]) else ''),
             COL_ID_DEUDA: id_deuda,
+            "Es_Liquidada": fila.get("Liquidada",False),
         }
 
     # Paso 3: Indexar el Resultado del Modelo por Id_Cruce
@@ -640,13 +596,15 @@ def build_pendiente_cruce_df(*,
             # Registro Procesado por el Modelo de Identificación
             etiqueta = str(match_fila['Etiqueta_Registro'])
             ids_candidatos = [str(id_d) for id_d in (match_fila['Ids_Candidatos'] or [])]
+            motivos_cruce = match_fila['Motivos_Etiqueta'].split('|')
         else:
-            # Registro que ya traía Id_Deuda en la base (se asume identificado)
-            etiqueta = ETIQUETA_EXACTO
             id_pre = ''
             if (id_deuda_col is not None) and pd.notna(fila.get(id_deuda_col)):
                 id_pre = str(fila[id_deuda_col]).replace('.0','').strip()
+            # Registro que ya traía Id_Deuda en la base (se asume identificado)
+            etiqueta = ETIQUETA_EXACTO if id_pre else ETIQUETA_NULO
             ids_candidatos = [id_pre] if id_pre else []
+            motivos_cruce = ["Id_Deuda Input"] if id_pre else []
 
         # Id Definitivo (los EXACTO se guardan directamente con el Id_Deuda del cruce)
         id_definitivo = None
@@ -662,11 +620,8 @@ def build_pendiente_cruce_df(*,
             deudas_posibles.append(DeudasPosiblesCruce(**info))
 
         # Pagos a Cuotas, Fecha Límite de Pago y Portafolio
-        pagos_cuotas = pagos_cuotas_lista[i] if i < len(pagos_cuotas_lista) else [] # type: ignore
+        pagos_cuotas = [PagosCuotasCruce(**info) for info in pagos_cuotas_dict.get(fila[COL_ID_CRUCE],[])]
         fecha_limite = fecha_limite_serie.iloc[i] if i < len(fecha_limite_serie) else pd.NaT # type: ignore
-        portafolio_ids = None
-        if (portafolio_serie is not None) and (i < len(portafolio_serie)) and pd.notna(portafolio_serie.iloc[i]): # type: ignore
-            portafolio_ids = str(portafolio_serie.iloc[i]) # type: ignore
 
         # Creación de la Metadata del Registro
         mtdt = create_metadata_cruce(
@@ -675,12 +630,14 @@ def build_pendiente_cruce_df(*,
             fecha_identificacion=fecha_identificacion,
             fecha_limite_pago=fecha_limite, # type: ignore
             etiqueta=etiqueta,
+            motivos_cruce = motivos_cruce,
             deudas_posibles=deudas_posibles,
             casa_cobro=casa_cobro,
             ejecutivo_subida=ejecutivo_subida,
             alias_casa=alias_casa,
             id_definitivo=id_definitivo,
-            portafolio_ids=portafolio_ids,
+            descuento_maximo = descuento_maximo,
+            nombre_archivo = nombre_archivo, 
         )
 
         # Agregar la Fila de Salida
@@ -721,9 +678,9 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
         mtdt['Ultima_Actualizacion'] = ahora
         # Sanitizamos los Valores Anidados para que el JSON quede válido al subir
         if mtdt.get('Deudas_Posibles'):
-            mtdt['Deudas_Posibles'] = _sanitize_para_json(mtdt['Deudas_Posibles'])
+            mtdt['Deudas_Posibles'] = convert_data_to_string(mtdt['Deudas_Posibles'])
         if mtdt.get('Pagos_Cuotas'):
-            mtdt['Pagos_Cuotas'] = _sanitize_para_json(mtdt['Pagos_Cuotas'])
+            mtdt['Pagos_Cuotas'] = convert_data_to_string(mtdt['Pagos_Cuotas'])
         return mtdt
 
     df_actualizar['Metadata'] = df_actualizar.apply(actualizar_mtdt, axis=1)

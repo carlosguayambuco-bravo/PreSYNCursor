@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco
 from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
@@ -798,7 +798,11 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
 
     # Paso 6: Validamos el DF con el Esquema (Si no esta vacio)
     if not cruce_df.empty:
-        cruce_df = PendienteCruceSchema.validate(cruce_df)
+        try:
+            cruce_df = PendienteCruceSchema.validate(cruce_df, lazy=True)
+        except Exception as e:
+            st.json(e.message)
+            raise e
     else:
         cruce_df = PendienteCruceSchema.empty()
 
@@ -815,13 +819,13 @@ def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
         return MetadataPendienteCruce(**mtdt_val)
     # Si es Vacío o no es texto devolvemos un Diccionario Vacío
     if pd.isna(mtdt_val) or not isinstance(mtdt_val, str) or not mtdt_val.strip():
-        return {}
+        return {} # type: ignore
     try:
         mtdt = json.loads(mtdt_val)
     except json.JSONDecodeError:
-        return {}
+        return {} # type: ignore
     if not isinstance(mtdt, dict):
-        return {}
+        return {} # type: ignore
 
     # Sub-Listas que quedaron serializadas como texto dentro del JSON
     for key in ['Pagos_Cuotas', 'Deudas_Posibles']:
@@ -836,9 +840,9 @@ def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
 
     # Tipados de las Claves Obligatorias
     try:
-        mtdt['Id_Registro'] = int(float(mtdt.get('Id_Registro', 0)))
+        mtdt['Id_Registro'] = str(int(float(mtdt.get('Id_Registro', 0))))
     except (TypeError, ValueError):
-        mtdt['Id_Registro'] = 0
+        mtdt['Id_Registro'] = str(mtdt.get('Id_Registro') or 0)
     for key in ['Fecha_Identificacion', 'Fecha_Limite_Pago']:
         mtdt[key] = pd.to_datetime(mtdt.get(key,''), errors='coerce')
     ultima_upd = mtdt.get('Ultima_Actualizacion')
@@ -856,7 +860,6 @@ def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
             pago['Monto'] = float(pago.get('Monto', 0) or 0)
         except (TypeError, ValueError):
             pago['Monto'] = 0.0
-        pago['En_Portafolio'] = pago.get('En_Portafolio') in (True, 'True', 'true', 1, '1')
 
     # Tipado de las Deudas Posibles
     for deuda in (mtdt.get('Deudas_Posibles') or []):
@@ -879,18 +882,32 @@ def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
         mtdt.pop('Monto_Actual_Original')
 
     # Aseguramos las Claves Obligatorias Faltantes
+    mtdt.setdefault('Archivo_Origen', '')
     mtdt.setdefault('Pagos_Cuotas', [])
     mtdt.setdefault('Deudas_Posibles', [])
     mtdt.setdefault('Fecha_Identificacion', pd.NaT)
     mtdt.setdefault('Fecha_Limite_Pago', pd.NaT)
+    mtdt.setdefault('Maximo_Descuento', False)
     mtdt.setdefault('Etiqueta', 'NULO')
+    mtdt.setdefault('Motivos_Cruce', [])
     mtdt.setdefault('Cruce_Status', 'Sin Reconocer')
     mtdt.setdefault('Casa_Cobro', '')
     mtdt.setdefault('Ejecutivo_Subida', '')
     mtdt.setdefault('Ultima_Actualizacion', None)
 
-    # Actualizamos las Deudas a DeudasPosiblesCruce
-    mtdt['Deudas_Posibles'] = [DeudasPosiblesCruce(**ddict) for ddict in mtdt['Deudas_Posibles']]
+    # Filtramos las Claves no Declaradas en los TypedDicts (la Validación las Rechaza)
+    top_keys = set(MetadataPendienteCruce.__annotations__)
+    mtdt = {k: v for k, v in mtdt.items() if k in top_keys}
+    pago_keys = set(PagosCuotasCruce.__annotations__)
+    mtdt['Pagos_Cuotas'] = [
+        {k: v for k, v in pago.items() if k in pago_keys}
+        for pago in mtdt['Pagos_Cuotas'] if isinstance(pago, dict)
+    ]
+    deuda_keys = set(DeudasPosiblesCruce.__annotations__)
+    mtdt['Deudas_Posibles'] = [
+        DeudasPosiblesCruce(**{k: v for k, v in deuda.items() if k in deuda_keys})
+        for deuda in mtdt['Deudas_Posibles'] if isinstance(deuda, dict)
+    ]
 
     # Lo Convertimos en el TypedDict
     mtdt = MetadataPendienteCruce(**mtdt)
