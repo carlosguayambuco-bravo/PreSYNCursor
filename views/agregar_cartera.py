@@ -17,96 +17,15 @@ from modules.forms import obtener_datos_completos_deudas
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
     COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL,
-    COL_MONTO_PROPUESTO, COL_NOMBRE,
-    ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO,
-    aplicar_cambios_id_definitivo, build_pendiente_cruce_df, limpiar_base_subida,
-    transform_portafolio, generateFileName, uploadDBtoDrive,
+    COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES,
+    ETIQUETAS_CRUCE, MIMETYPES,
+    aplicar_cambios_id_definitivo, build_pendiente_cruce_df, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
+    generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
     LLAVE_CAMBIOS_ID_DEFINITIVO, mostrar_deudas_cruce_paginadas, mostrar_filtros_cruce,
 )
 from utils.helpers_general import cleanNumber
-
-ETIQUETAS_CRUCE = [ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO]
-
-MIMETYPES = {
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'csv': 'text/csv',
-}
-
-COLUMNAS_MAPEABLES = [
-    (COL_CEDULA, 'Cedula', ['cedula', 'documento', 'identificacion','cédula']),
-    (COL_NOMBRE, 'Nombre del Cliente', ['nombre', 'cliente']),
-    (COL_BANCO, 'Banco', ['banco', 'entidad','portafolio']),
-    (COL_CREDITO, 'Número de Crédito', ['credito', 'numero crédito','numero_producto','numero_credito']),
-    (COL_MONTO_ACTUAL, 'Monto Actual', ['monto actual', 'deuda', 'saldo', 'saldo insoluto']),
-    (COL_ID_DEUDA, 'Id_Deuda (Opcional)', ['id deuda', 'id_deuda', 'id de la deuda']),
-    (COL_MONTO_PROPUESTO, 'Monto Propuesto (Opcional)', ['monto propuesto', 'propuesta', 'descuento']),
-]
-
-# Función Auxiliar para Leer la Base Subida por el Usuario (xlsx o csv)
-def _leer_base_subida(uploaded_file: io.BytesIO) -> pd.DataFrame:
-    buffer_bytes = uploaded_file.getvalue()
-    ext = uploaded_file.name.split('.')[-1].lower()
-
-    # Caso 1: Excel
-    if ext == 'xlsx':
-        return pd.read_excel(io.BytesIO(buffer_bytes), dtype=str)
-
-    # Caso 2: CSV (intentamos la lectura y si falla pedimos el separador)
-    try:
-        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str)
-    except Exception:
-        pass
-    try:
-        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str, encoding='latin-1')
-    except Exception:
-        pass
-
-    separador = st.text_input(
-        label="**🚧 No se pudo leer el CSV automáticamente. Indica el separador**",
-        value=";",
-        key="cruce_separador_csv_input",
-        help="Escribe el separador usado en el archivo (Ej: ';', '|', '\\t').",
-    )
-    if separador:
-        try:
-            sep = '\t' if separador == '\\t' else separador
-            return pd.read_csv(io.BytesIO(buffer_bytes), sep=sep, dtype=str)
-        except Exception as e:
-            st.error("No se pudo leer el CSV con el separador '{}': {}".format(separador, e), icon="❌")
-            return pd.DataFrame()
-    st.error("No se pudo leer el archivo CSV. Indica el separador para continuar.", icon="🚧")
-    return pd.DataFrame()
-
-# Función Auxiliar para Adivinar la Columna que corresponde a un dato del esquema
-def _adivinar_columna(columnas: list, candidatos: list) -> str:
-    columnas_lower = [str(c).strip().lower() for c in columnas]
-    for candidato in candidatos:
-        for i, col_lower in enumerate(columnas_lower):
-            if candidato in col_lower:
-                return columnas[i]
-    return 'Sin Columna'
-
-# Función Auxiliar para Limpiar las Keys de los Widgets de Columnas (al subir un archivo nuevo)
-def _resetear_widgets_columnas() -> None:
-    prefijos = ['cruce_col_', 'cruce_separador_csv_', 'cruce_portafolio_', 'cruce_tipo_cuota_', 'cruce_cuotas_input_', 'cruce_col_cuotas_', 'cruce_fecha_', 'cruce_montos_cuotas_']
-    for key in list(st.session_state.keys()):
-        if any(key.startswith(p) for p in prefijos): # type: ignore
-            del st.session_state[key]
-
-def _mostrar_seleccion_columnas(*,label: str, start_idx: int, end_idx: int, opciones_columnas: list[str], column_mapper: dict[str,str]) -> Optional[str]:
-    st.markdown(f"#### **{label}**")
-    for (col_std, label, candidatos) in COLUMNAS_MAPEABLES[start_idx:end_idx]:
-        adivinada = _adivinar_columna(raw_df.columns.tolist(), candidatos)
-        index_default = opciones_columnas.index(adivinada) if adivinada in opciones_columnas else 0
-        column_mapper[col_std] = st.selectbox(
-            label="**{}**".format(label),
-            options=opciones_columnas,
-            index=index_default,
-            key="cruce_col_{}".format(col_std),
-        )
-
 
 # Función Auxiliar para Mostrar la Configuración del Cruce (Columnas, Modelo y Subida)
 def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str) -> None:
@@ -141,34 +60,40 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
     # Creamos el Mappeador Guardador de Columnas
     seleccion_cols: dict[str,str] = {}
 
+    # Definimos las Columnas del DF
+    columnas_df = raw_df.columns.tolist()
+
     # Se crean 3 Columnas: Datos de Cliente, Datos de Deuda, Datos de Montos
     colClienteInfo, colDeudaInfo, colMontoInfo = st.columns(3, border=True)
 
     with colClienteInfo:
-        _mostrar_seleccion_columnas(
+        mostrar_seleccion_columnas(
             label = "Identificación del Cliente",
             start_idx = 0,
             end_idx = 2,
             opciones_columnas = opciones_columnas,
-            column_mapper = seleccion_cols
+            column_mapper = seleccion_cols,
+            columnas_df = columnas_df,
         )
 
     with colDeudaInfo:
-        _mostrar_seleccion_columnas(
+        mostrar_seleccion_columnas(
             label = "Identificación de la Deuda",
             start_idx = 2,
             end_idx = 5,
             opciones_columnas = opciones_columnas,
-            column_mapper = seleccion_cols
+            column_mapper = seleccion_cols,
+            columnas_df = columnas_df,
         )
 
     with colMontoInfo:
-        _mostrar_seleccion_columnas(
+        mostrar_seleccion_columnas(
             label = "Configuración Adicional",
             start_idx = 5,
             end_idx = len(COLUMNAS_MAPEABLES),
             opciones_columnas = opciones_columnas,
-            column_mapper = seleccion_cols
+            column_mapper = seleccion_cols,
+            columnas_df = columnas_df,
         )
 
     col_cedula = seleccion_cols[COL_CEDULA]
@@ -179,106 +104,137 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
     col_id_deuda = seleccion_cols[COL_ID_DEUDA]
     col_monto_propuesto = seleccion_cols[COL_MONTO_PROPUESTO]
 
+    # Verificamos que la Columna Cedula o Nombre este presente, de lo contrario paramos
+    if col_cedula == 'Sin Columna' and col_nombre == 'Sin Columna':
+        st.info("Selecciona las Columnas para continuar con la Subida", icon="ℹ️")
+        st.stop()
+
+    st.warning('Asegurate de Seleccionar **TODAS** las Columnas',icon='⚠️')
+
     st.divider()
 
-    # --- 3.1 Característica Especial: Portafolio ---
-    st.markdown("### 💼 Manejo de Portafolios")
-
-    portafolio_type = st.radio(
-        label = "**Escoger el Modo del Portafolio**",
+    # --- 3.1 Característica Especial: Montos a Plazos ---
+    st.markdown("### 💸 Montos a Plazos (Opcional)")
+    
+    tipo_cuotas = st.radio(
+        label="**Tipo de Selección de Cuotas**",
         options = [
-            "Sin Portafolio",
-            "Portafolio seleccionado en Columna",
-            "Portafolio con Mismo Monto"
+            "**Sin Plazos a Cuotas**",
+            "**Seleccionar Monto y Poner Cuotas**",
+            "**Seleccionar Monto y Cuotas**",
         ],
         captions=[
-            "**Sin Portafolio**: Manejar los Datos subidos por Deuda",
-            "**Seleccionado en Columna**: Una Columna indica si es Portafolio o no",
-            "**Mismo Monto**: El Portafolio se detecta con el Mismo Monto",
+            "La Casa no acepta solicitudes a coutas",
+            "Seleccionas la Columna del Pago y pones el #Cuotas que son",
+            "Seleccionas la Columna del Pago y la Columna que indica las cuotas",
         ],
-        horizontal=True,
+        horizontal = True,
+        index = None
     )
 
-    portafolio_type = portafolio_type.replace("*","")
+    if tipo_cuotas is None:
+        st.info("Selecciona si hay Montos Aprobados por Cuotas")
+        st.stop()
+
+    tipo_cuotas = tipo_cuotas.replace('*','')
+
+    # Definimos la Selección de las Columnas y sus Cuotas
+    cuotas_cols_config = {}
+    if tipo_cuotas != 'Seleccionar Monto y Poner Cuotas':
+        # Inicalizamos el Conteo de Configuraciones a Cuotas
+        key_count_cuotas = 'cuotas_count_{}'.format(base_key)
+        if not (key_count_cuotas in st.session_state):
+            st.session_state[key_count_cuotas] = 1
+
+        count_cuotas = st.session_state[key_count_cuotas]
+
+        # Creamos 3 Columnas: Identificador, Columna de Cuotas, Selector de Cuotas
+        colIdCt, colNCt, colSelectCt = st.columns([1,2,2], border = True)
+
+        with colIdCt:
+            for i in range(count_cuotas):
+                st.text_input(
+                    label="#Configuración de Cuotas",
+                    value = "Cuotas #{}".format(i+1),
+                    key="{}_"
+                    disabled=True
+                )
+
+        # Mostramos Botón de Añadir o Quitar Opciones de Columnas
+
+        # Mostramos Alerta en Caso de NaNs e incluimos el selector de Imputador ante estos casos
+
 
     st.divider()
 
-    # --- 3.2 Característica Especial: Montos a Plazos ---
-    st.markdown("### 💸 Montos a Plazos (Opcional)")
-    cols_montos_cuotas = st.multiselect(
-        label="**💸 Columnas con Montos a Pagar en Cuotas**",
-        options=list(raw_df.columns),
-        key="cruce_montos_cuotas_cols",
-        help="Selecciona una o varias columnas que definan los montos a pagar en cuotas.",
-    )
-    configs_cuotas = []
-    if cols_montos_cuotas:
-        for col_monto in cols_montos_cuotas:
-            with st.container(border=True):
-                tipo_definicion = st.segmented_control(
-                    label="**Definición de Cuotas para '{}'**".format(col_monto),
-                    options=["Definición por Input", "Definición por Columnas"],
-                    default="Definición por Input",
-                    key="cruce_tipo_cuota_{}".format(col_monto),
-                )
-                if tipo_definicion == "Definición por Input":
-                    num_cuotas = st.number_input(
-                        label="**🔢 Número de Cuotas**",
-                        min_value=1,
-                        max_value=120,
-                        value=2,
-                        step=1,
-                        key="cruce_cuotas_input_{}".format(col_monto),
-                        help="Los pagos a 1 cuota no se guardan (ese sería el Monto Propuesto).",
-                    )
-                    configs_cuotas.append({'col_monto': col_monto, 'tipo': 'input', 'cuotas': int(num_cuotas), 'col_cuotas': None})
-                else:
-                    col_cuotas = st.selectbox(
-                        label="**📋 Columna con el Número de Cuotas**",
-                        options=list(raw_df.columns),
-                        key="cruce_col_cuotas_{}".format(col_monto),
-                    )
-                    configs_cuotas.append({'col_monto': col_monto, 'tipo': 'columnas', 'col_cuotas': col_cuotas})
+    # --- 3.2 Características Especiales: Fecha Límite de Pago y Máximo Descuento---
 
-    st.divider()
+    colFechaEsperada, colMaxDisc = st.columns(2, border=True, gap="small")
 
-    # --- 3.3 Característica Especial: Fecha Límite de Pago ---
-    st.markdown("### 📅 Fecha Límite de Pago")
-    modo_fecha = st.segmented_control(
-        label="**📅 ¿Cómo se define la Fecha Límite de Pago?**",
-        options=["Por Columna", "Por Input de Fecha"],
-        default="Por Columna",
-        key="cruce_fecha_modo",
-    )
-    serie_fecha = None
-    if modo_fecha == "Por Columna":
-        col_fecha = st.selectbox(
-            label="**📋 Columna de Fecha Límite de Pago**",
-            options=list(raw_df.columns),
-            key="cruce_fecha_col",
+    with colFechaEsperada:
+        st.markdown("### 📅 Fecha Máxima de Pago")
+        modo_fecha = st.segmented_control(
+            label="**¿Cómo se define la Fecha Máxima de Pago?**",
+            options=["Por Columna", "Por Input de Fecha"],
+            default="Por Input de Fecha",
+            key="cruce_fecha_modo",
         )
-        serie_fecha = pd.to_datetime(raw_df[col_fecha], errors='coerce')
-        if serie_fecha.isna().any():
-            st.warning(
-                "⚠️ Hay **{:,}** valores sin fecha en la columna. Usa el input de fecha para rellenarlos:".format(
-                    int(serie_fecha.isna().sum())
+        serie_fecha = None
+        if modo_fecha == "Por Columna":
+            col_fecha = st.selectbox(
+                label="**📋 Columna de Fecha Límite de Pago**",
+                options=list(raw_df.columns),
+                key="cruce_fecha_col",
+            )
+            serie_fecha = pd.to_datetime(raw_df[col_fecha], errors='coerce')
+            if serie_fecha.isna().any():
+                st.warning(
+                    "⚠️ Hay **{:,}** valores sin fecha en la columna. Usa el input de fecha para rellenarlos:".format(
+                        int(serie_fecha.isna().sum())
+                    )
                 )
-            )
-            fecha_fallback = st.date_input(
-                label="**📅 Fecha de Relleno para los NaN**",
-                key="cruce_fecha_fallback_input",
-            )
-            if fecha_fallback is not None:
-                serie_fecha = serie_fecha.fillna(pd.Timestamp(fecha_fallback))
-    else:
-        fecha_input = st.date_input(
-            label="**📅 Fecha Límite de Pago**",
-            key="cruce_fecha_input",
-        )
-        if fecha_input is not None:
-            serie_fecha = pd.Series([pd.Timestamp(fecha_input)] * len(raw_df), index=raw_df.index)
+                fecha_fallback = st.date_input(
+                    label="**📅 Fecha de Relleno para los Datos sin Fecha Máxima de Pago**",
+                    key="cruce_fecha_fallback_input",
+                )
+                if fecha_fallback is not None:
+                    serie_fecha = serie_fecha.fillna(pd.Timestamp(fecha_fallback))
         else:
-            serie_fecha = pd.Series([pd.NaT] * len(raw_df), index=raw_df.index)
+            fecha_input = st.date_input(
+                label="**📅 Fecha Límite de Pago**",
+                key="cruce_fecha_input",
+                value=None,
+                min_value="today",
+            )
+            if fecha_input is not None:
+                serie_fecha = pd.Series([pd.Timestamp(fecha_input)] * len(raw_df), index=raw_df.index)
+            else:
+                serie_fecha = pd.Series([pd.NaT] * len(raw_df), index=raw_df.index)
+
+    with colMaxDisc:
+        st.markdown("### **🗒️ Tipo de Descuento Brindado**")
+
+        st.space()
+
+        tipo_descuento = st.radio(
+            label = "**Tipo de Descuento**",
+            options = [
+                "**Descuento Máximo**",
+                "**Posibilidad a ContraOfertas**",
+            ],
+            captions = [
+                "No se permite un descuento mayor al de la base",
+                "Se permite un descuento mayor con contraoferta y/o bajo comité"
+            ],
+            horizontal = True,
+            index = None
+        )
+
+    if (serie_fecha.isna().any()) or (tipo_descuento is None):
+        st.warning("Selecciona la Fecha Límite de Pago y el Tipo de Descuento para continuar")
+        st.stop()
+    elif serie_fecha.min() < pd.Timestamp.now('America/Bogota').tz_localize(None).normalize():
+        st.warning("Se están subiendo actualizaciones ya vencidas (**Fecha Límite Menor a Hoy**)")
 
     st.divider()
 
@@ -412,6 +368,8 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
         if n_pre_identificadas > 0:
             st.caption("ℹ️ {} registro(s) ya traían Id_Deuda en la base y se asumen identificados.".format(n_pre_identificadas))
 
+    st.divider()
+
     # --- 5. Subida de Datos (Drive + Limpieza + Sheets con un solo botón) ---
     st.markdown("### 🚀 Subida de Datos")
     key_sheets_subido = "cruce_sheets_subido_{}".format(base_key)
@@ -514,10 +472,10 @@ if tab_subida.open:
             id_archivo = "{}_{}".format(uploaded_file.name, uploaded_file.size)
             if st.session_state.get('cruce_archivo_actual') != id_archivo:
                 st.session_state['cruce_archivo_actual'] = id_archivo
-                _resetear_widgets_columnas()
+                resetear_widgets_columnas()
 
             # Lectura de la Base
-            raw_df = _leer_base_subida(uploaded_file)
+            raw_df = leer_base_subida(uploaded_file)
             if raw_df is not None:
                 ext = uploaded_file.name.split('.')[-1].lower()
                 st.caption("✅ Base leída: **{:,}** registros y **{}** columnas".format(len(raw_df), raw_df.shape[1]))

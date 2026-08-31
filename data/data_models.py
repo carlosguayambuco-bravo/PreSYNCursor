@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Dict, List, Optional, Literal, NotRequired
 from click import Option
+from pandera import Bool
 from typing_extensions import TypedDict
 # Librerías de Terceros
 import pandas as pd
@@ -276,10 +277,12 @@ class PagosCuotasCruce(TypedDict):
 
 
 class MetadataPendienteCruce(TypedDict):
-    Id_Registro: int
+    Id_Registro: str
+    Archivo_Origen: str
     Pagos_Cuotas: List[PagosCuotasCruce]
     Fecha_Identificacion: datetime
     Fecha_Limite_Pago: datetime
+    Maximo_Descuento: bool
     Etiqueta: Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
     Deudas_Posibles: List[DeudasPosiblesCruce]
     Cruce_Status: Literal['Sin Reconocer','Reconocido','Subido Alianzas']

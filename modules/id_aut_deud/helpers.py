@@ -1,8 +1,9 @@
 # Estandar usando Pep8
 # Librerías de Python
-from typing import Optional
+from typing import Optional, Any
 from collections import defaultdict
 import re
+import io
 # Librerías de Terceros
 from thefuzz import fuzz
 from pandera.typing import DataFrame
@@ -43,56 +44,22 @@ UMBRAL_BLOQUEO = 1000       # Si hay más candidatos se usan las rutas bloqueada
 LIMITE_VERIFICACION = 20000 # Tope de filas a verificar en las rutas bloqueadas
 MAX_COMB_NOMBRE = 6         # Tamaño máximo de subconjuntos de palabras para la contención de nombres
 
-def cleanText(txt):
-    # Primero Quitamos tildes y dejamos Upper
-    txt = txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
-    # Ahora Reemplazamos #N/A con NO_HAY_INFORMACION
-    txt = txt.replace('#N/A','NO_HAY_INFORMACION')
-    # Ahora Iteramos por cada uno de los signos de puntuación y los quitamos
-    for p in '\'!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~´':
-        txt = txt.replace(p,'')
-    # Ahora Reemplazamos (\d+) con '' para evitar numeros y parentesis
-    txt = re.sub(r'\(\d+\)', '', txt)
-    # Remplazamos Bco. por BANCO y AV VILLAS POR AVVILLAS
-    txt = txt.replace('BCO.','BANCO').replace('AV VILLAS','AVVILLAS')
-    # Reemplazams JEFFERSON_CAPITAL por JCAP
-    txt = txt.replace('JEFFERSON_CAPITAL','JCAP')
-    # Quitamos Números Romanos por cada uno de los Splits por espacio
-    romanRegex = r'\b(?=[MDCLXVI])M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\b'
-    txt = ' '.join(re.sub(romanRegex, '', t) for t in txt.split())
-    # Ahora realizamos split por espacio y ordenamos
-    txt = ' '.join(sorted(txt.split()))
-    # Quitamos Valores de Banco\s
-    txt = ' '.join(t for t in txt.split() if not t == 'BANCO')
-    # Quitamos Nombres Comunes de Casas de Cobro
-    commonNames = r'\b(' \
-            r'grupo|juridico|jurídico|sas|sa|s a|ltda|suma|financiera|'\
-            r'contactosol|contacto|solucion|soluciones|citisumma|'\
-            r'cobrando|cobranzas|adcore|logros|factoring|origen|origem|'\
-            r'gestiones|gestion|profesionales|bpo|inversionistas|'\
-            r'estrategicos|estratégicos|casa|de|cobro|servicios|'\
-            r'creditos|credito|abogados|asociados|'\
-            r'outsourcing|risk|patrimonio|autonomo|autónomo|central|'\
-            r'inversiones|valora|punto|com|puntocom|activos|'\
-            r'recuperacion|recuperación|financiera|financiero|'\
-            r'asesores|asociados|gest|prof|eyc|gca|summa'\
-            r')\b'
-    # Volvemos los Nombres Comunes a Upper
-    commnNames = commonNames.upper()
-    # Quitamos los nombres comunes
-    txt = re.sub(commnNames, '', txt)
+ETIQUETAS_CRUCE = [ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO]
 
-    # Reemplazamos NUBANK POR NU
-    txt = txt.replace('NUBANK','NU')
+MIMETYPES = {
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'csv': 'text/csv',
+}
 
-    # Regla de Negocio: Si tiene COLPATRIA se devuelve DAVI BANK
-    if 'COLPATRIA' in txt:
-        txt = 'DAVI BANK'
-    if 'BBVA' in txt:
-        txt = 'BBVA'
-
-    # Se devuelve el valor
-    return txt.strip()
+COLUMNAS_MAPEABLES = [
+    (COL_CEDULA, 'Cedula', ['cedula', 'documento', 'identificacion','cédula']),
+    (COL_NOMBRE, 'Nombre del Cliente', ['nombre', 'cliente']),
+    (COL_BANCO, 'Banco', ['banco', 'entidad','portafolio']),
+    (COL_CREDITO, 'Número de Crédito', ['credito', 'numero crédito','numero_producto','numero_credito']),
+    (COL_MONTO_ACTUAL, 'Monto Actual', ['monto actual', 'deuda', 'saldo', 'saldo insoluto']),
+    (COL_ID_DEUDA, 'Id_Deuda (Opcional)', ['id deuda', 'id_deuda', 'id de la deuda']),
+    (COL_MONTO_PROPUESTO, 'Monto Propuesto (Opcional)', ['monto propuesto', 'propuesta', 'descuento']),
+]
 
 # Función Auxiliar para Buscar Cortes
 def is_generalized_crop(original, target):
@@ -161,7 +128,7 @@ def _limpiar_serie_monto(serie: pd.Series) -> np.ndarray:
 
 # Función Auxiliar para obtener la Serie de Número de Crédito sin modificarla
 def _serie_credito(serie: pd.Series) -> np.ndarray:
-    return serie.astype(str).mask(serie.isna(), '').to_numpy(dtype=object)
+    return serie.apply(cleanNumeroCredito).to_numpy(dtype=object)
 
 # Función Auxiliar para construir los índices por texto de una columna
 def _construir_indices_texto(valores: np.ndarray):
@@ -302,39 +269,138 @@ def cleanNombreCliente(nombre) -> str:
     txt = txt.upper().strip()
     return ' '.join(sorted(txt.split()))
 
-def transform_portafolio(cruce_df: pd.DataFrame, col_portafolio: str, cols_to_unite: list[str], values_portafolio: Optional[list]) -> pd.Series:
-    # Paso 1: Verificar que el Id_Cruce este en el DataFrame
-    if not COL_ID_CRUCE in cruce_df.columns:
-        raise LookupError("No se encontro la Columna '{}' el DataFrame (de esta depende la generación de Portafolios)".format(
-            COL_ID_CRUCE
-        ))
-    # Paso 2: Verificar característica del Cliente presente
-    if not (COL_CEDULA in cruce_df.columns) and not (COL_NOMBRE in cruce_df.columns):
-        raise LookupError("No se encontro una Columna del Cliente [Cedula o Nombre] en el DataFrame (de esta depende la generación de Portafolios)")
-    # Paso 3: Verificar las Existencias de las Columnas necesarias
-    for col in [col_portafolio] + cols_to_unite:
-        if not (col in cruce_df.columns):
-            raise LookupError("No se encontro la Columna '{}' el DataFrame")
-
-    # Siguiente: Definir que Columna de Cliente se utiliza
-    if not COL_CEDULA in cruce_df.columns:
-        columna_cliente = COL_NOMBRE
+# Función Auxiliar para Limpiar el Número de Crédito
+def cleanNumeroCredito(nc: Any) -> str:
+    # Si es Nulo se deja así
+    if pd.isna(nc):
+        return ''
+    # Convertimos el Número de Credito a String
+    if isinstance(nc, (int,float)):
+        nc_cleaned = str(int(nc)) if nc%1 == 0 else str(nc)
     else:
-        columna_cliente = COL_CEDULA
-    # Verificación 2: Dejamos la Columna con menos NaNs
-    if (COL_CEDULA in cruce_df.columns) and (COL_NOMBRE in cruce_df.columns) and cruce_df[COL_CEDULA].isna().sum() < cruce_df[COL_NOMBRE].isna().sum():
-        columna_cliente = COL_NOMBRE
+        nc_cleaned = str(nc)
+    
+    # Quitamos Signos de Puntuación y X
+    nc_cleaned = nc_cleaned.replace('X','')
+    for p in '\'!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~´-':
+        nc_cleaned = nc_cleaned.replace(p,'')
 
-    # Aplicar la Agrupación y Generación de la Serie
-    serieGRP = cruce_df.groupby(cols_to_unite + [col_portafolio])[COL_ID_CRUCE].transform(lambda ids: '-'.join(map(str, ids)))
-    # Quitamos los Registros que no dependan de de los valores brindados
-    if values_portafolio:
-        maskValues = cruce_df[col_portafolio].isin(values_portafolio)
-        # Limpiamos dejando el Id_Cruce
-        serieGRP.loc[~maskValues] = cruce_df.loc[~maskValues][COL_ID_CRUCE]
+    # Devolvemos el Resultado
+    return nc_cleaned
 
-    # Devolvemos la Serie
-    return serieGRP
+def cleanText(txt):
+    # Primero Quitamos tildes y dejamos Upper
+    txt = txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
+    # Ahora Reemplazamos #N/A con NO_HAY_INFORMACION
+    txt = txt.replace('#N/A','NO_HAY_INFORMACION')
+    # Ahora Iteramos por cada uno de los signos de puntuación y los quitamos
+    for p in '\'!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~´-':
+        txt = txt.replace(p,'')
+    # Ahora Reemplazamos (\d+) con '' para evitar numeros y parentesis
+    txt = re.sub(r'\(\d+\)', '', txt)
+    # Remplazamos Bco. por BANCO y AV VILLAS POR AVVILLAS
+    txt = txt.replace('BCO.','BANCO').replace('AV VILLAS','AVVILLAS')
+    # Reemplazams JEFFERSON_CAPITAL por JCAP
+    txt = txt.replace('JEFFERSON_CAPITAL','JCAP')
+    # Quitamos Números Romanos por cada uno de los Splits por espacio
+    romanRegex = r'\b(?=[MDCLXVI])M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\b'
+    txt = ' '.join(re.sub(romanRegex, '', t) for t in txt.split())
+    # Ahora realizamos split por espacio y ordenamos
+    txt = ' '.join(sorted(txt.split()))
+    # Quitamos Valores de Banco\s
+    txt = ' '.join(t for t in txt.split() if not t == 'BANCO')
+    # Quitamos Nombres Comunes de Casas de Cobro
+    commonNames = r'\b(' \
+            r'grupo|juridico|jurídico|sas|sa|s a|ltda|suma|financiera|'\
+            r'contactosol|contacto|solucion|soluciones|citisumma|'\
+            r'cobrando|cobranzas|adcore|logros|factoring|origen|origem|'\
+            r'gestiones|gestion|profesionales|bpo|inversionistas|'\
+            r'estrategicos|estratégicos|casa|de|cobro|servicios|'\
+            r'creditos|credito|abogados|asociados|'\
+            r'outsourcing|risk|patrimonio|autonomo|autónomo|central|'\
+            r'inversiones|valora|punto|com|puntocom|activos|'\
+            r'recuperacion|recuperación|financiera|financiero|'\
+            r'asesores|asociados|gest|prof|eyc|gca|summa'\
+            r')\b'
+    # Volvemos los Nombres Comunes a Upper
+    commnNames = commonNames.upper()
+    # Quitamos los nombres comunes
+    txt = re.sub(commnNames, '', txt)
+
+    # Reemplazamos NUBANK POR NU
+    txt = txt.replace('NUBANK','NU')
+
+    # Regla de Negocio: Si tiene COLPATRIA se devuelve DAVI BANK
+    if 'COLPATRIA' in txt:
+        txt = 'DAVI BANK'
+    if 'BBVA' in txt:
+        txt = 'BBVA'
+
+    # Se devuelve el valor
+    return txt.strip()
+
+# Función Auxiliar para Leer la Base Subida por el Usuario (xlsx o csv)
+def leer_base_subida(uploaded_file: io.BytesIO) -> pd.DataFrame:
+    buffer_bytes = uploaded_file.getvalue()
+    ext = uploaded_file.name.split('.')[-1].lower()
+
+    # Caso 1: Excel
+    if ext == 'xlsx':
+        return pd.read_excel(io.BytesIO(buffer_bytes), dtype=str)
+
+    # Caso 2: CSV (intentamos la lectura y si falla pedimos el separador)
+    try:
+        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str)
+    except Exception:
+        pass
+    try:
+        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str, encoding='latin-1')
+    except Exception:
+        pass
+
+    separador = st.text_input(
+        label="**🚧 No se pudo leer el CSV automáticamente. Indica el separador**",
+        value=";",
+        key="cruce_separador_csv_input",
+        help="Escribe el separador usado en el archivo (Ej: ';', '|', '\\t').",
+    )
+    if separador:
+        try:
+            sep = '\t' if separador == '\\t' else separador
+            return pd.read_csv(io.BytesIO(buffer_bytes), sep=sep, dtype=str)
+        except Exception as e:
+            st.error("No se pudo leer el CSV con el separador '{}': {}".format(separador, e), icon="❌")
+            return pd.DataFrame()
+    st.error("No se pudo leer el archivo CSV. Indica el separador para continuar.", icon="🚧")
+    return pd.DataFrame()
+
+# Función Auxiliar para Adivinar la Columna que corresponde a un dato del esquema
+def adivinar_columna(columnas: list, candidatos: list) -> str:
+    columnas_lower = [str(c).strip().lower() for c in columnas]
+    for candidato in candidatos:
+        for i, col_lower in enumerate(columnas_lower):
+            if candidato in col_lower:
+                return columnas[i]
+    return 'Sin Columna'
+
+# Función Auxiliar para Limpiar las Keys de los Widgets de Columnas (al subir un archivo nuevo)
+def resetear_widgets_columnas() -> None:
+    prefijos = ['cruce_col_', 'cruce_separador_csv_', 'cruce_portafolio_', 'cruce_tipo_cuota_', 'cruce_cuotas_input_', 'cruce_col_cuotas_', 'cruce_fecha_', 'cruce_montos_cuotas_']
+    for key in list(st.session_state.keys()):
+        if any(key.startswith(p) for p in prefijos): # type: ignore
+            del st.session_state[key]
+
+def mostrar_seleccion_columnas(*,label: str, start_idx: int, end_idx: int, opciones_columnas: list[str], column_mapper: dict[str,str], columnas_df: list[str]):
+    st.markdown(f"#### **{label}**")
+    for (col_std, label, candidatos) in COLUMNAS_MAPEABLES[start_idx:end_idx]:
+        adivinada = adivinar_columna(columnas_df, candidatos)
+        index_default = opciones_columnas.index(adivinada) if adivinada in opciones_columnas else 0
+        column_mapper[col_std] = st.selectbox(
+            label="**{}**".format(label),
+            options=opciones_columnas,
+            index=index_default,
+            key="cruce_col_{}".format(col_std),
+        )
 
 # Función Auxiliar para ajustar el portafolio
 def adjust_portafolio_value(
