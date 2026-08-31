@@ -343,6 +343,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
             st.session_state[key_correo_enviado] = True
         else:
             st.error("No se pudo enviar el correo con el Acuerdo de Pago. Reintentar", icon="❌")
+            st.stop()
     elif pdf_bytes is None and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
         st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
 
