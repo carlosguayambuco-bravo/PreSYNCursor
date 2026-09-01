@@ -1291,6 +1291,22 @@ def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     # Paso 4: Subir las Solicitudes Actualizadas a Google Sheets
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)
 
+# Función Auxiliar para actualizar las Solicitudes a 'Vencida' (Cierre de Mes)
+def update_solicitudes_to_vencida(*, solicitudes: pd.DataFrame) -> bool:
+    # Paso 1: Actualizar el Estado de las Solicitudes a 'Vencida'
+    solicitudes['Estado_Solicitud'] = 'Vencida'
+    # Paso 2: Actualizar la Fecha de Respuesta a Hoy (Zona Horaria America/Bogota)
+    fechaActual = pd.Timestamp.now('America/Bogota').tz_localize(None)
+    solicitudes['Fecha_Respuesta'] = fechaActual
+    # Paso 3: Actualizamos el Ejecutivo
+    solicitudes['Ejecutivo'] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
+    # Paso 4: Actualizar el Comentario del Ejecutivo en la Metadata (Cierre de Mes)
+    solicitudes['Metadata_Solicitud'] = solicitudes['Metadata_Solicitud'].apply(
+        lambda x: {**x, 'Comentario_Ejecutivo': "*Solicitud cerrada por ejecutivo dado el cambio del Mes en Curso*"}
+    )
+    # Paso 5: Subir las Solicitudes Actualizadas a Google Sheets
+    return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)
+
 # Función Auxiliar para verificar si no se ha subido un Acuerdo de Pago para la Solicitud
 def check_if_acuerdo_pago_uploaded(*, solicitud: dict[str, Any]) -> bool:
     """

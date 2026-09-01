@@ -8,8 +8,8 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
-from modules.gest_sols import generar_descarga_masiva_solicitudes, generar_plantilla_masiva_solicitudes, get_massive_solicitudes_txt, obtener_mascara_sin_responder, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
-from ui.solicitudes_components import dialog_confirmar_actualizacion_solicitudes, mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo, mostrar_solicitudes_paginadas
+from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_mascara_sin_responder, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
+from ui.solicitudes_components import dialog_confirmar_actualizacion_solicitudes, dialog_confirmar_actualizacion_vencidas, mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo, mostrar_solicitudes_paginadas
 
 # Paso 1: Cargar las Solicitudes MEC
 solicitudes_df = load_current_month_solicitudes()
@@ -69,8 +69,8 @@ if tabSolicitudes.open:
 
         mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df=solicitudes_filtered)
 
-        # Creamos 4 Botones: Descargar Solicitudes, Subir Solicitudes, Copiar Datos y Marcar como Solicitado
-        colDescargar, colSubir, colMarcar, colCopiar = st.columns([3, 3, 3, 1], gap = "large")
+        # Creamos 5 Botones: Descargar Solicitudes, Subir Solicitudes, Marcar como Solicitado, Marcar como Vencida y Copiar Datos
+        colDescargar, colSubir, colMarcar, colVencer, colCopiar = st.columns([2, 2, 2, 2, 1], gap = "small")
         with colDescargar:
             download_bytes = generar_descarga_masiva_solicitudes(
                 solicitudes_df=solicitudes_filtered,
@@ -86,6 +86,7 @@ if tabSolicitudes.open:
                 help="Haz clic para descargar las solicitudes filtradas completas",
                 on_click=upload_log_to_sheets,
                 disabled=len(download_bytes)<=0,
+                width="stretch",
                 kwargs={"info": "Descarga de Solicitudes", "detail": f"{st.session_state['user_email']} descargó {len(solicitudes_filtered)} solicitudes filtradas."},
             )
 
@@ -94,6 +95,7 @@ if tabSolicitudes.open:
                 key="subir_solicitudes_button",
                 help="Haz clic para subir las solicitudes filtradas a Google Sheets",
                 type="primary",
+                width="stretch",
                 disabled = ((mask_sin_responder).sum() == 0) and not modo_total,
                 )
 
@@ -109,9 +111,20 @@ if tabSolicitudes.open:
                 key="marcar_solicitudes_button",
                 help="Haz clic para marcar las solicitudes filtradas como 'Solicitado'",
                 type="primary",
+                width="stretch",
                 disabled = (mask_sin_responder).sum() == 0,
             ):
                 dialog_confirmar_actualizacion_solicitudes(solicitudes=solicitudes_filtered)
+
+        with colVencer:
+            if st.button("Marcar como Vencida",
+                key="marcar_vencidas_solicitudes_button",
+                help="Haz clic para marcar las solicitudes abiertas como 'Vencida' por el cierre del Mes en Curso",
+                type="primary",
+                width="stretch",
+                disabled = (mask_sin_responder).sum() == 0,
+            ):
+                dialog_confirmar_actualizacion_vencidas(solicitudes=solicitudes_filtered)
 
         if subido_sheets:
             success = subir_masivo_plantilla_solicitudes(
