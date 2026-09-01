@@ -4,7 +4,7 @@
 import streamlit as st
 # Librerías Locales
 from data.data_loader import (
-    load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa,
+    execute_query_cache, load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa,
     load_cartera_backup, load_client_balances, load_headcount_negociacion,
     load_liquidaciones, load_logs, load_masivas, load_pab_ideal,
     load_pendiente_cruce, load_reference_changes, load_solicitudes_mec,
@@ -42,6 +42,7 @@ CACHE_FUNCS_METABASE = [
     ("obtener_deudas_activas_con_retry", obtener_deudas_activas_con_retry, []),
     ("obtener_ultima_actualizacion_deudas", obtener_ultima_actualizacion_deudas, []),
     ("obtener_datos_completos_deudas", obtener_datos_completos_deudas, []),
+    ("execute_query_cache", execute_query_cache,[])
 ]
 
 # Lista de Recursos con Cache: (Nombre, Función, Llaves del Session State Asociadas)

@@ -1015,17 +1015,24 @@ def parsear_plan_items(planes: pd.DataFrame) -> pd.DataFrame:
                 continue
     return pd.DataFrame(items)
 
-# Función Auxiliar para Obtener las Deudas Activas de una Referencia (Usando Progreso)
-def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[DeudasActivasSchema]:
+# Función Auxiliar para Ejecutar la Query de Deudas Activas
+@st.cache_data(ttl=HOUR_WAIT, max_entries=200, show_spinner=False)
+def execute_query_cache(query: str):
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
-    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
-    query_deudas = QUERY_DEUDAS.format(reference=referencia)
+    return metabase_service.execute_query(query)
 
+# Función Auxiliar para Obtener las Deudas Activas de una Referencia (Usando Progreso)
+def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[DeudasActivasSchema]:
+
+    st.space("medium")
+    
+    # Paso 1: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
+    query_deudas = QUERY_DEUDAS.format(reference=referencia)
     progreso_busqueda = st.progress(1/5,"Buscando Deudas para la Referencia")
 
     # 2.1 Ejecutamos la Query de las Deudas
-    deudas_df = metabase_service.execute_query(query_deudas)
+    deudas_df = execute_query_cache(query_deudas)
     # 2.2 Obtenemos el lead_id
     lead_id = deudas_df['Lead_Id'].iloc[0]
     if pd.notna(lead_id):
@@ -1033,7 +1040,7 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
         # Creamos la Query
         query_plan_liq = QUERY_PLANES.format(lead_id=str(lead_id).replace('.0','').strip())
         # Ejecutamos la Query
-        pl_df = metabase_service.execute_query(query_plan_liq)
+        pl_df = execute_query_cache(query_plan_liq)
         # Limpiamos los Datos
         pl_df = parsear_plan_items(pl_df)
     else:
@@ -1097,27 +1104,25 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
 # Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 500,)
 def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service: MetabaseService = st.session_state["metabase_service"]
 
-    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
+    # Paso 1: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
     try:
         query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
 
-        # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
-        ultima_actualizacion_df = metabase_service.execute_query(query)
+        # Paso 2: Obtener las Últimas Actualizaciones desde Metabase
+        ultima_actualizacion_df = execute_query_cache(query)
 
         if ultima_actualizacion_df.empty:
             return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
 
-        # Paso 4: -- Limpieza de Datos --
+        # Paso 3: -- Limpieza de Datos --
         # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
         ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
         ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
         ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
 
-        # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
+        # Paso 4: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
         if not ultima_actualizacion_df.empty:
             return ultima_actualizacion_df['Ultima_Actualizacion'].max()
         return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
@@ -1127,15 +1132,13 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
 # Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
 @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
 def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service: MetabaseService = st.session_state["metabase_service"]
-    # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
-    completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
+    # Paso 1: Ejecutar la Query QUERY_TOTAL_REPARADORAS
+    completo_df = execute_query_cache(QUERY_TOTAL_REPARADORAS)
 
     if completo_df.empty:
         return InputCruceSchema.empty()
 
-    # Paso 3: Limpieza de Datos
+    # Paso 2: Limpieza de Datos
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
     completo_df.dropna(subset=['Id_Deuda'], inplace=True)
     completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
