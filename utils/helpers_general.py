@@ -224,6 +224,9 @@ def formatNumber(num_str: str|float) -> str:
     # Si el Numero es <= 0, devolvemos el valor original
     if num <= 0 and isinstance(num_str, str):
         return num_str
+    # Paso Intermedio: Si es 999, se realiza el +1
+    if (num%1000 == 999):
+        num += 1
     # Paso 2: Determinar la Existencia de decimales
     if num % 1 == 0:
         # No hay decimales, devolvemos como entero

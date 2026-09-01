@@ -56,6 +56,11 @@ VER_LOGS = Permit(
     description="Permite ver los logs de actividad del sistema.",
     user_roles_allowed=['admin'],
 )
+GESTIONAR_CACHE = Permit(
+    name="gestionar_cache",
+    description="Permite controlar el Cache del Sistema",
+    user_roles_allowed=['admin'],
+)
 
 # Creamos un Diccionario de Permisos para facilitar la búsqueda y gestión de permisos
 PERMISSIONS_DICT = {
@@ -65,6 +70,7 @@ PERMISSIONS_DICT = {
     "ver_mis_solicitudes": VER_MIS_SOLICITUDES,
     "ver_cartera_total": VER_CARTERA_TOTAL,
     "ver_logs": VER_LOGS,
+    "gestionar_cache": GESTIONAR_CACHE,
 }
 
 # Definimos los permisos por defecto para cada rol de usuario
@@ -82,6 +88,7 @@ PAGES_ROUTE_MAPPING = {
     "ver_mis_solicitudes": {"page": "views/ver_solicitudes.py", "title": "Ver Mis Solicitudes", "icon": "📋"},
     "ver_cartera_total": {"page": "views/ver_cartera_total.py", "title": "Ver Cartera Total", "icon": "💸"},
     "ver_logs": {"page": "views/ver_logs.py", "title": "Ver Logs", "icon": "🤔"},
+    "gestionar_cache": {"page": "views/cache_viewer.py","title": "Manejo de Cache", "icon": "🤖"}
 }
 
 def get_permit_pages(user_role: Literal['admin', 'leader', 'nego', 'executive']) -> list[st.Page]:

@@ -10,11 +10,10 @@ import pandas as pd
 import streamlit as st
 from pandera.errors import SchemaErrors
 # Librerías Locales
-from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios
+from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas
 from data.data_models import InputCruceSchema
 from data.data_uploader import upload_base_cruce_info
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES
-from modules.forms import obtener_datos_completos_deudas
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
     aplicar_cambios_id_definitivo, build_pendiente_cruce_df, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,

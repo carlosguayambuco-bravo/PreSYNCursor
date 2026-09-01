@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 import json
+import re
 from typing import Literal, Any, Hashable, Optional
 from io import BytesIO
 # Librerías de Terceros
@@ -14,7 +15,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas
 from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_filtered_plantilla, upload_addendum_debt
-from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
+from data.data_models import MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador
@@ -272,12 +273,20 @@ def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Opt
     # Paso 3: Actualizar la Solicitud en Google Sheets
     return update_solicitud_in_google_sheets(solicitud=solicitud)
 
-def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
+def distribuir_resultado_solicitud(
+        *,
+    solicitud: pd.Series,
+    pdf_bytes: Optional[bytes] = None,
+    casa_cobro_old: Optional[str] = None
+    ) -> bool:
     """
     Distribuye el resultado de la solicitud a las diferentes solicitudes disponibles
 
     Args:
         solicitud (pd.Series): Información de la solicitud.
+        pdf_bytes (Optional[bytes]): Los bytes del PDF del Acuerdo de Pago
+        casa_cobro_old (Optional[str]): La Casa antigua de la Solicitud (Si cambia 
+        se responden las solicitudes con casas iguales)
 
     Returns:
         bool: True si la distribución fue exitosa, False en caso contrario.
@@ -287,7 +296,7 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
     solicitudes_df = load_current_month_solicitudes()
     idsFinal = '-'.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
     maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
-    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro'])
+    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro']) | (solicitudes_df['Casa_Cobro'] == casa_cobro_old)
     maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
     maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
@@ -401,15 +410,22 @@ def distribuir_resultado_solicitud(solicitud: pd.Series, pdf_bytes: Optional[byt
 
     return success
 
-def redistribuir_resultado_solicitud(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None) -> bool:
+def redistribuir_resultado_solicitud(
+        *,
+    solicitud: pd.Series, 
+    pdf_bytes: Optional[bytes] = None,
+    casa_cobro_old: Optional[str] = None,
+    ) -> bool:
     """
     Re-Distribuye el resultado actualizado de una solicitud a las Solicitudes Espejo
-    que comparten el mismo 'Id_Respuesta_Autom'.
+    que comparten el mismo 'Id_Respuesta_Autom'. Si la solicitud es Exitosa y es de
+    tipo Acuerdo de Pago u Oferta de Acuerdo, envía el correo de ajuste con el PDF.
 
     Args:
         solicitud (pd.Series): Información de la solicitud actualizada.
-        pdf_bytes (Optional[bytes]): Bytes del PDF. No se usa, se mantiene por
-            compatibilidad con mostrar_boton_actualizar_solicitudes.
+        pdf_bytes (Optional[bytes]): Bytes del PDF del Acuerdo de Pago ajustado.
+        casa_cobro_old: Optional[str]: Casa de Cobro Antigua. no se usa, se 
+        mantiene por compatibilidad con mostrar_boton_actualizar_solicitudes
 
     Returns:
         bool: True si la re-distribución fue exitosa, False en caso contrario.
@@ -454,13 +470,30 @@ def redistribuir_resultado_solicitud(*, solicitud: pd.Series, pdf_bytes: Optiona
             # Agregamos la Solicitud Espejo a la Lista de Filas a Actualizar
             need_update_rows.append(solicitud_espejo)
 
-    # Paso 5: Actualizar cada Solicitud en Google Sheets usando update_solicitud_in_google_sheets
+    # Paso 5: Si la Solicitud Inicial es Exitosa, Es Acuerdo de Pago u Oferta de Acuerdo y tenemos bytes del PDF
+    # Se envia el correo de ajuste correspondiente
+    if solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and pdf_bytes is not None:
+        # Definimos la Key del Session State para rastrear el Estado del Envío del Correo de Ajuste
+        key_correo_enviado = 'correo_ajuste_enviado_{}'.format(solicitud['ID_Solicitud'])
+        # Verificamos si el Correo de Ajuste ya fue enviado en un intento anterior para no duplicarlo
+        if st.session_state.get(key_correo_enviado, False):
+            st.info("El correo de ajuste con el Acuerdo de Pago ya fue enviado anteriormente, por lo que no se volverá a enviar.", icon="📧")
+        elif send_email_acuerdos(solicitudes=need_update_rows, pdf_bytes=pdf_bytes, es_ajuste=True):
+            # Guardamos el Estado del Envío del Correo de Ajuste en el Session State
+            st.session_state[key_correo_enviado] = True
+        else:
+            st.error("No se pudo enviar el correo de ajuste con el Acuerdo de Pago. Reintentar", icon="❌")
+            st.stop()
+    elif pdf_bytes is None and solicitud['Estado_Solicitud'] == 'Exitosa' and solicitud['Tipo_Solicitud'] in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
+        st.warning("No se generó un PDF para el Acuerdo de Pago. Por favor, contacte al equipo de soporte.", icon="⚠️")
+
+    # Paso 6: Actualizar cada Solicitud en Google Sheets usando update_solicitud_in_google_sheets
     need_update_df = pd.DataFrame(need_update_rows).reset_index(drop=True)
     success =  update_massive_solicitudes_in_google_sheets(solicitudes_df=need_update_df)
 
     return success
 
-def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
+def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes, es_ajuste: bool = False):
     # Paso 1: Definir todos los Destinatarios Principales
     main_recipients = set([sol['Correo'] for sol in solicitudes])
     # Añadimos los Correos de Lideres
@@ -490,6 +523,10 @@ def send_email_acuerdos(*,solicitudes: list[pd.Series], pdf_bytes: bytes):
         nombre_ejecutivo=st.session_state['user_name'],
         comentario_llamativo = solicitudes[0]['Metadata_Solicitud'].get('Comentario_Ejecutivo') or "Realizar el Pago lo más pronto posible"
     )
+    # Si es un Ajuste, añadimos el Prefijo (AJUSTE) al Inicio del Asunto y del Cuerpo del Correo
+    if es_ajuste:
+        asunto_correo = "(AJUSTE) {}".format(asunto_correo)
+        body_correo = re.sub(r'(<body[^>]*>)', r'\1<p style="font-weight: bold; color: #d9534f;">(AJUSTE)</p>', body_correo, count=1)
     # Paso 6: Traer el Servicio de Google Mail desde el Session State
     google_mail_service: GoogleMailService = st.session_state['google_mail_service']
     # Paso 7: Enviar el Correo y devolver los resultados
@@ -588,6 +625,21 @@ def subir_acuerdo_pago_a_google_drive(pdf_bytes: bytes, solicitud_info: pd.Serie
     )
     # Paso 5: Retornar el ID del Archivo Subido
     return file_id
+
+def eliminar_acuerdo_pago_de_google_drive(*, file_id: str) -> bool:
+    """
+    Elimina un archivo PDF de Acuerdo de Pago de Google Drive.
+
+    Args:
+        file_id (str): ID del archivo en Google Drive a eliminar.
+
+    Returns:
+        bool: True si la eliminación fue exitosa, False en caso contrario.
+    """
+    # Paso 1: Traer el Servicio de Google Drive desde el Session State
+    google_drive_service: GoogleDriveService = st.session_state['google_drive_service']
+    # Paso 2: Eliminar el Archivo de Google Drive
+    return google_drive_service.delete_file(file_id=file_id)
 
 def obtener_link_acuerdo_pago(file_id: str) -> str:
     """
@@ -998,12 +1050,14 @@ def obtener_df_bancos_sin_responder(solicitudes_df: pd.DataFrame) -> pd.DataFram
 
     return df_bancos_sin_responder
 
-def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str]) -> pd.Series:
+def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str], sufijo: str = '') -> pd.Series:
     """
     Genera una plantilla de serie para un acuerdo de pago basado en la información de la solicitud.
 
     Args:
         solicitud (pd.Series): Información de la solicitud.
+        deudas (list[str]): Lista de IDs de Deuda a incluir en el Acuerdo.
+        sufijo (str, default ''): Sufijo de las Keys del Session State (Para el Modo Edición).
 
     Returns:
         pd.Series: Serie con la plantilla del acuerdo de pago.
@@ -1027,7 +1081,7 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str])
                 "Id_Deuda": deuda['Id_Deuda'],
                 "Banco": deuda['Banco'],
                 "Numero_Credito": st.session_state.get(
-                    "numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], deuda['Id_Deuda']),
+                    "numero_credito_solicitud_info_{}_{}{}".format(solicitud['ID_Solicitud'], deuda['Id_Deuda'], sufijo),
                     deuda.get('Numero_Credito', 'N/A')
                 ),
                 "Monto_Propuesto": cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0),

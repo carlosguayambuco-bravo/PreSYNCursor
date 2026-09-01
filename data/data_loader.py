@@ -12,11 +12,12 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
-from modules.bank_normalizer import normalizar_banco
-from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
+from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
+from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
 
@@ -946,3 +947,154 @@ def load_pendiente_cruce_con_cambios() -> pd.DataFrame:
 
     # 3: Devolver el Nuevo DF
     return cruce_ajustado
+
+# --- Queries a MetaBase ---
+
+# Función Auxiliar para obtener la referencia dada una deuda
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
+def obtener_referencia_por_deuda(*,deuda: str) -> str:
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Referencia
+    query = QUERY_DEBT_TO_REFERENCE.format(debt_id=deuda)
+    # Paso 3: Obtener la Referencia desde Metabase
+    referencia_df = metabase_service.execute_query(query)
+    # Paso 4: Devolver la Referencia si Existe, de lo Contrario Devolver None
+    if not referencia_df.empty:
+        return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
+    return ""
+
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
+def obtener_deudas_activas_con_retry(*, referencia: str) -> DataFrame[DeudasActivasSchema]:
+    """
+    Función principal que intenta obtener las Deudas Activas desde Metabase.
+    Si la consulta falla, se cargan las Deudas Activas desde la Cartera Backup.
+    """
+    try:
+        # Intentamos obtener los datos desde Metabase
+        return obtener_deudas_activas(referencia=referencia)
+    except LookupError:
+        # Si la consulta a Metabase falla, cargamos la Cartera Backup
+        st.warning('Berex no se encuentra disponible, cargando la Cartera Backup', icon="⚠️")
+
+        # Paso 1: Cargamos la Cartera Backup (Contiene la info de todos los clientes)
+        backup_df = load_cartera_backup()
+
+        # Paso 2: Filtramos la Cartera Backup por la Referencia dada
+        deudas_backup_df = backup_df[backup_df['Referencia'] == referencia]
+
+        # Paso 3: Devolvemos el DataFrame con las Deudas Activas desde la Cartera Backup
+        return deudas_backup_df
+
+# Función Auxiliar para Obtener las Deudas Activas de una Referencia
+def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
+    query = QUERY_ACTIVE_DEBTS.format(referencia=referencia)
+    # Paso 3: Obtener las Deudas Activas desde Metabase
+    deudas_df = metabase_service.execute_query(query)
+
+    if deudas_df.empty:
+        # Si el DataFrame está vacío, devolvemos un DataFrame vacío con el esquema
+        return DeudasActivasSchema.empty()
+
+    # Paso 4: -- Limpieza de Datos --
+    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+    deudas_df.dropna(subset=['Id_Deuda'], inplace=True)
+    deudas_df['Id_Deuda'] = deudas_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Referencia y Cedula a String
+    deudas_df['Referencia'] = deudas_df['Referencia'].apply(lambda x: str(x).replace(".0", "").strip())
+    deudas_df['Cedula'] = deudas_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos las Columnas PaB_Origen y PaB_PL a Números
+    deudas_df['PaB_Origen'] = pd.to_numeric(deudas_df['PaB_Origen'], errors='coerce')
+    deudas_df['PaB_PL'] = pd.to_numeric(deudas_df['PaB_PL'], errors='coerce')
+    # Imputamos los Valores Nulos de PaB_Origen con 0
+    imputeNans(deudas_df, col='PaB_Origen', value=0)
+    # Imputamos los Valores Nulos de PaB_PL como: PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)
+    maskPLNaN = deudas_df['PaB_PL'].isna()
+    deudas_df.loc[maskPLNaN, 'PaB_PL'] = deudas_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
+    # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
+    deudas_df['Pricing'] = deudas_df['Pricing'].apply(parsePercentage)
+    # Volvemos Numero_Credito a String usando astype
+    deudas_df['Numero_Credito'] = deudas_df['Numero_Credito'].astype(str)
+
+    # Importante: Normalizamos los Bancos
+    deudas_df['Banco'] = deudas_df['Banco'].apply(normalizar_banco)
+
+    # Validamos el DF con el esquema
+    deudas_df = DeudasActivasSchema.validate(deudas_df)
+
+    # Paso 5: Devolver el DataFrame de Deudas Activas
+    return deudas_df
+
+# Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 500,)
+def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+
+    # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
+    try:
+        query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
+
+        # Paso 3: Obtener las Últimas Actualizaciones desde Metabase
+        ultima_actualizacion_df = metabase_service.execute_query(query)
+
+        if ultima_actualizacion_df.empty:
+            return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+
+        # Paso 4: -- Limpieza de Datos --
+        # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+        ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
+        ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+        # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
+        ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+
+        # Paso 5: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
+        if not ultima_actualizacion_df.empty:
+            return ultima_actualizacion_df['Ultima_Actualizacion'].max()
+        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+    except:
+        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+
+# Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
+@st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
+def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+    # Paso 2: Ejecutar la Query QUERY_TOTAL_REPARADORAS
+    completo_df = metabase_service.execute_query(QUERY_TOTAL_REPARADORAS)
+
+    if completo_df.empty:
+        return InputCruceSchema.empty()
+
+    # Paso 3: Limpieza de Datos
+    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+    completo_df.dropna(subset=['Id_Deuda'], inplace=True)
+    completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Referencia y Cedula a String
+    completo_df['Cedula'] = completo_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Monto_Actual a Números
+    completo_df['Monto_Actual'] = pd.to_numeric(completo_df['Monto_Actual'], errors='coerce')
+    # Volvemos Numero_Credito, Nombre_Cliente y Banco a String usando astype
+    completo_df['Numero_Credito'] = completo_df['Numero_Credito'].astype(str)
+    completo_df['Nombre_Cliente'] = completo_df['Nombre_Cliente'].astype(str)
+    completo_df['Banco'] = completo_df['Banco'].astype(str)
+
+    # Estandarizamos el Banco
+    completo_df['Banco'] = normalizar_bancos_vectorizado(completo_df['Banco'])
+
+    # Siguiente: Calcular Columna Liquidada según los Estados y los Sub-Estados
+    maskEstado = completo_df['Estado_Deuda'].isin(ESTADOS_LIQUIDACION)
+    maskSubEstado = completo_df['Sub_Estado_Deuda'].isin(SUB_ESTADOS_LIQUIDACION)
+
+    completo_df['Liquidada'] = maskEstado | maskSubEstado
+
+    # Quitamos las Columnas de Estados
+    completo_df = completo_df.drop(columns=['Estado_Deuda','Sub_Estado_Deuda'])
+
+    # Validamos el Esquema
+    completo_df = InputCruceSchema.validate(completo_df)
+    # Devolvemos el DF
+    return completo_df

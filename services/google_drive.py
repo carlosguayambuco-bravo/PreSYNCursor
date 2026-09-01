@@ -4,6 +4,7 @@ from io import BytesIO
 # Librerías de Terceros
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseUpload
 import streamlit as st
 
@@ -47,3 +48,28 @@ class GoogleDriveService:
             print(f"Error al subir el archivo a Google Drive: {e}")
             st.error(f"Error al subir el archivo a Google Drive: {e}", icon="❌")
             return ''
+
+    def delete_file(self, file_id: str) -> bool:
+        """
+        Elimina un archivo de Google Drive.
+
+        Args:
+            file_id (str): ID del archivo en Google Drive a eliminar.
+
+        Returns:
+            bool: True si la eliminación fue exitosa, False en caso contrario.
+        """
+        try:
+            self.service.files().delete(fileId=file_id, supportsAllDrives=True).execute()
+            return True
+        except HttpError as e:
+            # Si el archivo ya no existe (404), consideramos que la eliminación fue exitosa
+            if e.resp.status == 404:
+                return True
+            print(f"Error al eliminar el archivo de Google Drive: {e}")
+            st.error(f"Error al eliminar el archivo de Google Drive: {e}", icon="❌")
+            return False
+        except Exception as e:
+            print(f"Error al eliminar el archivo de Google Drive: {e}")
+            st.error(f"Error al eliminar el archivo de Google Drive: {e}", icon="❌")
+            return False

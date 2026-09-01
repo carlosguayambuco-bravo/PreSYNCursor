@@ -12,13 +12,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 from pypdf.errors import WrongPasswordError
 # Librerías Locales
-from data.data_loader import load_app_config
+from data.data_loader import load_app_config, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets, upload_log_to_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
-from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.forms import obtener_nombre_negociador
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -411,7 +411,13 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
     return solicitudes_df
 
 # Función Auxiliar para mostrar el Botón que va a Finalizar la Solicitud y mantener toda la Lógica de forma Interna
-def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Optional[bytes] = None, funcion_actualizar: Callable = distribuir_resultado_solicitud) -> None:
+def mostrar_boton_actualizar_solicitudes(
+        *, 
+        solicitud: pd.Series,
+        casa_cobro_old: str,
+        pdf_bytes: Optional[bytes] = None, 
+        funcion_actualizar: Callable = distribuir_resultado_solicitud
+    ) -> None:
     # Primero: Mostrar el Boton de la Solicitud y el Botón de Cancelar
     colCancelar, colBoton = st.columns([1, 1])
 
@@ -444,6 +450,14 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
                     file_id = st.session_state.get(key_id_acuerdo_pago, '')
                     success = bool(file_id)
                 else:
+                    # Antes de Subir el Nuevo Acuerdo, Eliminamos el Acuerdo de Pago Anterior (Si Existe)
+                    id_acuerdo_anterior = solicitud['Metadata_Solicitud'].get('Id_Acuerdo_Pago', '')
+                    if id_acuerdo_anterior:
+                        if eliminar_acuerdo_pago_de_google_drive(file_id=id_acuerdo_anterior):
+                            st.success("El Acuerdo de Pago anterior fue eliminado de Google Drive correctamente.", icon="✅")
+                        else:
+                            st.error("No se pudo eliminar el Acuerdo de Pago anterior de Google Drive. Por favor, intente nuevamente.", icon="❌")
+                            st.stop()
                     file_id = subir_acuerdo_pago_a_google_drive(pdf_bytes=pdf_bytes, solicitud_info=solicitud)
                     success = bool(file_id)
                     # Guardamos el Estado de la Subida del Acuerdo en el Session State
@@ -456,7 +470,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
                 success = True  # No hay PDF para subir, consideramos que la subida fue exitosa
             # Actualizamos la Solicitud en Google Sheets
             if success:
-                success = funcion_actualizar(solicitud=solicitud, pdf_bytes=pdf_bytes)
+                success = funcion_actualizar(solicitud=solicitud, pdf_bytes=pdf_bytes, casa_cobro_old = casa_cobro_old)
             # Actualizamos los Datos de Addendums
             if success:
                 upload_massive_addendums(solicitud=solicitud)
@@ -470,7 +484,7 @@ def mostrar_boton_actualizar_solicitudes(*, solicitud: pd.Series, pdf_bytes: Opt
             st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
 
 # Función Auxiliar para mostrar las Especificaciones del Acuerdo de Pago Generado
-def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
+def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series, sufijo: str = '') -> bytes:
 
     # Paso 1: Mostrar los Inputs del Acuerdo de Pago Generado
     with st.expander("**🔏 Especificaciones del Acuerdo de Pago Generado**", expanded=False):
@@ -488,7 +502,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
             options=debt_ids,
             default=debt_ids,
             help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
-            key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+            key = "deudas_addendums_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             selection_mode="multi",
             width="stretch",
             persist_state="page",
@@ -510,7 +524,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                 label="**📄 Referencia**",
                 value=solicitud["Referencia"],
                 disabled=True,
-                key="referencia_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="referencia_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
 
         with col2Info:
@@ -518,7 +532,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                 label="**👤 Nombre del Cliente**",
                 value=solicitud["Metadata_Solicitud"]["Nombre_Cliente"],
                 disabled=True,
-                key="nombre_cliente_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="nombre_cliente_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
 
         with col3Info:
@@ -526,7 +540,7 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                 label="**🆔 Documento**",
                 value=solicitud["Cedula"],
                 disabled=True,
-                key="cedula_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="cedula_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
 
         # 1.2 Monto Total de Pago, Metodo de Pago y Fecha Limite de Pago (Desabilitados, ya estan como Inputs)
@@ -535,21 +549,21 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                 label="**💰 Monto Total de Pago**",
                 value="{:,.0f}".format(monto_total),
                 disabled=True,
-                key="monto_total_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="monto_total_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
         with col2Info:
             st.text_input(
                 label="**💳 Método de Pago**",
                 value=solicitud["Metadata_Solicitud"].get("Metodo_Pago", "Desconocido"),
                 disabled=True,
-                key="metodo_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="metodo_pago_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
         with col3Info:
             st.text_input(
                 label="**📅 Fecha Límite de Pago**",
                 value=solicitud["Fecha_Limite_Pago"].strftime("%Y-%m-%d") if pd.notna(solicitud["Fecha_Limite_Pago"]) else "",
                 disabled=True,
-                key="fecha_limite_pago_solicitud_info_{}".format(solicitud['ID_Solicitud']),
+                key="fecha_limite_pago_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
             )
 
         # Ahora vamos a presentar por cada deuda seleccionada: Id_Deuda, Numero_Credito y Monto Propuesto
@@ -561,18 +575,18 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                     label="**Id Deuda**",
                     value=d['Id_Deuda'],
                     disabled=True,
-                    key="id_deuda_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="id_deuda_solicitud_info_{}_{}{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                 )
             with col2Info:
                 st.text_input(
                     label="**Número de Crédito**",
                     value=d['Numero_Credito'],
                     disabled=False, # Este si se puede cambiar
-                    key="numero_credito_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="numero_credito_solicitud_info_{}_{}{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                 )
 
             # Actualizamos la Key de Monto Propuesto dejando el valor por si se actualiza
-            key_monto_propuesto = "monto_propuesto_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'])
+            key_monto_propuesto = "monto_propuesto_solicitud_info_{}_{}{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
             st.session_state[key_monto_propuesto] = formatNumber(d['Monto_Propuesto'])
 
             with col3Info:
@@ -580,14 +594,15 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
                     label="**Monto Propuesto**",
                     value=formatNumber(d['Monto_Propuesto']),
                     disabled=True,
-                    key="monto_propuesto_solicitud_info_{}_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda']),
+                    key="monto_propuesto_solicitud_info_{}_{}{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo),
                 )
 
         # Ahora vamos a crear el Botón para Descargar el Acuerdo de Pago en PDF
         # Primero Definimos la Key
-        key_acuerdo = "acuerdo_gen_{ID_Sol}_{Ids_Deudas}".format(
+        key_acuerdo = "acuerdo_gen_{ID_Sol}_{Ids_Deudas}{sufijo}".format(
             ID_Sol=solicitud['ID_Solicitud'],
-            Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in selected_deudas_info)
+            Ids_Deudas='-'.join(str(d['Id_Deuda']) for d in selected_deudas_info),
+            sufijo=sufijo
         )
 
         # Ahora Creamos el Botón de Generar el PDF
@@ -600,13 +615,142 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series) -> bytes:
         if generar_pdf:
             with st.spinner("⚙️ Generando Acuerdo de Pago en PDF..."):
                 # Paso 1: Crear la Serie de Datos
-                serie_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud, deudas=selected_ids)
+                serie_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud, deudas=selected_ids, sufijo=sufijo)
                 # Paso 2: Obtener los Bytes del Acuerdo
                 pdf_bytes = generate_payment_agreement_pdf(agreement=serie_acuerdo, assets_dir="assets", alpha=0.10) # type: ignore
                 # Paso 3: Guardar los Bytes en el Session State
                 st.session_state[key_acuerdo] = pdf_bytes
 
     return st.session_state.get(key_acuerdo, bytes())
+
+# Función Auxiliar para Construir los Componentes de Acuerdo de Pago u Oferta de Acuerdo
+# Maneja: Método de Pago, Formato de Pago (Subir Archivo o Generar PDF) y la Vista Previa.
+# Es usada tanto por el Diálogo de Respuesta como por el Diálogo de Modificación.
+# Devuelve los bytes del Acuerdo de Pago (Subido o Generado) y actualiza el Metodo_Pago en la solicitud_respuesta
+def construir_respuesta_solicitud_acuerdo_pago(*, solicitud: pd.Series, solicitud_respuesta: pd.Series, modo_edicion: bool = False) -> bytes:
+
+    # Definimos el Sufijo de las Keys para evitar Colisiones entre el Diálogo de Respuesta y el de Modificación
+    sufijo = '_edit' if modo_edicion else ''
+
+    # Especificaciones de Acuerdo de Pago u Oferta de Pago
+    with st.expander("**💸 Especificaciones de Acuerdo de Pago u Oferta de Pago**", expanded=True):
+
+        # Creamos 2 Columnas: Una para Metodo de Pago y la Otra para Formato de Pago
+        colMetodoPago, colFormatoPago = st.columns(2, vertical_alignment="top")
+
+        # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Metodo de Pago (Efectivo-Cheque, PSE, Transferencia)
+        with colMetodoPago:
+            # En Modo Edición dejamos el Método de Pago Actual por Defecto
+            metodo_pago_actual = solicitud_respuesta["Metadata_Solicitud"].get("Metodo_Pago", "Efectivo-Cheque")
+            if modo_edicion and (metodo_pago_actual in ["Efectivo-Cheque", "PSE", "Transferencia"]):
+                index_metodo_pago = ["Efectivo-Cheque", "PSE", "Transferencia"].index(metodo_pago_actual)
+            else:
+                index_metodo_pago = 0
+            metodo_pago = st.radio(
+                label="**Método de Pago**",
+                options=["Efectivo-Cheque", "PSE", "Transferencia"],
+                index=index_metodo_pago,
+                key="metodo_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                help="Seleccione el método de pago para la solicitud.",
+                persist_state="page",
+            )
+
+        # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
+        solicitud_respuesta["Metadata_Solicitud"]["Metodo_Pago"] = metodo_pago
+
+        with colFormatoPago:
+            formato_pago = st.radio(
+                label="**Formato de Acuerdo de Pago**",
+                options=["Subir Archivo", "Generar PDF"],
+                index=0,
+                key="formato_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                help="Seleccione el formato de pago para la solicitud.",
+                persist_state="page",
+            )
+
+        # Siguiente: Definir el formato_pago
+        if formato_pago == "Subir Archivo":
+
+            # Reunimos la Información de las Deudas y los Addendums en uno Solo
+            deudas_info = solicitud_respuesta["JSON_Respuesta"] + solicitud_respuesta["Metadata_Solicitud"].get("Addendums",[])
+
+            # Definimos todas las Deudas Disponibles
+            debt_ids = [d['Id_Deuda'] for d in deudas_info]
+
+            # Creamos una Vista de Pills para definir las Deudas a Usar
+            selected_ids = st.pills(
+                "**Deudas y Addendums usados**",
+                options=debt_ids,
+                default=debt_ids,
+                help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
+                key = "deudas_addendums_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                selection_mode="multi",
+                width="stretch",
+                persist_state="page",
+            )
+
+            acuerdo_pdf_list = st.file_uploader(
+                label="**Subir Acuerdo(s) de Pago**",
+                type=["pdf"],
+                key="subir_acuerdo_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                help="Suba el archivo PDF del acuerdo de pago.",
+                accept_multiple_files=True,
+            )
+            if acuerdo_pdf_list is None or not acuerdo_pdf_list or len(acuerdo_pdf_list) == 0:
+                st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
+                st.stop()
+
+            # Generamos la Metadata de la Solicitud
+            metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids, sufijo=sufijo)
+
+            # Guardamos la Metadata en el PDF
+            try:
+                # Obtenemos los bytes del archivo subido
+                bytes_acuerdo = unir_pdfs(
+                    archivos_pdf = acuerdo_pdf_list,
+                    contrasenia_inicial = st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula'])
+                )
+                bytes_acuerdo = add_metadata_to_uploaded_pdf(
+                    pdf_bytes=bytes_acuerdo,
+                    metadata=metadata_to_add_acuerdo.to_dict(),
+                    password=st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula'])
+                )
+            except Exception as e:
+                st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
+                    str(e)
+                ), icon="ℹ️")
+                st.text_input(
+                    "**Contraseña del PDF**",
+                    key="pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo),
+                    type="password",
+                    help="Ingresa la contraseña del PDF para guardarlo correctamente",
+                    persist_state="page",
+                )
+                if isinstance(e, WrongPasswordError):
+                    st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
+                st.stop()
+
+            if st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula']) != solicitud['Cedula']:
+                st.success("El PDF se ha guardado correctamente con la contraseña ingresada. (Por Defecto es la Cedula del Cliente)", icon="✅")
+
+        elif formato_pago == "Generar PDF":
+            bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta, sufijo=sufijo)
+            # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
+            if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
+                st.warning("Debes oprimir el Botón de Generar PDF para poder generar el Acuerdo de Pago")
+                st.stop()
+
+        # Creamos un popover para mostrar el PDF generado o subido
+        with st.expander("**📄 Vista Previa del Acuerdo de Pago**", expanded=False):
+            if bytes_acuerdo is not None and len(bytes_acuerdo) > 0:
+                st.markdown("**Vista Previa del Acuerdo de Pago:**")
+                st.pdf(bytes_acuerdo)
+            else:
+                st.warning("No hay un acuerdo de pago disponible para mostrar. Hay que subir o generar el acuerdo de pago en PDF.", icon="⚠️")
+                st.stop()
+
+    # Devolvemos los Bytes del Acuerdo de Pago
+    return bytes_acuerdo
 
 # Función Auxiliar para Mostrar el Mensaje de Cliente Actualizado/No Act 
 def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecutivo", "nego"]) -> None:
@@ -692,6 +836,9 @@ def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
         'acuerdo_pago_subido_{}',
         'id_acuerdo_pago_subido_{}',
         'correo_acuerdo_enviado_{}',
+        'correo_ajuste_enviado_{}',
+        'acuerdo_gen_{}',
+        'modificar_iniciado_{}',
         'cancelar_solicitud_{}',
         'finalizar_solicitud_{}',
     ]
@@ -726,6 +873,9 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
 
     # Mostramos el Mensaje de Actualización
     mostrar_mensaje_actualizado(solicitud=solicitud, origen='ejecutivo')
+
+    # Mostramos el Comentario del Negociador
+    st.info(solicitud['Metadata_Solicitud'].get("Comentario_Negociador") or "Sin Comentario", title="Comentario del Negociador",icon="💬")
 
     # Paso 1: Escogencia de Aliado, Estado de Solicitud y (Llamada )
     colAliado, colEstado, colLlamada = st.columns([2,2,1], vertical_alignment="center", border=True)
@@ -804,7 +954,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
 
         st.success("La solicitud está en un estado que permite finalizarla.")
         # Mostramos el Botón para Finalizar la Solicitud
-        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, funcion_actualizar=funcion_actualizar)
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, casa_cobro_old = solicitud['Casa_Cobro'], funcion_actualizar=funcion_actualizar)
         st.stop()
 
     # En caso que no (es Exitosa), se requiere poner el Monto por Deuda, Cuotas y Fecha Límite de Pago
@@ -1291,129 +1441,21 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
-        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta)
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta,casa_cobro_old = solicitud['Casa_Cobro'])
         st.stop()
 
-    # Especificaciones de Acuerdo de Pago u Oferta de Pago
-    with st.expander("**💸 Especificaciones de Acuerdo de Pago u Oferta de Pago**", expanded=True):
-
-        # Creamos 2 Columnas: Una para Metodo de Pago y la Otra para Formato de Pago
-        colMetodoPago, colFormatoPago = st.columns(2, vertical_alignment="top")
-
-        # Como es Acuerdo de Pago u Oferta de Pago, mostramos un Input de Metodo de Pago (Efectivo-Cheque, PSE, Transferencia)
-        with colMetodoPago:
-            metodo_pago = st.radio(
-                label="**Método de Pago**",
-                options=["Efectivo-Cheque", "PSE", "Transferencia"],
-                index=0,
-                key="metodo_pago_{}".format(solicitud['ID_Solicitud']),
-                help="Seleccione el método de pago para la solicitud.",
-                persist_state="page",
-            )
-
-        # Guardamos el Método de Pago en la metadata de la solicitud_respuesta
-        solicitud_respuesta["Metadata_Solicitud"]["Metodo_Pago"] = metodo_pago
-
-        with colFormatoPago:
-            formato_pago = st.radio(
-                label="**Formato de Acuerdo de Pago**",
-                options=["Subir Archivo", "Generar PDF"],
-                index=0,
-                key="formato_pago_{}".format(solicitud['ID_Solicitud']),
-                help="Seleccione el formato de pago para la solicitud.",
-                persist_state="page",
-            )
-
-        # Siguiente: Definir el formato_pago
-        if formato_pago == "Subir Archivo":
-
-            # Reunimos la Información de las Deudas y los Addendums en uno Solo
-            deudas_info = solicitud_respuesta["JSON_Respuesta"] + solicitud_respuesta["Metadata_Solicitud"].get("Addendums",[])
-    
-            # Definimos todas las Deudas Disponibles
-            debt_ids = [d['Id_Deuda'] for d in deudas_info]
-    
-            # Creamos una Vista de Pills para definir las Deudas a Usar
-            selected_ids = st.pills(
-                "**Deudas y Addendums usados**",
-                options=debt_ids,
-                default=debt_ids,
-                help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
-                key = "deudas_addendums_solicitud_info_{}".format(solicitud['ID_Solicitud']),
-                selection_mode="multi",
-                width="stretch",
-                persist_state="page",
-            )
-
-            acuerdo_pdf_list = st.file_uploader(
-                label="**Subir Acuerdo(s) de Pago**",
-                type=["pdf"],
-                key="subir_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
-                help="Suba el archivo PDF del acuerdo de pago.",
-                accept_multiple_files=True,
-            )
-            if acuerdo_pdf_list is None or not acuerdo_pdf_list or len(acuerdo_pdf_list) == 0:
-                st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
-                st.stop()
-
-            # Generamos la Metadata de la Solicitud
-            metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids)
-
-            # Guardamos la Metadata en el PDF
-            try:
-                # Obtenemos los bytes del archivo subido
-                bytes_acuerdo = unir_pdfs(
-                    archivos_pdf = acuerdo_pdf_list,
-                    contrasenia_inicial = st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula'])
-                )
-                bytes_acuerdo = add_metadata_to_uploaded_pdf(
-                    pdf_bytes=bytes_acuerdo,
-                    metadata=metadata_to_add_acuerdo.to_dict(),
-                    password=st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula'])
-                )
-            except Exception as e:
-                st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
-                    str(e)
-                ), icon="ℹ️")
-                st.text_input(
-                    "**Contraseña del PDF**",
-                    key="pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']),
-                    type="password",
-                    help="Ingresa la contraseña del PDF para guardarlo correctamente",
-                    persist_state="page",
-                )
-                if isinstance(e, WrongPasswordError):
-                    st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
-                st.stop()
-
-            if st.session_state.get("pdf_password_{}".format(metadata_to_add_acuerdo['ID_Solicitud']), solicitud['Cedula']) != solicitud['Cedula']:
-                st.success("El PDF se ha guardado correctamente con la contraseña ingresada. (Por Defecto es la Cedula del Cliente)", icon="✅")
-
-        elif formato_pago == "Generar PDF":
-            bytes_acuerdo = mostrar_especificaciones_acuerdo_generado(solicitud=solicitud_respuesta)
-            # Si no hay bytes_acuerdo, mostramos un error y detenemos la ejecución
-            if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
-                st.warning("Debes oprimir el Botón de Generar PDF para poder generar el Acuerdo de Pago")
-                st.stop()
-
-        # Creamos un popover para mostrar el PDF generado o subido
-        with st.expander("**📄 Vista Previa del Acuerdo de Pago**", expanded=False):
-            if bytes_acuerdo is not None and len(bytes_acuerdo) > 0:
-                st.markdown("**Vista Previa del Acuerdo de Pago:**")
-                st.pdf(bytes_acuerdo)
-            else:
-                st.warning("No hay un acuerdo de pago disponible para mostrar. Hay que subir o generar el acuerdo de pago en PDF.", icon="⚠️")
-                st.stop()
+    # Si es Acuerdo de Pago u Oferta de Acuerdo: Construimos los Componentes y Obtenemos los Bytes del Acuerdo
+    bytes_acuerdo = construir_respuesta_solicitud_acuerdo_pago(solicitud=solicitud, solicitud_respuesta=solicitud_respuesta, modo_edicion=False)
 
     # Verificamos que exista el metodo de Pago
-    if not metodo_pago:
+    if not solicitud_respuesta["Metadata_Solicitud"].get("Metodo_Pago", ""):
         st.warning("Debe seleccionar un método de pago para poder finalizar la solicitud.", icon="⚠️")
         st.stop()
 
     # Siguiente: Mostramos el Botón de Finalizar Solicitud
-    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, pdf_bytes=bytes_acuerdo)
+    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, casa_cobro_old=solicitud['Casa_Cobro'], pdf_bytes=bytes_acuerdo)
 
-# Función para Abrir el Diálogo de Modificación de la Respuesta de una Solicitud (Solo Validaciones)
+# Función para Abrir el Diálogo de Modificación de la Respuesta de una Solicitud
 @st.dialog("🗒️ Modificar Respuesta de Solicitud", dismissible=True, width="large", on_dismiss="rerun")
 def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
@@ -1422,10 +1464,13 @@ def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         st.warning("La Solicitud `{}` no ha sido respondida aún, por lo que no se puede modificar su respuesta.".format(solicitud['ID_Solicitud']), icon="⚠️")
         st.stop()
 
-    # Restricción 2: Es una Solicitud de Validación
-    if solicitud["Tipo_Solicitud"] != "Validación":
-        st.warning("La modificación de respuestas solo está disponible para Solicitudes de Validación.", icon="⚠️")
-        st.stop()
+    # Limpiamos (Una Sola Vez) el Estado de Subida del Acuerdo de la Respuesta Anterior
+    # para forzar que el PDF se vuelva a subir al Modificar la Respuesta
+    key_modificar_iniciado = 'modificar_iniciado_{}'.format(solicitud['ID_Solicitud'])
+    if not st.session_state.get(key_modificar_iniciado, False):
+        st.session_state.pop('acuerdo_pago_subido_{}'.format(solicitud['ID_Solicitud']), None)
+        st.session_state.pop('id_acuerdo_pago_subido_{}'.format(solicitud['ID_Solicitud']), None)
+        st.session_state[key_modificar_iniciado] = True
 
     # Construimos la Respuesta de la Solicitud en Modo Edición usando los Componentes de Validación
     solicitud_respuesta = construir_respuesta_solicitud_validacion(
@@ -1434,8 +1479,21 @@ def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         funcion_actualizar=redistribuir_resultado_solicitud,
     )
 
+    # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
+    if solicitud["Tipo_Solicitud"] == "Validación":
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, casa_cobro_old=solicitud['Casa_Cobro'], funcion_actualizar=redistribuir_resultado_solicitud)
+        st.stop()
+
+    # Si es Acuerdo de Pago u Oferta de Acuerdo: Construimos los Componentes y Obtenemos los Bytes del Acuerdo
+    bytes_acuerdo = construir_respuesta_solicitud_acuerdo_pago(solicitud=solicitud, solicitud_respuesta=solicitud_respuesta, modo_edicion=True)
+
+    # Verificamos que exista el metodo de Pago
+    if not solicitud_respuesta["Metadata_Solicitud"].get("Metodo_Pago", ""):
+        st.warning("Debe seleccionar un método de pago para poder finalizar la solicitud.", icon="⚠️")
+        st.stop()
+
     # Siguiente: Mostramos el Botón de Finalizar que Re-Distribuye el Resultado a las Solicitudes Espejo
-    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, funcion_actualizar=redistribuir_resultado_solicitud)
+    mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, casa_cobro_old=solicitud['Casa_Cobro'], pdf_bytes=bytes_acuerdo, funcion_actualizar=redistribuir_resultado_solicitud)
     st.stop()
 
 # Diálogo para subir automáticamente una solicitud de acuerdo de pago después de una validación
@@ -2580,18 +2638,15 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         # Por Último: Mostramos el Botón para Responder la Solicitud
         solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
 
-        # Definimos si la Solicitud se Puede Modificar (Solo Validaciones ya Respondidas)
-        puede_modificar = solicitud_ya_gestionada and (solicitud["Tipo_Solicitud"] == "Validación")
+        # Definimos si la Solicitud se Puede Modificar (Todas las Solicitudes ya Respondidas)
+        puede_modificar = solicitud_ya_gestionada
 
         # Creamos Tres Columnas: Una para Información, Otra para Responder y Otra para Modificar
         colInfo, colBoton, colBotonModificar = st.columns([3, 1.5, 1.5], vertical_alignment="top")
 
         with colInfo:
             if solicitud_ya_gestionada:
-                if puede_modificar:
-                    st.success("Esta solicitud ya ha sido respondida. Puedes modificar su respuesta.", icon="✅")
-                else:
-                    st.success("Esta solicitud ya ha sido respondida o está en espera de comité/ilocalizable.", icon="✅")
+                st.success("Esta solicitud ya ha sido respondida. Puedes modificar su respuesta.", icon="✅")
             else:
                 st.info("Haz click para responder la solicitud.", icon="ℹ️")
 
@@ -2613,7 +2668,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 key="modificar_respuesta_solicitud_{}".format(solicitud['ID_Solicitud']),
                 disabled=not puede_modificar,
                 type = "secondary",
-                help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes de Validación ya respondidas.",
+                help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes ya respondidas.",
             ):
                 dialog_modificar_respuesta_solicitud(solicitud=solicitud)
 
