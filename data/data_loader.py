@@ -1088,6 +1088,8 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
     deudas_df.loc[maskPLNaN, 'PaB_PL'] = deudas_df.loc[maskPLNaN, 'PaB_Origen'] * (1 - DEFAULT_DISCOUNT_PL)
     # Por Último, aplicamos la Limpieza a la Columna Pricing usando parsePercentage
     deudas_df['Pricing'] = deudas_df['Pricing'].apply(parsePercentage)
+    # Obtenemos el Máximo Dato de Princing y lo ponemos
+    deudas_df['Pricing'] = deudas_df['Pricing'].max() if pd.notna(deudas_df['Pricing'].max()) else 0.15
     # Volvemos Numero_Credito a String usando astype
     deudas_df['Numero_Credito'] = deudas_df['Numero_Credito'].astype(str)
 
