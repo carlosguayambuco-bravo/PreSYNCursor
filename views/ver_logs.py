@@ -12,11 +12,9 @@ st.divider()
 active_logs_df = load_logs()
 st.toast("Se han cargado los logs de la aplicación desde Google Sheets.", icon="✅")
 
-# Creamos 4 Columnas para mostrar los Logs
-colTimestamp, colUser, colAction, colDetails = st.columns([2, 2, 2, 2], vertical_alignment="center", gap="small")
-
 # Iteramos por cada uno de los datos
 for index, row in active_logs_df.iterrows():
+    colTimestamp, colUser, colAction, colDetails = st.columns([1, 1, 2, 2], vertical_alignment="center", gap="small")
     with colTimestamp:
         st.code(row["Timestamp"].strftime("%Y-%m-%d %H:%M:%S"), language="text")
     with colUser:
