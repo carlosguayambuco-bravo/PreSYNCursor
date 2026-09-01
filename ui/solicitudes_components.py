@@ -16,7 +16,7 @@ from data.data_loader import load_app_config, obtener_ultima_actualizacion_deuda
 from data.data_uploader import upload_form_response_to_google_sheets, upload_log_to_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
-from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
+from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
@@ -164,12 +164,26 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
             )
 
     # Filtro Nuevo: Organizar por ABC de Casa_Cobro default=False
-    organizar_abc = st.toggle(
-        "**Organizar por Abecedario**",
-        value=False,
-        key="organizar_abc_solicitudes_gestion_input",
-        help = "Organizar los Aliados por ABC (A a la Z)"
-    )
+    # Adicionalmente se elige programaticamente la posibilidad de filtro de Liquidación
+    colABC, colLiq = st.columns(2)
+    with colABC:
+        st.space()
+        organizar_abc = st.toggle(
+            "**Organizar por Abecedario**",
+            value=False,
+            key="organizar_abc_solicitudes_gestion_input",
+            help = "Organizar los Aliados por ABC (A a la Z)"
+        )
+    with colLiq:
+        if st.secrets.get('VER_FILTRO_LIQUIDACIONES',False):
+            tipo_liquidacion = st.selectbox(
+                label="**🕶️ Estado de Liquidación**",
+                options = ["Todos"] + ESTADOS_POSIBLES_LIQUIDACION,
+                index=0,
+                key="estado_liq_nego_input"
+            )
+        else:
+            tipo_liquidacion = None
 
     # Paso 3: Aplicar ls filtros seleccionados al DataFrame de Solicitudes
 
@@ -190,6 +204,15 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
 
     if id_deuda_solicitud != "Todos":
         solicitudes_df = solicitudes_df[solicitudes_df["Ids_Deuda"].str.contains(id_deuda_solicitud)]
+
+    if not (tipo_liquidacion is None) and tipo_liquidacion != "Todos":
+        # Primero Obtenemos el Tipo de Liquidación para cada Fila
+        liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+        liq_serie = liq_serie.mask(liq_serie == None, "N/A")
+        # Ahora definimos el Filtro
+        filtro_liq = (liq_serie == tipo_liquidacion)
+        # Por último, Aplicamos el Filtro
+        solicitudes_df = solicitudes_df[filtro_liq]
 
     # Paso 4: Quitar los IDs de Solicitudes que ya fueron respondidas y están en el BannedManager
     if usar_recomendado or usar_basico:
@@ -249,7 +272,7 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
     # Nombre Cliente, Tipo de Soliciutd, Estado Solicitud, Aliado
     
     # Creamos las Columnas
-    colCliente, colTipoSolicitud, colEstado, colAliado, colToggles = st.columns(5, border=True)
+    colCliente, colTipoSolicitud, colEstado, colAliado, colLiquidacion = st.columns(5, border=True)
 
     with colCliente:
         clientes_posibles = list(solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Nombre_Cliente", "Desconocido")).unique())
@@ -270,6 +293,12 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
             key="tipo_solicitud_nego_input",
             help="Seleccione el tipo de solicitud que desea filtrar",
         )
+        toggle_aprobacion = st.toggle(
+            label="**🔐 Requiere Aprobación**",
+            value=False,
+            key="toggle_aprobacion_solicitud_nego_input",
+            help="Filtra las solicitudes que están en estado de aprobación.",
+        )
 
     with colEstado:
         estados_posibles = list(solicitudes_df["Estado_Solicitud"].unique())
@@ -279,6 +308,12 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
             index=0,
             key="estado_solicitud_nego_input",
             help="Seleccione el estado de la solicitud que desea filtrar",
+        )
+        toggle_exitosas = st.toggle(
+            label="**✅ Exitosas**",
+            value=False,
+            key="toggle_exitosas_solicitud_nego_input",
+            help="Filtra las solicitudes que aún no han sido respondidas.",
         )
 
     with colAliado:
@@ -290,25 +325,19 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
             key="aliado_solicitud_nego_input",
             help="Seleccione el aliado que desea filtrar",
         )
-
-    with colToggles:
-        toggle_exitosas = st.toggle(
-            label="**✅ Exitosas**",
-            value=False,
-            key="toggle_exitosas_solicitud_nego_input",
-            help="Filtra las solicitudes que aún no han sido respondidas.",
-        )
-        toggle_aprobacion = st.toggle(
-            label="**🔐 Requiere Aprobación**",
-            value=False,
-            key="toggle_aprobacion_solicitud_nego_input",
-            help="Filtra las solicitudes que están en estado de aprobación.",
-        )
         toggle_orden_fecha = st.toggle(
             label="**🗓️ Ordenar de Primera a Última**",
             value=False,
             key="toggle_orden_fecha_solicitud_nego_input",
             help="Ordena las solicitudes por fecha de creación.",
+        )
+
+    with colLiquidacion:
+        tipo_liquidacion = st.selectbox(
+            label="**🕶️ Estado de Liquidación**",
+            options = ["Todos"] + ESTADOS_POSIBLES_LIQUIDACION,
+            index=0,
+            key="estado_liq_nego_input"
         )
 
     # Ahora Creamos un Expander para los Filtros Específicos, que son:
@@ -395,6 +424,15 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
 
     if not ("Todos" in banco_solicitud) and banco_solicitud:
         solicitudes_df = solicitudes_df[solicitudes_df["Datos_Solicitud"].apply(lambda l: [x.get("Banco", "Desconocido") for x in l]).apply(lambda x: any(b in x for b in banco_solicitud))]
+
+    if tipo_liquidacion != "Todos":
+        # Primero Obtenemos el Tipo de Liquidación para cada Fila
+        liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+        liq_serie = liq_serie.mask(liq_serie == None, "N/A")
+        # Ahora definimos el Filtro
+        filtro_liq = (liq_serie == tipo_liquidacion)
+        # Por último, Aplicamos el Filtro
+        solicitudes_df = solicitudes_df[filtro_liq]
 
     # Siguiente: Aplicar la Lógica de los Toggles
     if toggle_exitosas:
@@ -2351,9 +2389,10 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
         # Calculamos la Diferencia a Hoy
         if pd.notnull(fecha_limite_pago):
             diferencia_dias = getBDDaysDiffFloat(fecha_limite_pago, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
-            delta_color = "red" if diferencia_dias < 0 else "green"
-            delta_arrow = "down" if diferencia_dias < 0 else "up"
-            delta_text = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if diferencia_dias < 0 else "para pagar")
+            menor_hoy = (fecha_limite_pago < pd.Timestamp.now(tz='America/Bogota').tz_localize(None).normalize())
+            delta_color = "red" if menor_hoy else "green"
+            delta_arrow = "down" if menor_hoy else "up"
+            delta_text = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if menor_hoy else "para pagar")
         else:
             delta_color = "gray"
             delta_arrow = "off"

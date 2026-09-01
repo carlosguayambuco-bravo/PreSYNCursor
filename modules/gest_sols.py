@@ -207,8 +207,8 @@ def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin
             - None: Si la Solicitud no es Exitosa o no es de tipo Acuerdo de Pago u Oferta de Acuerdo,
                 o si no tiene Ids de Deuda en la Respuesta.
     """
-    # Solo Aplica para Solicitudes Exitosas de Acuerdo de Pago u Oferta de Acuerdo
-    if (solicitud['Estado_Solicitud'] != 'Exitosa') or (solicitud['Tipo_Solicitud'] not in ['Acuerdo de Pago', 'Oferta de Acuerdo']):
+    # Solo Aplica para Solicitudes Exitosas
+    if (solicitud['Estado_Solicitud'] != 'Exitosa'):
         return None
 
     # Paso 1: Obtener los Ids de Deuda de la Respuesta

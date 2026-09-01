@@ -50,6 +50,13 @@ PAGOS_POSIBLES_SOLICITUD = [
     'Crédito',
 ]
 
+ESTADOS_POSIBLES_LIQUIDACION = [
+    "Sin Liquidar",
+    "Liquidado Parcial",
+    "Liquidado Total",
+    "N/A",
+]
+
 # --- Queries a Metabase ---
 QUERY_DEBT_TO_REFERENCE = """
 SELECT
