@@ -798,11 +798,7 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
 
     # Paso 6: Validamos el DF con el Esquema (Si no esta vacio)
     if not cruce_df.empty:
-        try:
-            cruce_df = PendienteCruceSchema.validate(cruce_df, lazy=True)
-        except Exception as e:
-            st.json(e.message)
-            raise e
+        cruce_df = PendienteCruceSchema.validate(cruce_df, lazy=True)
     else:
         cruce_df = PendienteCruceSchema.empty()
 

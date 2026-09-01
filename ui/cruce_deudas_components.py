@@ -5,10 +5,17 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from modules.constants import COL_CEDULA, COL_NOMBRE, PRIORIDAD_ETIQUETAS_CRUCE
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
 OPCION_SIN_OPCIONES = 'Sin Opciones Actuales'
 ID_DEFINITIVO_ADDENDUM = 'ADDENDUM'
+
+# Opciones de Ordenamiento de las Deudas a Identificar
+OPCION_ORDEN_DF = 'Orden del DataFrame (Actual)'
+OPCION_ORDEN_CEDULA = 'Cédula'
+OPCION_ORDEN_NOMBRE = 'Nombre del Cliente'
+OPCION_ORDEN_ETIQUETA = 'Etiqueta'
 
 # Función Auxiliar para Mostrar los Filtros de las Deudas a Identificar
 def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
@@ -24,6 +31,7 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     df['_Ejecutivo_Subida'] = df['Metadata'].apply(lambda m: str(m.get('Ejecutivo_Subida', '') or ''))
     df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta', '') or ''))
     df['_Tiene_Id_Definitivo'] = df['Metadata'].apply(lambda m: (m.get('Id_Definitivo') not in (None, '')))
+    df['_Archivo_Origen'] = df['Metadata'].apply(lambda m: str(m.get('Archivo_Origen', '') or ''))
 
     # Paso 2: Mostrar los Filtros (Casa de Cobro, Alias, Ejecutivo de Subida y Etiqueta)
     colCasa, colAlias, colEjecutivo, colEtiqueta = st.columns(4)
@@ -65,14 +73,7 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
             help="Seleccione las etiquetas que desea ver.",
         )
 
-    incluir_con_definitivo = st.toggle(
-        label="**✅ Incluir Deudas con Id_Definitivo**",
-        value=False,
-        key="filtro_cruce_incluir_definitivo_input",
-        help="Activar para incluir también las deudas que ya tienen un Id_Definitivo asignado.",
-    )
-
-    # Paso 3: Aplicar los Filtros Seleccionados al DataFrame
+    # Paso 3: Aplicar los Filtros Principales Seleccionados
     if casa_seleccionada:
         df = df[df['_Casa_Cobro'].isin(casa_seleccionada)]
 
@@ -85,11 +86,72 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     if etiqueta_seleccionada:
         df = df[df['_Etiqueta'].isin(etiqueta_seleccionada)]
 
+    # Paso 4: Ayudas Auxiliares (Toggle de Id_Definitivo, Ordenamiento y Archivo de Origen)
+    with st.expander("Ayudas Auxiliares", expanded=False):
+        colToggle, colOrdenamiento, colArchivo = st.columns(3)
+
+        with colToggle:
+            incluir_con_definitivo = st.toggle(
+                label="**✅ Incluir Deudas con Id_Definitivo**",
+                value=False,
+                key="filtro_cruce_incluir_definitivo_input",
+                help="Activar para incluir también las deudas que ya tienen un Id_Definitivo asignado.",
+            )
+
+        with colOrdenamiento:
+            # El Ordenamiento por Cédula o Nombre solo tiene sentido si hay más de un valor distinto
+            opciones_ordenamiento = [OPCION_ORDEN_DF]
+            if df[COL_CEDULA].nunique() > 1:
+                opciones_ordenamiento.append(OPCION_ORDEN_CEDULA)
+            if df[COL_NOMBRE].nunique() > 1:
+                opciones_ordenamiento.append(OPCION_ORDEN_NOMBRE)
+            opciones_ordenamiento.append(OPCION_ORDEN_ETIQUETA)
+
+            # Si la opción guardada ya no existe entre las disponibles, volvemos al orden del DF
+            valor_orden_actual = st.session_state.get('filtro_cruce_ordenamiento_input', OPCION_ORDEN_DF)
+            index_ordenamiento = (
+                opciones_ordenamiento.index(valor_orden_actual)
+                if valor_orden_actual in opciones_ordenamiento else 0
+            )
+
+            ordenamiento = st.selectbox(
+                label="**Ordenamiento de los Datos**",
+                options=opciones_ordenamiento,
+                index=index_ordenamiento,
+                key="filtro_cruce_ordenamiento_input",
+                help="Selecciona el criterio con el que se ordenarán las deudas.",
+            )
+
+        with colArchivo:
+            archivo_seleccionado = st.multiselect(
+                label="**Archivo de Origen**",
+                options=sorted(df['_Archivo_Origen'].unique().tolist()),
+                key="filtro_cruce_archivo_origen_input",
+                help="Seleccione los archivos de origen que desea ver.",
+            )
+
+    # Paso 5: Aplicar los Filtros Auxiliares Seleccionados
     if not incluir_con_definitivo:
         df = df[~df['_Tiene_Id_Definitivo']]
 
-    # Paso 4: Devolver el DataFrame Filtrado (sin las Columnas Auxiliares)
-    return df.drop(columns=['_Casa_Cobro', '_Alias_Casa', '_Ejecutivo_Subida', '_Etiqueta', '_Tiene_Id_Definitivo'])
+    if archivo_seleccionado:
+        df = df[df['_Archivo_Origen'].isin(archivo_seleccionado)]
+
+    # Paso 6: Aplicar el Ordenamiento Seleccionado
+    if ordenamiento == OPCION_ORDEN_CEDULA:
+        df = df.sort_values(by=COL_CEDULA, kind='stable')
+    elif ordenamiento == OPCION_ORDEN_NOMBRE:
+        df = df.sort_values(by=COL_NOMBRE, kind='stable', na_position='last')
+    elif ordenamiento == OPCION_ORDEN_ETIQUETA:
+        df['_Prioridad_Etiqueta'] = df['_Etiqueta'].map(PRIORIDAD_ETIQUETAS_CRUCE)
+        df = df.sort_values(by='_Prioridad_Etiqueta', kind='stable', na_position='last')
+
+    # Paso 7: Devolver el DataFrame Filtrado y Ordenado (sin las Columnas Auxiliares)
+    columnas_auxiliares = [
+        '_Casa_Cobro', '_Alias_Casa', '_Ejecutivo_Subida', '_Etiqueta',
+        '_Tiene_Id_Definitivo', '_Archivo_Origen', '_Prioridad_Etiqueta',
+    ]
+    return df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
 
 # Función Auxiliar para Mostrar un Registro del Cruce (Vista de 2 Columnas)
 def mostrar_registro_cruce(*, registro: pd.Series) -> None:

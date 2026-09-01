@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador, obtener_ultima_actualizacion_deudas
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -2414,6 +2414,14 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))
     if etiqueta_subestado:
         expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
+    estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
+    if estado_liquidacion:
+        color_liquidacion = {
+            "Sin Liquidar": "red",
+            "Liquidado Parcial": "yellow",
+            "Liquidado Total": "green",
+        }[estado_liquidacion]
+        expander_name = "{} | :{}-background[**{}**]".format(expander_name, color_liquidacion, estado_liquidacion)
     expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
 
     # Por Último: Mostramos el Botón para Responder la Solicitud
@@ -2648,6 +2656,15 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
     # Añadimos Nombre de Cliente
     expander_name = "{} | :gray-background[{}]".format(expander_name, solicitud['Metadata_Solicitud'].get('Nombre_Cliente','Nombre no Encontrado'))
+
+    estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
+    if estado_liquidacion:
+        color_liquidacion = {
+            "Sin Liquidar": "red",
+            "Liquidado Parcial": "yellow",
+            "Liquidado Total": "green",
+        }[estado_liquidacion]
+        expander_name = "{} | :{}-background[**{}**]".format(expander_name, color_liquidacion, estado_liquidacion)
 
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
 

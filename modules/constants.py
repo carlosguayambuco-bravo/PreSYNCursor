@@ -277,6 +277,15 @@ MAX_COMB_NOMBRE = 6         # Tamaño máximo de subconjuntos de palabras para l
 
 ETIQUETAS_CRUCE = [ETIQUETA_EXACTO, ETIQUETA_DUPLICADO, ETIQUETA_AMBIGUO, ETIQUETA_ADDENDUM, ETIQUETA_NULO]
 
+# --- Prioridades de Ordenamiento de las Etiquetas del Cruce ---
+PRIORIDAD_ETIQUETAS_CRUCE = {
+    ETIQUETA_EXACTO: 1,
+    ETIQUETA_DUPLICADO: 2,
+    ETIQUETA_AMBIGUO: 3,
+    ETIQUETA_ADDENDUM: 4,
+    ETIQUETA_NULO: 5,
+}
+
 MIMETYPES = {
     'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'csv': 'text/csv',

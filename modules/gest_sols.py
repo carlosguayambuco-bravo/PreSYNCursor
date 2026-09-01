@@ -12,7 +12,7 @@ from pypdf.generic import NameObject, TextStringObject
 from pypdf.errors import FileNotDecryptedError, WrongPasswordError
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_masivas
+from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas
 from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_filtered_plantilla, upload_addendum_debt
 from data.data_models import SolicitudesSchema, MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
@@ -190,6 +190,47 @@ def obtener_mascara_exitosas(solicitudes_df: pd.DataFrame) -> pd.Series:
         pd.Series: Serie con las solicitudes exitosas.
     """
     return solicitudes_df["Estado_Solicitud"] == "Exitosa"
+
+def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
+    """
+    Obtiene el Estado de Liquidación de una Solicitud Exitosa de Acuerdo de Pago u Oferta de Acuerdo.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        Optional[Literal["Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
+            - "Sin Liquidar": Ningún Id_Deuda de la Respuesta está en las Liquidaciones.
+            - "Liquidado Parcial": Algunos Ids de la Respuesta están en las Liquidaciones, pero no todos.
+            - "Liquidado Total": Todos los Ids de la Respuesta están en las Liquidaciones.
+            - None: Si la Solicitud no es Exitosa o no es de tipo Acuerdo de Pago u Oferta de Acuerdo,
+                o si no tiene Ids de Deuda en la Respuesta.
+    """
+    # Solo Aplica para Solicitudes Exitosas de Acuerdo de Pago u Oferta de Acuerdo
+    if (solicitud['Estado_Solicitud'] != 'Exitosa') or (solicitud['Tipo_Solicitud'] not in ['Acuerdo de Pago', 'Oferta de Acuerdo']):
+        return None
+
+    # Paso 1: Obtener los Ids de Deuda de la Respuesta
+    json_respuesta = solicitud['JSON_Respuesta']
+    if not isinstance(json_respuesta, list):
+        return None
+    ids_respuesta = [str(d['Id_Deuda']) for d in json_respuesta]
+    if not ids_respuesta:
+        return None
+
+    # Paso 2: Cargar los Ids de Deuda Liquidados
+    liquidaciones_ids: set[str] = load_liquidaciones()
+
+    # Paso 3: Contar cuántos Ids de la Respuesta están Liquidados
+    num_liquidados = sum(1 for id_deuda in ids_respuesta if id_deuda in liquidaciones_ids)
+
+    # Paso 4: Determinar el Estado de Liquidación
+    if num_liquidados == 0:
+        return "Sin Liquidar"
+    elif num_liquidados == len(ids_respuesta):
+        return "Liquidado Total"
+    else:
+        return "Liquidado Parcial"
 
 def obtener_mascara_aprobacion_necesaria(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
