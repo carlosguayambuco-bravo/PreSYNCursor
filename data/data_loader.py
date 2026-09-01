@@ -5,6 +5,7 @@ from collections import defaultdict
 import json
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
+from pandas import notna
 from pandera.typing import DataFrame
 import gspread
 import numpy as np
@@ -15,7 +16,7 @@ from core.permissions import PERMISSIONS_DICT
 from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_LAST_UPDATE, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
@@ -965,14 +966,14 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
     return ""
 
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
-def obtener_deudas_activas_con_retry(*, referencia: str) -> DataFrame[DeudasActivasSchema]:
+def obtener_deudas_activas_con_retry(*, referencia: str, todas: bool) -> DataFrame[DeudasActivasSchema]:
     """
     Función principal que intenta obtener las Deudas Activas desde Metabase.
     Si la consulta falla, se cargan las Deudas Activas desde la Cartera Backup.
     """
     try:
         # Intentamos obtener los datos desde Metabase
-        return obtener_deudas_activas(referencia=referencia)
+        return obtener_deudas_activas(referencia=referencia, usar_todas=todas)
     except LookupError:
         # Si la consulta a Metabase falla, cargamos la Cartera Backup
         st.warning('Berex no se encuentra disponible, cargando la Cartera Backup', icon="⚠️")
@@ -980,26 +981,71 @@ def obtener_deudas_activas_con_retry(*, referencia: str) -> DataFrame[DeudasActi
         # Paso 1: Cargamos la Cartera Backup (Contiene la info de todos los clientes)
         backup_df = load_cartera_backup()
 
-        # Paso 2: Filtramos la Cartera Backup por la Referencia dada
+        # Paso 2: Aplicamos el Cambio de Referencia
+        refChanges = load_reference_changes()
+        referencia = refChanges.get(referencia,referencia)
+
+        # Paso 3: Filtramos la Cartera Backup por la Referencia dada
         deudas_backup_df = backup_df[backup_df['Referencia'] == referencia]
 
-        # Paso 3: Devolvemos el DataFrame con las Deudas Activas desde la Cartera Backup
+        # Paso 4: Devolvemos el DataFrame con las Deudas Activas desde la Cartera Backup
         return deudas_backup_df
 
-# Función Auxiliar para Obtener las Deudas Activas de una Referencia
-def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
+# Función Auxiliar para Parsear los Planes de Liquidación
+def parsear_plan_items(planes: pd.DataFrame) -> pd.DataFrame:
+    """Convierte el JSON 'debts' de cada plan winner en filas con Pricing + PB_PL."""
+    items = []
+    for row in planes.itertuples():
+        try:
+            debts_json = json.loads(row.debts) if isinstance(row.debts, str) else row.debts
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(debts_json, list):
+            continue
+        for item in debts_json:
+            try:
+                items.append({
+                    "Pricing": row.pricing,
+                    "Banco": item.get("financial_entity"),
+                    "PaB_Origen": float(item.get("updated_amount")),
+                    "PaB_PL": float(item.get("payment_to_bank"))
+                    + float(item.get("reduction_commission")),
+                })
+            except (TypeError, ValueError):
+                continue
+    return pd.DataFrame(items)
+
+# Función Auxiliar para Obtener las Deudas Activas de una Referencia (Usando Progreso)
+def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[DeudasActivasSchema]:
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
     # Paso 2: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
-    query = QUERY_ACTIVE_DEBTS.format(referencia=referencia)
-    # Paso 3: Obtener las Deudas Activas desde Metabase
-    deudas_df = metabase_service.execute_query(query)
+    query_deudas = QUERY_DEUDAS.format(reference=referencia)
 
+    progreso_busqueda = st.progress(1/5,"Buscando Deudas para la Referencia")
+
+    # 2.1 Ejecutamos la Query de las Deudas
+    deudas_df = metabase_service.execute_query(query_deudas)
+    # 2.2 Obtenemos el lead_id
+    lead_id = deudas_df['Lead_Id'].iloc[0]
+    if pd.notna(lead_id):
+        progreso_busqueda.progress(2/5,"Buscando Datos del Plan de Liquidación")
+        # Creamos la Query
+        query_plan_liq = QUERY_PLANES.format(lead_id=str(lead_id).replace('.0','').strip())
+        # Ejecutamos la Query
+        pl_df = metabase_service.execute_query(query_plan_liq)
+        # Limpiamos los Datos
+        pl_df = parsear_plan_items(pl_df)
+    else:
+        pl_df = pd.DataFrame(columns=['Pricing','Banco','PaB_Origen','PaB_PL'])
+
+    # Si esta Vacío
     if deudas_df.empty:
         # Si el DataFrame está vacío, devolvemos un DataFrame vacío con el esquema
         return DeudasActivasSchema.empty()
 
-    # Paso 4: -- Limpieza de Datos --
+    progreso_busqueda.progress(3/5, "Limpiando Datos")
+    # Paso 3: -- Limpieza de Datos --
     # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
     deudas_df.dropna(subset=['Id_Deuda'], inplace=True)
     deudas_df['Id_Deuda'] = deudas_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
@@ -1008,6 +1054,23 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     deudas_df['Cedula'] = deudas_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
     # Volvemos las Columnas PaB_Origen y PaB_PL a Números
     deudas_df['PaB_Origen'] = pd.to_numeric(deudas_df['PaB_Origen'], errors='coerce')
+
+    # Paso 4: Unimos los Datos con los del Plan de Liquidación
+    deudas_df = pd.merge(
+        deudas_df,
+        pl_df,
+        on=['PaB_Origen','Banco'],
+    )
+
+    # Paso 5: Filtramos si es necesario las liquidaciones
+    if not usar_todas:
+        maskEstados = deudas_df['Estado_Deuda'].isin(ESTADOS_LIQUIDACION)
+        maskSubEstados = deudas_df['Sub_Estado_Deuda'].isin(SUB_ESTADOS_LIQUIDACION)
+        deudas_df = deudas_df[~(maskEstados|maskSubEstados)]
+
+    # Quitamos las Columnas Lead_Id, Estado_Deuda y Sub_Estado_Deuda
+    deudas_df = deudas_df.drop(columns=['Estado_Deuda','Sub_Estado_Deuda','Lead_Id'])
+
     deudas_df['PaB_PL'] = pd.to_numeric(deudas_df['PaB_PL'], errors='coerce')
     # Imputamos los Valores Nulos de PaB_Origen con 0
     imputeNans(deudas_df, col='PaB_Origen', value=0)
@@ -1019,11 +1082,14 @@ def obtener_deudas_activas(*,referencia: str) -> DataFrame[DeudasActivasSchema]:
     # Volvemos Numero_Credito a String usando astype
     deudas_df['Numero_Credito'] = deudas_df['Numero_Credito'].astype(str)
 
+    progreso_busqueda.progress(3/5, "Aplicando Normalización de Bancos")
     # Importante: Normalizamos los Bancos
     deudas_df['Banco'] = deudas_df['Banco'].apply(normalizar_banco)
 
     # Validamos el DF con el esquema
-    deudas_df = DeudasActivasSchema.validate(deudas_df)
+    deudas_df = DeudasActivasSchema.validate(deudas_df, lazy=True)
+
+    progreso_busqueda.progress(5/5, "Búsqueda Completada")
 
     # Paso 5: Devolver el DataFrame de Deudas Activas
     return deudas_df

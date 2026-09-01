@@ -53,6 +53,14 @@ with cols[1]:
     disabled = (not st.session_state.get('id_rep_needed',False)),
     )
 
+# Agregamos un Toggle para las Deudas Totales
+busar_todas = st.toggle(
+    label="Buscar Todas las Deudas - No solo activas",
+    value=False,
+    key="toggle_buscar_todas_forms",
+    help="Si activado, busca todas las Deudas Activas para una Referencia"
+)
+
 # Validamos la Referencia
 if not referencia_cliente:
     st.error("La referencia del cliente es obligatoria")
@@ -64,7 +72,7 @@ id_deuda = str(id_deuda).strip().replace('.0','') if id_deuda else ''
 
 # Paso Siguiente: Obtener las Deudas Activas y la Última Actualización
 # --- Deudas Activas ---
-deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente)
+deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas)
 
 # Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
 if deudas_activas_df.empty:
@@ -90,7 +98,7 @@ if deudas_activas_df.empty:
         st.stop()
 
     # Obtenemos las Deudas Activas con la Referencia Obtenida
-    deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente)
+    deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas)
 else:
     ref_antigua = referencia_cliente
 

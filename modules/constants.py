@@ -81,11 +81,37 @@ SELECT
 FROM dealer_public.berex_credit_repair_debts bcrd
 
 LEFT JOIN dealer_public.berex_credit_repairs AS bcr
-    ON bcr.id = bcrd.credit_repair_id
+    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit')
+"""
 
-WHERE 
-    bcr.status IN ('active','partial_credito')
-    AND bcr.country = 'co'
+QUERY_DEUDAS = """
+SELECT
+    bcrd.id AS Id_Deuda,
+    bcrd.bank_reference AS Referencia,
+    bcr.document_number AS Cedula,
+    bcr.full_name AS Nombre_Cliente,
+    bcrd.financial_entity_name AS Banco,
+    bcrd.credit_number AS Numero_Credito,
+    bcrd.amount AS PaB_Origen,
+    bcrd.state AS Estado_Deuda,
+    bcrd.sub_state AS Sub_Estado_Deuda,
+    ll.id as Lead_Id
+FROM dealer_public.berex_credit_repair_debts AS bcrd
+INNER JOIN dealer_public.berex_credit_repairs AS bcr
+    ON bcr.id = bcrd.credit_repair_id AND bcr.bank_reference = '{reference}'
+LEFT JOIN vanex_public.leads_lead AS ll
+    ON bcr.tracker_id = ll.tracker_id
+"""
+
+QUERY_PLANES = """
+SELECT
+    vsp.success_commission_percentage AS pricing,
+    vsp.debts as debts
+FROM vanex_public.settlement_plan AS vsp
+WHERE vsp.winner IS TRUE
+    AND vsp.lead_id = {lead_id}
+QUALIFY
+    ROW_NUMBER() OVER (PARTITION BY vsp.lead_id ORDER BY vsp.updated_at DESC) = 1
 """
 
 QUERY_ACTIVE_DEBTS = """
