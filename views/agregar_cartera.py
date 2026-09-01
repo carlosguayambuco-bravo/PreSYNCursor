@@ -591,8 +591,7 @@ if tab_escogencia.open:
         )
 
         # Carga de las Deudas a Identificar (con Cambios Locales aplicados)
-        with st.spinner("⏳ Cargando Deudas a Identificar desde Google Sheets..."):
-            cruce_df = load_pendiente_cruce_con_cambios()
+        cruce_df = load_pendiente_cruce_con_cambios()
 
         # Sección de Filtros
         cruce_filtrado = mostrar_filtros_cruce(cruce_df=cruce_df)

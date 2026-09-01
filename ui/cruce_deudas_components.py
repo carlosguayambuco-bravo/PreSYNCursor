@@ -88,7 +88,7 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
 
     # Paso 4: Ayudas Auxiliares (Toggle de Id_Definitivo, Ordenamiento y Archivo de Origen)
     with st.expander("Ayudas Auxiliares", expanded=False):
-        colToggle, colOrdenamiento, colArchivo = st.columns(3)
+        colToggle, colOrdenamiento, colArchivo = st.columns(3, vertical_alignment="center")
 
         with colToggle:
             incluir_con_definitivo = st.toggle(
@@ -97,6 +97,7 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
                 key="filtro_cruce_incluir_definitivo_input",
                 help="Activar para incluir también las deudas que ya tienen un Id_Definitivo asignado.",
             )
+            st.caption("Por defecto los cruces exactos **NO se incluyen** para identificar")
 
         with colOrdenamiento:
             # El Ordenamiento por Cédula o Nombre solo tiene sentido si hay más de un valor distinto
