@@ -49,12 +49,23 @@ if tabSolicitudes.open:
 
         st.divider()
 
-        modo_plantilla = st.toggle(
-            label="Plantilla en Portafolio",
-            value=True,
-            help="Generar Plantilla agrupando los Datos de Deudas",
-            key="plantilla_en_portafolio_gestionar_solicitudes"
-        )
+
+        # Creamos 2 Columnas: Columna de Portafolio y Columna de Todas las Solicitudes
+        colPortafolio, colTodas = st.columns(2)
+        with colPortafolio:
+            modo_plantilla = st.toggle(
+                label="Plantilla en Portafolio",
+                value=True,
+                help="Generar Plantilla agrupando los Datos de Deudas",
+                key="plantilla_en_portafolio_gestionar_solicitudes"
+            )
+        with colTodas:
+            modo_total = st.toggle(
+                label="Usar todas las Solicitudes",
+                value=False,
+                help="Generar Plantilla con todos los datos de solicitudes (inlcuyendo con respuesta)",
+                key="plantilla_total_gestionar_solicitudes"
+            )
 
         mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df=solicitudes_filtered)
 
@@ -63,7 +74,8 @@ if tabSolicitudes.open:
         with colDescargar:
             download_bytes = generar_descarga_masiva_solicitudes(
                 solicitudes_df=solicitudes_filtered,
-                en_portafolio=modo_plantilla
+                en_portafolio=modo_plantilla,
+                usar_total=modo_total,
             )
             st.download_button("Descargar Solicitudes",
                 download_bytes,
@@ -82,7 +94,7 @@ if tabSolicitudes.open:
                 key="subir_solicitudes_button",
                 help="Haz clic para subir las solicitudes filtradas a Google Sheets",
                 type="primary",
-                disabled = (mask_sin_responder).sum() == 0,
+                disabled = ((mask_sin_responder).sum() == 0) and not modo_total,
                 )
 
         with colCopiar:
@@ -104,7 +116,8 @@ if tabSolicitudes.open:
         if subido_sheets:
             success = subir_masivo_plantilla_solicitudes(
                 solicitudes_df=solicitudes_filtered,
-                en_portafolio=modo_plantilla
+                en_portafolio=modo_plantilla,
+                usar_total=modo_plantilla,
                 )
             if success:
                 st.toast("Las solicitudes filtradas se han subido correctamente a Google Sheets.", icon="✅")

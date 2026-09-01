@@ -653,20 +653,22 @@ def obtener_link_acuerdo_pago(file_id: str) -> str:
     """
     return f"https://drive.google.com/open?id={file_id}"
 
-def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_portafolio: bool = False) -> pd.DataFrame:
+def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_portafolio: bool = False, usar_total: bool =False) -> pd.DataFrame:
     """
     Genera una plantilla masiva de solicitudes a partir de un DataFrame de solicitudes.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
         modo_portafolio: (bool, default False): Si se agrupan las Solicitudes por Portafolio o se dejan por Deuda
+        usar_total: (bool, default False): Si se dejan todas las Solicitudes o solo sin responder
 
     Returns:
         pd.DataFrame: DataFrame con la plantilla masiva de solicitudes.
     """
     # Paso 0: Dejar solicitudes sin responder
-    mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
-    solicitudes_df = solicitudes_df[mask_sin_responder]
+    if not usar_total:
+        mask_sin_responder = obtener_mascara_sin_responder(solicitudes_df)
+        solicitudes_df = solicitudes_df[mask_sin_responder]
 
     # Paso 1: Iterar sobre cada solicitud y llenar la plantilla
     filas = []
@@ -720,19 +722,20 @@ def generar_plantilla_masiva_solicitudes(solicitudes_df: pd.DataFrame, modo_port
 
     return plantilla_df
 
-def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame, en_portafolio: bool) -> bytes:
+def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame, en_portafolio: bool, usar_total: bool) -> bytes:
     """
     Genera un archivo CSV para la descarga masiva de solicitudes.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes a descargar.
         en_portafolio (bool): Si se genera el DF en portafolio o por Deuda
+        usar_total (bool): Si se usan todas las Solicitudes
 
     Returns:
         bytes: Contenido del archivo CSV en formato binario.
     """
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
-    download_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio)
+    download_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio, usar_total=usar_total)
     if download_df.empty:
         return bytes()
 
@@ -741,13 +744,14 @@ def generar_descarga_masiva_solicitudes(*,solicitudes_df: pd.DataFrame, en_porta
 
     return csv_bytes
 
-def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame, en_portafolio: bool) -> bool:
+def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame, en_portafolio: bool, usar_total: bool) -> bool:
     """
     Sube una plantilla masiva de solicitudes a Google Sheets.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes a subir.
         en_portafolio (bool): Si se genera el DF en portafolio o por Deuda
+        usar_total (bool): Si se genera con todas las Solicitudes (incluyendo respuestas)
 
     Returns:
         bool: True si la subida fue exitosa, False en caso contrario.
@@ -757,7 +761,7 @@ def subir_masivo_plantilla_solicitudes(solicitudes_df: pd.DataFrame, en_portafol
 
     # Paso 1: Generar la Plantilla Masiva de Solicitudes
     with st.spinner("Subiendo Información a Google Sheets..."):
-        plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio)
+        plantilla_df = generar_plantilla_masiva_solicitudes(solicitudes_df, modo_portafolio=en_portafolio, usar_total = usar_total)
 
         # Paso 2: Subir la Plantilla Masiva a Google Sheets
         success = upload_massive_solicitudes_filtered_plantilla(plantilla_df)
