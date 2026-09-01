@@ -1033,6 +1033,7 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
 
     # 2.1 Ejecutamos la Query de las Deudas
     deudas_df = execute_query_cache(query_deudas)
+
     # 2.2 Obtenemos el lead_id
     lead_id = deudas_df['Lead_Id'].iloc[0]
     if pd.notna(lead_id):
@@ -1067,6 +1068,7 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
         deudas_df,
         pl_df,
         on=['PaB_Origen','Banco'],
+        how="left"
     )
 
     # Paso 5: Filtramos si es necesario las liquidaciones
