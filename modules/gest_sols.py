@@ -128,9 +128,10 @@ def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     maskSinTocar = (solicitud["Estado_Solicitud"] == "Sin Tocar") | (solicitud["Estado_Solicitud"] == "Solicitado")
     maskBajoComite = solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 3 and solicitud["Estado_Solicitud"] == "Bajo Comité"
     maskTitularIlocalizable = solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 3 and solicitud["Estado_Solicitud"] == "Titular Ilocalizable"
+    maskActual = not solicitud['Es_Historico']
     banner_manager = get_banned_manager()
     maskSinBan = (not banner_manager.is_banned(solicitud["ID_Solicitud"]))
-    return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan
+    return (maskSinTocar or maskBajoComite or maskTitularIlocalizable) and maskSinBan and maskActual
 
 def es_solicitud_aprobacion_necesaria(solicitud: pd.Series) -> bool:
     """
@@ -145,6 +146,24 @@ def es_solicitud_aprobacion_necesaria(solicitud: pd.Series) -> bool:
     maskAprobComite = (solicitud["Metadata_Solicitud"].get("Estado_Comite", 0) == 1) and (solicitud["Estado_Solicitud"] == "Bajo Comité")
     maskAprobIlocalizado = (solicitud["Metadata_Solicitud"].get("Estado_Titular_Ilocalizable", 0) == 1) and (solicitud["Estado_Solicitud"] == "Titular Ilocalizable")
     return (maskAprobComite or maskAprobIlocalizado)
+
+def es_acuerdo_reasignable(solicitud: pd.Series) -> Optional[bool]:
+    """Determina si una solicitud de acuerdo de pago específica es reasignable
+
+    Args:
+        solicitud (pd.Series): Información de la Solicitud
+
+    Returns:
+        Optional[bool]: True si la solicitud es reasignable, False en caso contrario. None si no aplica
+    """    
+    # Paso 1: Verificar que sea de Acuerdo y Exitosa, y que no sea Histórica y que no este liquidada
+    if solicitud['Estado_Solicitud'] != "Exitosa" or solicitud['Tipo_Solicitud'] == 'Validación' or solicitud['Es_Historico'] or ("Liquidado" in (obtener_estado_liquidacion(solicitud=solicitud) or "a")):
+        return None
+    # Paso 2: Verificamos que la Fecha_Limite_Pago no se haya cumplido
+    elif solicitud['Fecha_Limite_Pago'].normalize() >= pd.Timestamp.now('America/Bogota').tz_localize(None).normalize():
+        return False
+    else: # De caso contrario si es Reasignable
+        return True
 
 def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal["Comité", "Titular Ilocalizable"]]:
     """
@@ -177,8 +196,9 @@ def obtener_mascara_sin_responder(solicitudes_df: pd.DataFrame) -> pd.Series:
     maskBajoComite = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Comite", 0) == 3) & (solicitudes_df["Estado_Solicitud"] == "Bajo Comité")
     maskTitularIlocalizable = solicitudes_df["Metadata_Solicitud"].apply(lambda x: x.get("Estado_Titular_Ilocalizable", 0) == 3) & (solicitudes_df["Estado_Solicitud"] == "Titular Ilocalizable")
     banner_manager = get_banned_manager()
+    maskActual = ~(solicitudes_df['Es_Historico'])
     maskSinBan = solicitudes_df["ID_Solicitud"].apply(lambda x: not banner_manager.is_banned(x))
-    return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan
+    return (maskSinTocar | maskBajoComite | maskTitularIlocalizable) & maskSinBan & maskActual
 
 def obtener_mascara_exitosas(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
@@ -191,6 +211,29 @@ def obtener_mascara_exitosas(solicitudes_df: pd.DataFrame) -> pd.Series:
         pd.Series: Serie con las solicitudes exitosas.
     """
     return solicitudes_df["Estado_Solicitud"] == "Exitosa"
+
+def obtener_mascara_reasignable(solicitudes_df: pd.DataFrame) -> pd.Series:
+    """Filtra las Solicitudes con Posibilidad de Reasignación ante Acuerdos Caídos
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con todas las solicitudes.
+
+    Returns:
+        pd.Series: Serie con las solicitudes reasignables (Acuerdos de Pago con Fecha_Limite_Pago Vencida).
+    """
+    # Creamos 5 Máscaras:
+    # Máscara 1: Tipo de Solicitud
+    maskTipo = (solicitudes_df['Tipo_Solicitud'] != 'Validación')
+    # Máscara 2: Exitosa
+    maskExitosa = (solicitudes_df["Estado_Solicitud"] == "Exitosa")
+    # Máscara 3: Fecha Vencida
+    maskVencida = solicitudes_df['Fecha_Limite_Pago'].dt.normalize() < pd.Timestamp.now('America/Bogota').tz_localize(None).normalize()
+    # Máscara 4: Que no sea Histórica
+    maskHist = ~(solicitudes_df['Es_Historico'])
+    # Máscara 5: Que no sea Liquidado
+    maskLiq = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) == "Sin Liquidar" # type: ignore
+    # Devolvemos la Consecución de Estas
+    return maskTipo & maskExitosa & maskVencida & maskHist & maskLiq
 
 def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
     """
@@ -297,7 +340,10 @@ def distribuir_resultado_solicitud(
     idsFinal = '-'.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
     maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
     maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro']) | (solicitudes_df['Casa_Cobro'] == casa_cobro_old)
-    maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
+    if solicitud['Tipo_Solicitud'] == 'Validación':
+        maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
+    elif solicitud['Tipo_Solicitud'] in ['Oferta de Acuerdo','Acuerdo de Pago']:
+        maskTipo = solicitudes_df['Tipo_Solicitud'].isin(['Oferta de Acuerdo','Acuerdo de Pago'])
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
     maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
     maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder & maskDiffID
@@ -839,6 +885,9 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         'toggle_exitosas_solicitud_nego_input',
         'toggle_aprobacion_solicitud_nego_input',
         'toggle_orden_fecha_solicitud_nego_input',
+        "fecha_min_solicitud_nego_input",
+        "fecha_max_solicitud_nego_input",
+        "reasignable_solicitud_nego_input",
     ]
     keys_to_list = [
         'id_deuda_solicitud_nego_input',
@@ -857,6 +906,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         'toggle_exitosas_solicitud_nego_input',
         'toggle_aprobacion_solicitud_nego_input',
         'toggle_orden_fecha_solicitud_nego_input',
+        'reasignable_solicitud_nego_input',
     ]
 
     for key in keys_to_remove:
@@ -1180,10 +1230,12 @@ def filtrar_solicitudes_por_usuario_actual(solicitudes_df: pd.DataFrame) -> pd.D
     """
     # Paso 1: Obtener los Correos a Cargo del Usuario Actual
     correos_a_cargo = obtener_correos_a_cargo_usuario_actual()
-    # Paso 2: Filtrar el DataFrame de Solicitudes por los Correos a Cargo
+    # Paso 2: Filtrar el DataFrame de Solicitudes por los Correos a Cargo o Reasignables
+    mask_reasignable = obtener_mascara_reasignable(solicitudes_df)
     mask_correos_lider = solicitudes_df['Correo'].isin(correos_a_cargo)
     mask_correos_usuario_actual = (solicitudes_df['Correo'] == st.session_state.get('user_email', ''))
-    mask_final = (mask_correos_lider | mask_correos_usuario_actual)
+    mask_final = (mask_correos_lider | mask_correos_usuario_actual | mask_reasignable)
+    # Paso 3: Crear el DF Dejando los Reasignables primero
     return solicitudes_df[mask_final]
 
 # Función Auxiliar para crear la plantilla de solicitud de acuerdo de pago

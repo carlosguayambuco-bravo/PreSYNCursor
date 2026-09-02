@@ -2,8 +2,6 @@
 # Librerías de Python
 from datetime import datetime
 from typing import Dict, List, Optional, Literal, NotRequired
-from click import Option
-from pandera import Bool
 from typing_extensions import TypedDict
 # Librerías de Terceros
 import pandas as pd
@@ -12,41 +10,56 @@ from pandera.typing import Series
 # Librerías Locales
 from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD
 
+class DeudasSolicitud(TypedDict):
+    Id_Deuda: str
+    Banco: str
+    Numero_Credito: str
+    Num_Cuotas: int
+    Monto_Actual: NotRequired[float]
+    Monto_Propuesto: NotRequired[float]
+
+class MetadataSolicitud(TypedDict):
+    Comentario_Negociador: str
+    Nombre_Cliente: str
+    Estado_Comite: NotRequired[int]
+    Estado_Titular_Ilocalizable: NotRequired[int]
+    Pago_Total_Obligatorio: NotRequired[bool]
+    Metodo_Pago: NotRequired[Literal['Efectivo-Cheque','PSE','Transferencia']]
+    Comentario_Ejecutivo: NotRequired[str]
+    Fue_Llamada: NotRequired[bool]
+    Es_Reasignado: NotRequired[bool]
+    Id_Acuerdo_Pago: NotRequired[str]
+    Origen_Solicitud: NotRequired[str]
+    Id_Respuesta_Autom: NotRequired[str]
+    Fecha_Solicitado: NotRequired[str]
+    Max_Descuento_Otorgado: NotRequired[bool]
+    Addendums: NotRequired[List[DeudasSolicitud]]
+
 class SolicitudesSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de solicitudes.
     """
-    ID_Solicitud: str = pa.Field(unique=True)  # Aseguramos que ID_Solicitud sea único
-    Timestamp: pa.dtypes.Timestamp
-    Correo: str = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")  # Validación de correo electrónico
-    Referencia: str
-    Cedula: str = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
-    Ids_Deuda: str  # Lista de Ids de Deuda como cadena separada por -
-    Casa_Cobro: str
-    Tipo_Solicitud: str = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
-    Datos_Solicitud: str # Es un JSON que contiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas y Monto_Actual
-    Fecha_Esperada_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha esperada de pago
-    Tipo_Pago: str = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
-    Ejecutivo: str = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
-    Metadata_Solicitud: str  # Es un JSON que contiene:
-    # - Estado_Comite: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
-    # - Estado_Titular_Ilocalizable: int (0: NA, 1: Solicitado, 2: Aprobado, 3: Rechazado)
-    # - Pago_Total_Obligatorio: bool
-    # - Metodo_Pago: str ('Efectivo-Cheque','PSE','Transferencia')
-    # - Comentario Ejecutivo: str
-    # - Comentario Negociador: str
-    # - Fue_Llamada: bool
-    # - Id_Acuerdo_Pago: str
-    # - Origen_Acuerdo: str (ID_Solicitud)
-    Estado_Solicitud: str = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
-    Fecha_Respuesta: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
-    Fecha_Limite_Pago: pa.dtypes.Timestamp = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
-    JSON_Respuesta: str = pa.Field(nullable=True)  # Es un JSON que contiene la respuesta a la solicitud por cada Deuda
-    # Tiene: Id_Deuda, Banco, Numero_Credito, Monto_Propuesto, Num_Cuotas
+    ID_Solicitud: Series[str] = pa.Field(unique=True)  # Aseguramos que ID_Solicitud sea único
+    Timestamp: Series[pa.dtypes.Timestamp]
+    Correo: Series[str] = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")  # Validación de correo electrónico
+    Referencia: Series[str]
+    Cedula: Series[str] = pa.Field(str_matches=r"^[\d\.]{6,15}$")  # Validación de cédula
+    Ids_Deuda: Series[str]  # Lista de Ids de Deuda como cadena separada por -
+    Casa_Cobro: Series[str]
+    Tipo_Solicitud: Series[str] = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
+    Datos_Solicitud: Series[list[DeudasSolicitud]]
+    Fecha_Esperada_Pago: Series[pa.dtypes.Timestamp] = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha esperada de pago
+    Tipo_Pago: Series[str] = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
+    Ejecutivo: Series[str] = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
+    Metadata_Solicitud: Series[MetadataSolicitud]
+    Estado_Solicitud: Series[str] = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido
+    Fecha_Respuesta: Series[pa.dtypes.Timestamp] = pa.Field(nullable=True)  # Puede ser nulo si no hay respuesta
+    Fecha_Limite_Pago: Series[pa.dtypes.Timestamp] = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
+    JSON_Respuesta: Series[list[DeudasSolicitud]] = pa.Field(nullable=True)
+    Es_Historico: Series[bool]
 
     class Config:
         strict = True  # Validación estricta de columnas
-        coerce = True  # Coerción automática de tipos
 
 class AhorroSchema(pa.DataFrameModel):
     """
@@ -320,3 +333,11 @@ class OutputCruceSchema(pa.DataFrameModel):
     Ids_Candidatos: Series[List[str]]
     Etiqueta_Registro: str = pa.Field(isin=['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO'])
     Motivos_Etiqueta: str
+
+class ActualizacionesSchema(pa.DataFrameModel):
+    Correo: str = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")
+    Id_Deuda: str
+    Etiqueta_Act: str
+    Referencia: str
+    Fecha_Act: pa.dtypes.Timestamp
+    Nombre: str

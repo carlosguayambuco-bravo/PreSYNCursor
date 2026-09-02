@@ -91,6 +91,28 @@ def getMesOperativo() -> pd.Timestamp:
 
     return mes_operativo.replace(day=1)  # Retornamos el primer día del mes operativo
 
+# Función Auxiliar para convertir un Color a RGBA con Transparencia
+def color_a_rgba(color: str, alpha: float) -> str:
+    """
+    Convierte un color en formato hexadecimal (#RRGGBB) o RGB (rgb(r, g, b)) a
+    un string RGBA con la transparencia indicada.
+
+    Args:
+        color (str): Color en formato hexadecimal o RGB.
+        alpha (float): Transparencia a aplicar al color (0.0 a 1.0).
+
+    Returns:
+        str: Color en formato rgba(r, g, b, alpha).
+    """
+    color = str(color).strip()
+    if color.startswith("#"):
+        color = color.lstrip("#")
+        r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+    else:
+        componentes = color.replace("rgba(", "").replace("rgb(", "").replace(")", "").split(",")[:3]
+        r, g, b = (int(componente) for componente in componentes)
+    return "rgba({}, {}, {}, {})".format(r, g, b, alpha)
+
 # Función Auxiliar para Realizar el Parsing a un String de %
 def parsePercentage(value, default_value: float = 0.15) -> float:
     if isinstance(value, str):

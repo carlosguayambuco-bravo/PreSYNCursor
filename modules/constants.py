@@ -266,6 +266,8 @@ CCS_CREDITO = [
     "nmcaro@gobravo.com.co"
 ]
 
+CORREOS_NO_RELEVANTES = ['humbertoch@gobravo.io','nmcaro@gobravo.io']
+
 # -- Ids de Spreadsheets de Sheets
 SOLICITUDES_SHEET_ID = '1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk'
 SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
@@ -277,6 +279,7 @@ LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
 HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
+ACTUALIZACIONES_SHEET_ID = '1O8OHuVhgwhLw8XYEBf1uBzLYrxQ45rPiZecHOnAa1Go'
 
 # --- Configuraciones del Cruce de Deudas ---
 # --- Constantes del Algoritmo ---

@@ -18,9 +18,9 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
-from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
+from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
 # Función para Mostrar los Filtros Generales de una Solicitud (Versión Ejecutivo)
 def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFrame) -> pd.DataFrame:
@@ -375,6 +375,13 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
             key="estado_liq_nego_input"
         )
 
+        toggle_reasignable = st.toggle(
+            label="**👁️ Reasignable**",
+            value=False,
+            key="reasignable_solicitud_nego_input",
+            help="Marcar para Ver los Acuerdos Caídos Reasignables"
+        )
+
     # Ahora Creamos un Expander para los Filtros Específicos, que son:
     # ID_Solicitud, Referencia, Id_Deuda, Banco, Persona que Solicito
     with st.expander("✴️ **Filtros Específicos**", expanded=False):
@@ -513,6 +520,11 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
     # Aplicamos el Ordenamiento por Fecha
     solicitudes_df = solicitudes_df.sort_values(by=["Fecha_Respuesta","Timestamp"], ascending=toggle_orden_fecha, na_position="last")
 
+    # Por Último, dejamos los Reasignables Primero
+    if toggle_reasignable:
+        maskReasignable = obtener_mascara_reasignable(solicitudes_df)
+        solicitudes_df = solicitudes_df[maskReasignable]
+
     # Por Último devolvemos el DataFrame de Solicitudes filtrado
     return solicitudes_df
 
@@ -526,6 +538,8 @@ def mostrar_boton_actualizar_solicitudes(
     ) -> None:
     # Primero: Mostrar el Boton de la Solicitud y el Botón de Cancelar
     colCancelar, colBoton = st.columns([1, 1])
+
+    es_historica = solicitud['Es_Historico']
 
     with colCancelar:
         if st.button(
@@ -543,7 +557,12 @@ def mostrar_boton_actualizar_solicitudes(
             key="finalizar_solicitud_{}".format(solicitud['ID_Solicitud']),
             width="stretch",
             type="primary",
+            disabled=es_historica,
         )
+
+    if es_historica:
+        st.error("No se puede Cambiar una Solicitud del Histórico",icon="❌",title="Error de Cambio")
+
     if actualizar_solicitud:
         with st.spinner("Subiendo Solicitud a Google Sheets..."):
             # Definimos las Keys del Session State para rastrear el Estado de la Subida del Acuerdo
@@ -1455,8 +1474,8 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     addendums = []
     for i in range(1, st.session_state[key_addendums_count]+1):
 
-        addendum_banco = st.session_state['addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)]
-        addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)]
+        addendum_banco = st.session_state['addendums_banco_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] or "Sin Banco"
+        addendum_numero_credito = st.session_state['addendums_numero_credito_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)] or "Sin Número Crédito"
         addendum_monto_actual = cleanNumber(st.session_state['addendums_monto_actual_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)], default_nan=0.0)
         addendum_monto_propuesto = cleanNumber(st.session_state['addendums_monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], i, sufijo)], default_nan=0.0)
         if cuotas_input == "Por Deuda":
@@ -2826,6 +2845,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
     # Por Último: Mostramos el Botón para Responder la Solicitud
     solicitud_ya_gestionada = not es_solicitud_sin_responder(solicitud)
+    solicitud_historica = solicitud['Es_Historico']
 
     # Creamos el Expander para Mostrar los Datos de la Solicitud
     with st.expander(expander_name, expanded=is_main, key=expander_key, on_change="rerun"):
@@ -2996,7 +3016,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             if st.button(
                 label="Responder Solicitud",
                 key="responder_solicitud_{}".format(solicitud['ID_Solicitud']),
-                disabled=solicitud_ya_gestionada,
+                disabled=solicitud_ya_gestionada or solicitud_historica,
                 type = "primary",
                 width="stretch",
                 icon="✅",
@@ -3008,11 +3028,13 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             if st.button(
                 label="Modificar Respuesta",
                 key="modificar_respuesta_solicitud_{}".format(solicitud['ID_Solicitud']),
-                disabled=not puede_modificar,
+                disabled=(not puede_modificar) or solicitud_historica,
                 type = "secondary",
                 help="Haga clic para modificar la respuesta de la solicitud. Solo disponible para Solicitudes ya respondidas.",
             ):
                 dialog_modificar_respuesta_solicitud(solicitud=solicitud)
+        if solicitud_historica:
+            st.error("No se puede cambiar el Histórico de las Solicitudes",icon="❌",title="Error de Cambio de Solicitudes")
 
         mostrar_subestado_transitorio(solicitud=solicitud)
         comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','')
@@ -3063,7 +3085,11 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         }[estado_liquidacion]
         expander_name = "{} | :{}-background[**{}**]".format(expander_name, color_liquidacion, estado_liquidacion)
 
+    if es_acuerdo_reasignable(solicitud):
+        expander_name = "{} | :orange-background[**REASIGNABLE**]".format(expander_name)
+
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
+    solicitud_historica = solicitud['Es_Historico']
 
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
 
@@ -3199,6 +3225,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     help="Haga clic para aprobar la solicitud. Esta acción enviará la solicitud al aliado.",
                     type="primary",
                     width="stretch",
+                    disabled=solicitud_historica,
                 )
             with colDesaprobar:
                 hacer_desaprobacion = st.button(
@@ -3207,6 +3234,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     help="Haga clic para desaprobar la solicitud. Esta acción enviará la solicitud al aliado.",
                     type="secondary",
                     width="stretch",
+                    disabled=solicitud_historica,
                 )
 
             if hacer_aprobacion or hacer_desaprobacion:
@@ -3223,6 +3251,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 else:
                     st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aceptar_peticion else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
 
+            if solicitud_historica:
+                st.error("No se puede modificar una solicitud Histórica",icon="❌",title="Sin Posibilidad de Modificar")
             # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
             return 
 
@@ -3273,6 +3303,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                     icon="🔴"
                 )
 
+            if solicitud_historica:
+                st.warning("Ten en cuenta que la Solicitud es Histórica, el descuento puede cambiar",icon="⚠️",title="Alerta de Solicitud")
+
             # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
             coLGenAC, colGenCO, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
 
@@ -3302,28 +3335,6 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colBotonCopiar:
                 txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
-
-# Función Auxiliar para convertir un Color a RGBA con Transparencia
-def _color_a_rgba(color: str, alpha: float) -> str:
-    """
-    Convierte un color en formato hexadecimal (#RRGGBB) o RGB (rgb(r, g, b)) a
-    un string RGBA con la transparencia indicada.
-
-    Args:
-        color (str): Color en formato hexadecimal o RGB.
-        alpha (float): Transparencia a aplicar al color (0.0 a 1.0).
-
-    Returns:
-        str: Color en formato rgba(r, g, b, alpha).
-    """
-    color = str(color).strip()
-    if color.startswith("#"):
-        color = color.lstrip("#")
-        r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-    else:
-        componentes = color.replace("rgba(", "").replace("rgb(", "").replace(")", "").split(",")[:3]
-        r, g, b = (int(componente) for componente in componentes)
-    return "rgba({}, {}, {}, {})".format(r, g, b, alpha)
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
@@ -3665,7 +3676,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                         line=dict(color=color_linea, width=2, shape=line_shape, smoothing=smoothing),
                         marker=dict(size=5),
                         fill="tozeroy",
-                        fillcolor=_color_a_rgba(color_linea, 0.10),
+                        fillcolor=color_a_rgba(color_linea, 0.10),
                         hovertemplate="<b>Solicitudes: {}</b><br>Fecha: %{{x|%Y-%m-%d}}<br>Cantidad: %{{y}}<extra></extra>".format(tipo),
                     ))
             else:
@@ -3716,7 +3727,7 @@ def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_na
     # Paso 2: Sacar KPIs
     # Número de Solicitudes (con Exitosas y % de Exitosas)
     num_solicitudes = len(solicitudes)
-    num_solicitudes_exitosas = np.sum(solicitudes["Estado_Solicitud"] == "Exitosa")
+    num_solicitudes_exitosas = (solicitudes["Estado_Solicitud"] == "Exitosa").sum()
     porcentaje_exitosas = (num_solicitudes_exitosas / num_solicitudes) * 100 if num_solicitudes > 0 else 0
     # Numero de Deudas y Clientes Solicitados
     num_deudas = solicitudes["Datos_Solicitud"].apply(len).sum()

@@ -13,14 +13,91 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
+
+# Función Auxiliar para Normalizar una Deuda al tipo DeudasSolicitud
+def normalizeDeuda(deuda: dict) -> dict:
+    deuda = dict(deuda)
+    numero_credito = deuda.get('Numero_Credito')
+    if numero_credito is not None:
+        if isinstance(numero_credito, float) and numero_credito.is_integer():
+            numero_credito = int(numero_credito)
+        deuda['Numero_Credito'] = str(numero_credito).strip()
+    return deuda
+
+# Función Auxiliar para Normalizar la Metadata al tipo MetadataSolicitud
+def normalizeMetadata(metadata: dict) -> dict:
+    metadata = dict(metadata)
+    comentario = metadata.get('Comentario_Negociador')
+    if comentario is not None and not isinstance(comentario, str):
+        metadata['Comentario_Negociador'] = str(comentario)
+    if metadata.get('Metodo_Pago') == '':
+        metadata.pop('Metodo_Pago', None)
+    if 'Addendums' in metadata and metadata['Addendums']:
+        metadata['Addendums'] = [normalizeDeuda(dd) for dd in metadata['Addendums']]
+    return metadata
+
+# Función Auxiliar para Limpiar Solicitudes
+def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataFrame[SolicitudesSchema]:
+    # Volvemos las Columnas Necesarias a Timestamp
+    for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
+        solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)
+
+    # Volvemos las Columnas Referencia, ID_Solicitud y Cedula a String
+    for col in ['Referencia', 'ID_Solicitud', 'Cedula', 'Ids_Deuda']:
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+
+    # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
+    for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
+        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
+
+    # Imputamos Ejecutivo con 'Sin Asignar'
+    imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
+
+    # Agregamos la Columna Es_Historico como False
+    solicitudes_df['Es_Historico'] = es_historico
+
+    # Volvemos cada JSON a su respectivo Esquema
+    solicitudes_df['Datos_Solicitud'] = solicitudes_df['Datos_Solicitud'].apply(
+        lambda d: [DeudasSolicitud(**normalizeDeuda(dd)) for dd in d] if d else []
+    )
+    solicitudes_df['JSON_Respuesta'] = solicitudes_df['JSON_Respuesta'].apply(
+        lambda d: [DeudasSolicitud(**normalizeDeuda(dd)) for dd in d] if d else []
+    )
+    solicitudes_df['Metadata_Solicitud'] = solicitudes_df['Metadata_Solicitud'].apply(
+        lambda d: MetadataSolicitud(**normalizeMetadata(d))
+    )
+
+    # Validamos el DataFrame con el esquema (Si no esta vacio)
+    if not solicitudes_df.empty:
+        solicitudes_df = SolicitudesSchema.validate(solicitudes_df, lazy=True) 
+    else:
+        solicitudes_df = SolicitudesSchema.empty()
+
+    return solicitudes_df
+
+#--> Carga de Solicitudes Históricas
+@st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=WEEK_WAIT)
+def load_solicitudes_hist()-> DataFrame[SolicitudesSchema]:
+
+    # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "Solicitudes_Hist"
+    solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_Hist')
+
+    # Limpiamos el DF
+    solicitudes_df = clean_solicitudes(solicitudes_df=solicitudes_df, es_historico=False)
+
+    # Devolvemos el DF
+    return solicitudes_df
 
 #--> Carga de Solicitudes del Mes en Curso
 @st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=MIN_10_WAIT)
@@ -35,46 +112,19 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     # Guardamos los Headers en el Session State
     st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
 
-    # Volvemos las Columnas Necesarias a Timestamp
-    for col in ['Timestamp', 'Fecha_Esperada_Pago', 'Fecha_Respuesta', 'Fecha_Limite_Pago']:
-        solicitudes_df[col] = pd.to_datetime(solicitudes_df[col], errors='coerce', dayfirst=False)
-
-    # Volvemos las Columnas Referencia, ID_Solicitud y Cedula a String
-    for col in ['Referencia', 'ID_Solicitud', 'Cedula', 'Ids_Deuda']:
-        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
-
-    # Cargamos los Cambios de Referencia y los Aplicamos
-    changeRefDict = load_reference_changes()
-    solicitudes_df['Referencia'] = solicitudes_df['Referencia'].apply(lambda s: changeRefDict.get(s,s))
-
-    # Guardamos el Primer ID_Solicitud
-    st.session_state["first_id_solicitud"] = solicitudes_df['ID_Solicitud'].iloc[0] if not solicitudes_df.empty else None
-
-    # Imputamos Ejecutivo con 'Sin Asignar'
-    imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
+    solicitudes_df = clean_solicitudes(solicitudes_df=solicitudes_df, es_historico=False)
 
     # Corregimos los IDs de Solicitud Duplicados (si existen) antes de validar el esquema
     solicitudes_df = fix_duplicated_solicitud_ids(solicitudes_df)
-
-    # Validamos el DataFrame con el esquema (Si no esta vacio)
-    if not solicitudes_df.empty:
-        solicitudes_df = SolicitudesSchema.validate(solicitudes_df) 
-    else:
-        solicitudes_df = SolicitudesSchema.empty()
-
-    # Hacemos Parsing de la Columna Datos_Solicitud y Metadata_Solicitud a JSON
-    for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
-        solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
-    
 
     # Por último, reiniciamos los cambios locales
     st.session_state['local_solicitudes_changes'] = []
 
     # Devolvemos el DataFrame
-    return solicitudes_df
+    return solicitudes_df # type: ignore
 
 # Función Auxiliar para Corregir los IDs de Solicitud Duplicados en la Worksheet y en el DF
-def fix_duplicated_solicitud_ids(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
+def fix_duplicated_solicitud_ids(solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
     # Verificamos si existen IDs Duplicados en las Solicitudes (dejando el primero de cada grupo)
     duplicated_mask = solicitudes_df['ID_Solicitud'].duplicated(keep='first')
 
@@ -109,9 +159,16 @@ def fix_duplicated_solicitud_ids(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
     return solicitudes_df
 
 # --> Carga de Solicitudes del Mes en Curso (Aplicando los Cambios locales)
-def load_current_month_solicitudes() -> pd.DataFrame:
+def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     # 1: Cargamos las Solicitudes del Mes en Curso desde Google Sheets
     solicitudes_df = load_solicitudes_mec()
+    # 1.1: Cargamos el Histórico si es Necesario
+    if st.session_state.get("cargar_historico_solicitudes", False):
+        hist_df = load_solicitudes_hist()
+        # Unimos los DFs
+        solicitudes_df = pd.concat([solicitudes_df,hist_df], ignore_index=True)
+        # Eliminamos duplicados por ID_Solicitud dejando el primer registro
+        solicitudes_df = solicitudes_df.drop_duplicates(subset=['ID_Solicitud'],keep="first")
 
     st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
 
@@ -147,6 +204,9 @@ def load_current_month_solicitudes() -> pd.DataFrame:
 
         # Restauramos el Indice
         sols_ajustadas = sols_ajustadas.reset_index(drop=True)
+
+    # Validamos el DF
+    sols_ajustadas = SolicitudesSchema.validate(sols_ajustadas, lazy=True)
 
     # 3: Devolver el Nuevo DF
     return sols_ajustadas
@@ -948,6 +1008,60 @@ def load_pendiente_cruce_con_cambios() -> pd.DataFrame:
 
     # 3: Devolver el Nuevo DF
     return cruce_ajustado
+
+# --> Carga de Actualizaciones desde Sheets 
+@st.cache_data(show_spinner="Cargando Cartera Activa de Respaldo (berex malo :( )", ttl=2*HOUR_WAIT)
+def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Definir el Nombre de la Hoja a Abrir
+    hojaName = 'act {}'.format(getMesOperativo().year)
+
+    # Paso 3: Obtener los Datos
+    actsDF = google_sheets_service.get_sheet_as_dataframe(ACTUALIZACIONES_SHEET_ID, hojaName)
+
+    # -- Limpieza de Datos
+    # Renombramiento de Columnas
+    actsDF = actsDF.rename(columns={
+        "end": "Correo",
+        "debt_id": "Id_Deuda",
+        "inserted_at": "Fecha_Act",
+        "bank_reference": "Referencia",
+        "Status_Act": "Etiqueta_Act"
+    })
+    # Quitamos Datos con NaNs
+    actsDF = actsDF.dropna()
+    # Dejamos solo las Columnas Necesarias
+    actsDF = actsDF[["Correo","Id_Deuda","Fecha_Act","Referencia","Etiqueta_Act"]]
+    # Volvemos las Columnas Id_Deuda y Referencia a String
+    actsDF["Id_Deuda"] = actsDF["Id_Deuda"].apply(lambda s: str(s).replace('.0','').strip())
+    actsDF["Referencia"] = actsDF["Referencia"].apply(lambda s: str(s).replace('.0','').strip())
+    # Volvemos Fecha_Act a Datetime quitando "'"
+    actsDF['Fecha_Act'] = actsDF['Fecha_Act'].astype(str).str.replace("'","",regex=False)
+    actsDF["Fecha_Act"] = pd.to_datetime(actsDF["Fecha_Act"],errors="coerce",dayfirst=False)
+    # Dejamos Etiqueta_Act como string
+    actsDF["Etiqueta_Act"] = actsDF["Etiqueta_Act"].astype(str)
+
+    # Quitamos datos donde el correo no sea relevante
+    actsDF = actsDF[~actsDF['Correo'].isin(CORREOS_NO_RELEVANTES)]
+
+    # Cargamos datos del Headcount
+    hc_df = load_headcount_negociacion()
+
+    # Hacemos un left join con correo para obtener el nombre
+    actsDF = pd.merge(
+        actsDF, hc_df[["Correo",'Nombre']], how='left', on='Correo'
+    )
+
+    # Imputamos el Nombre con el Correo
+    maskSinNombre = actsDF['Correo']
+
+    # Validamos el DF
+    if actsDF.empty:
+        return ActualizacionesSchema.empty()
+    return ActualizacionesSchema.validate(actsDF, lazy=True)
+
 
 # --- Queries a MetaBase ---
 

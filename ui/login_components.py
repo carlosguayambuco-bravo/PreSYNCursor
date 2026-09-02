@@ -91,6 +91,14 @@ def show_user_info():
         # Recargamos la Información
         st.rerun()
 
+    # Creamos un Toggle para Cargar las Históricas
+    st.sidebar.toggle(
+        label="🔁 Cargar **Histórico** de Solicitudes",
+        value=False,
+        help="Carga la Información Antigua de Solicitudes (desde Julio)",
+        key="cargar_historico_solicitudes",
+        )
+
     # Indicador del estado de guardado de las cookies de autenticación
     if are_cookies_saved():
         st.sidebar.markdown(":material/check_circle: :green[**Cookies guardadas correctamente**]")
