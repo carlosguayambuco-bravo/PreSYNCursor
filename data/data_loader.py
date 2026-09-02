@@ -16,7 +16,7 @@ from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_ACTIVE_DEBTS, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
@@ -1262,6 +1262,12 @@ def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     completo_df['Id_Deuda'] = completo_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
     # Volvemos la Columna Referencia y Cedula a String
     completo_df['Cedula'] = completo_df['Cedula'].apply(lambda x: str(x).replace(".0", "").strip())
+    completo_df['Referencia'] = completo_df['Referencia'].apply(lambda x: str(x).replace(".0", "").strip())
+
+    # Aplicamos los Cambios de Referencia
+    refChangesDict = load_reference_changes()
+    completo_df['Referencia'] = completo_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
     # Volvemos la Columna Monto_Actual a Números
     completo_df['Monto_Actual'] = pd.to_numeric(completo_df['Monto_Actual'], errors='coerce')
     # Volvemos Numero_Credito, Nombre_Cliente y Banco a String usando astype
@@ -1285,3 +1291,47 @@ def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     completo_df = InputCruceSchema.validate(completo_df)
     # Devolvemos el DF
     return completo_df
+
+def obtener_datos_deuda_cedula(*,cedula: str) -> DataFrame[InputCruceSchema]:
+    # Paso 1: Definir la Query de Ejecución
+    query_cedula = QUERY_DEUDAS_CEDULA.format(cedula=cedula)
+    # Paso 2: Ejecutar la Query
+    cedula_df = execute_query_cache(query_cedula)
+
+    # Paso 3: Verificar si está vacía o no
+    if cedula_df.empty:
+        return InputCruceSchema.empty()
+
+    # Paso 4: Limpieza de Datos
+    # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
+    cedula_df.dropna(subset=['Id_Deuda'], inplace=True)
+    cedula_df['Id_Deuda'] = cedula_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+    # Volvemos la Columna Referencia a String
+    cedula_df['Referencia'] = cedula_df['Referencia'].apply(lambda x: str(x).replace(".0", "").strip())
+
+    # Aplicamos los Cambios de Referencia
+    refChangesDict = load_reference_changes()
+    cedula_df['Referencia'] = cedula_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
+    # Volvemos la Columna Monto_Actual a Números
+    cedula_df['Monto_Actual'] = pd.to_numeric(cedula_df['Monto_Actual'], errors='coerce')
+    # Volvemos Numero_Credito y Banco a String usando astype
+    cedula_df['Numero_Credito'] = cedula_df['Numero_Credito'].astype(str)
+    cedula_df['Banco'] = cedula_df['Banco'].astype(str)
+
+    # Estandarizamos el Banco
+    cedula_df['Banco'] = normalizar_bancos_vectorizado(cedula_df['Banco'])
+
+    # Siguiente: Calcular Columna Liquidada según los Estados y los Sub-Estados
+    maskEstado = cedula_df['Estado_Deuda'].isin(ESTADOS_LIQUIDACION)
+    maskSubEstado = cedula_df['Sub_Estado_Deuda'].isin(SUB_ESTADOS_LIQUIDACION)
+
+    cedula_df['Liquidada'] = (maskEstado | maskSubEstado)
+
+    # Quitamos las Columnas de Estados
+    cedula_df = cedula_df.drop(columns=['Estado_Deuda','Sub_Estado_Deuda'])
+
+    # Validamos el Esquema
+    cedula_df = InputCruceSchema.validate(cedula_df)
+    # Devolvemos el DF
+    return cedula_df

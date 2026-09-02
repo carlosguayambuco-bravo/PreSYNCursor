@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from data.data_loader import obtener_datos_deuda_cedula
 from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MetadataPendienteCruce, PendienteCruceSchema
 from modules.constants import (
     COL_BANCO,
@@ -687,3 +688,9 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
 
     # Paso 4: Devolver el DataFrame Actualizado
     return df_actualizar
+
+# Función Auxiliar para Buscar los Datos de las Deudas
+def search_data_deudas(*,cedula: str):
+    # Ejecutar la Función de Obtención de Datos y Guardarla en el Session State
+    key_deudas = 'cruce_deudas_posibles_{}'.format(cedula)
+    st.session_state[key_deudas] = obtener_datos_deuda_cedula(cedula = cedula)

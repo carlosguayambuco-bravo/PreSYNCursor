@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from modules.constants import COL_CEDULA, COL_NOMBRE, PRIORIDAD_ETIQUETAS_CRUCE
+from modules.id_aut_deud.helpers import search_data_deudas
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
 OPCION_SIN_OPCIONES = 'Sin Opciones Actuales'
@@ -154,6 +155,21 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     ]
     return df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
 
+def estilizar_deudas(deudas_df: pd.DataFrame):
+    deudas_df = deudas_df[['Banco','Numero_Credito','Monto_Actual','Id_Deuda'] + (['Es_Liquidada'] if 'Es_Liquidada' in deudas_df.columns else [])]
+    if 'Es_Liquidada' in deudas_df.columns:
+        return deudas_df.style.apply(
+            lambda r: ['background-color: {}'.format(
+                "#ce1424" if r['Es_Liquidada'] else "#009723"
+            )] * len(r), axis=1
+        ).hide(subset=['Es_Liquidada'], axis='columns').set_table_styles([
+            {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
+        ])
+    else:
+        return deudas_df.style.set_table_styles([
+            {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
+        ])
+
 # Función Auxiliar para Mostrar un Registro del Cruce (Vista de 2 Columnas)
 def mostrar_registro_cruce(*, registro: pd.Series) -> None:
     # Paso 1: Extraemos la Metadata y el Id_Cruce del Registro
@@ -166,50 +182,63 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
 
     # Columna Izquierda (70%): Información de las Posibles Deudas
     # Columna Derecha (30%): Input del Id_Deuda Definitivo
-    colIzquierda, colDerecha = st.columns([7, 3], vertical_alignment="top", gap="medium")
+    colData, colDeudas, colSeleccion = st.columns([1,2,1], vertical_alignment="center", gap="small")
 
-    with colIzquierda:
-        titulo_expander = "🔎 {} - {} [{}]".format(
-            mtdt.get('Casa_Cobro', ''),
-            registro.get('Cedula', ''),
-            mtdt.get('Etiqueta', ''),
-        )
-        with st.expander(titulo_expander, expanded=False):
-            info_basica = {
-                'Cédula': registro.get('Cedula', ''),
-                'Nombre del Cliente': registro.get('Nombre_Cliente', ''),
-                'Banco': registro.get('Banco', ''),
-                'Monto Actual': registro.get('Monto_Actual', ''),
-                'Número de Crédito': registro.get('Numero_Credito', ''),
-                'Etiqueta': mtdt.get('Etiqueta', ''),
-                'Casa de Cobro': mtdt.get('Casa_Cobro', ''),
-                'Alias': mtdt.get('Alias_Casa', ''),
-                'Ejecutivo de Subida': mtdt.get('Ejecutivo_Subida', ''),
-                'Fecha de Identificación': mtdt.get('Fecha_Identificacion', ''),
-                'Fecha Límite de Pago': mtdt.get('Fecha_Limite_Pago', ''),
-                'Id_Definitivo': mtdt.get('Id_Definitivo', 'Sin Definir'),
-                'Portafolio': mtdt.get('Portafolio_Ids', ''),
-            }
-            info_basica = {k: (str(v) if v is not None else '') for k, v in info_basica.items()}
-            st.dataframe(
-                pd.DataFrame({'Dato': list(info_basica.keys()), 'Valor': list(info_basica.values())}),
-                hide_index=True,
-                width="stretch",
+    with colData:
+        # Acá mostramos: Casa de Cobro, Alias, Cedula, Nombre del Cliente
+        st.markdown(
+            "> **Cedula**: {}".format(registro['Cedula'] if pd.notna(registro['Cedula']) and (registro['Cedula'] != "nan") else "Sin Cédula Proporcionada") +
+            "\n\n> **Casa de Cobro**: {} (*{}*)".format(registro['Metadata']['Casa_Cobro'], registro['Metadata'].get('Alias_Casa',"Sin Alias")) +
+            "\n\n> **Resultado del Cruce**: {}".format(registro['Metadata']['Etiqueta'])
             )
-            st.markdown("**💼 Deudas Posibles**")
-            deudas_posibles = mtdt.get('Deudas_Posibles', []) or []
-            if deudas_posibles:
-                st.dataframe(pd.DataFrame(deudas_posibles), hide_index=True, width="stretch")
-            else:
-                st.caption("Sin Deudas Posibles")
 
-    with colDerecha:
+    with colDeudas:
+        key_deudas = 'cruce_deudas_posibles_{}'.format(registro['Cedula'])
+        if not st.session_state.get(key_deudas, pd.DataFrame()).empty:
+            dfDeudas = st.session_state[key_deudas]
+        elif registro['Metadata']['Deudas_Posibles']:
+            # Creamos el DF
+            dfDeudas = pd.DataFrame(registro['Metadata']['Deudas_Posibles'])
+        else:
+            dfDeudas = pd.DataFrame()
+
+        if dfDeudas.empty:
+            st.error("Deudas no Encontradas al Ejecutar el Algoritmo de Cruce", icon="❌",title="Sin Deudas")
+        else:
+            with st.expander("**👁️ Ver Deudas Posibles**"):
+                # Formateamos el DF para que se vea la fila en rojo si esta liquidada
+                st.dataframe(
+                    data=estilizar_deudas(dfDeudas), 
+                    width="stretch", 
+                    hide_index=True, 
+                    column_order=['Banco','Numero_Credito','Monto_Actual','Id_Deuda'],
+                    column_config={'Monto_Actual':st.column_config.NumberColumn("Monto_Actual", format="localized")}
+                )
+
+        # Agregamos Botón de Actualización de Datos
+        if registro['Cedula'] and (registro['Cedula'] not in ['', None]):
+            st.button(
+                label="**Buscar Deudas Activas**",
+                icon="🔎",
+                on_click=search_data_deudas,
+                kwargs= {'cedula': registro['Cedula']},
+                type="primary",
+                width="stretch",
+                key="cruce_boton_busqueda_deudas_{}".format(registro["Id_Cruce"]),
+                disabled=not (st.session_state.get(key_deudas,None) is None)
+            )
+
+        st.caption("**Id del Cruce**: {}".format(
+            registro["Id_Cruce"]
+        ))
+
+    with colSeleccion:
         # El valor previo define si el toggle arranca marcado como Addendum
         valor_previo = cambios.get(id_cruce, mtdt.get('Id_Definitivo'))
         es_addendum = (valor_previo == ID_DEFINITIVO_ADDENDUM)
 
         marcar_addendum = st.toggle(
-            label="**🚫 Marcar como Addendum**",
+            label="**ℹ️ Marcar como Addendum**",
             value=es_addendum,
             key="cruce_addendum_toggle_{}".format(id_cruce),
             help="Al activarlo, el Id_Definitivo será ADDENDUM y no se podrá escoger un Id_Deuda.",
@@ -288,6 +317,7 @@ def mostrar_deudas_cruce_paginadas(*, cruce_df: pd.DataFrame, key: str) -> None:
     # Paso 1: Mostrar los Registros de la Página Actual
     for _, registro in pagina_df.iterrows():
         mostrar_registro_cruce(registro=registro)
+        st.divider()
 
     # Paso 2: Caption con los Registros Mostrados y su Porcentaje
     st.caption(
