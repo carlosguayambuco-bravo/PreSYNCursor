@@ -1,11 +1,13 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
+import re
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from modules.constants import COL_CEDULA, COL_NOMBRE, PRIORIDAD_ETIQUETAS_CRUCE
+from modules.constants import COL_CEDULA, COL_NOMBRE, ETIQUETA_EXACTO, PRIORIDAD_ETIQUETAS_CRUCE
 from modules.id_aut_deud.helpers import search_data_deudas
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
@@ -185,12 +187,17 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
     colData, colDeudas, colSeleccion = st.columns([1,2,1], vertical_alignment="center", gap="small")
 
     with colData:
-        # Acá mostramos: Casa de Cobro, Alias, Cedula, Nombre del Cliente
-        st.markdown(
-            "> **Cedula**: {}".format(registro['Cedula'] if pd.notna(registro['Cedula']) and (registro['Cedula'] != "nan") else "Sin Cédula Proporcionada") +
-            "\n\n> **Casa de Cobro**: {} (*{}*)".format(registro['Metadata']['Casa_Cobro'], registro['Metadata'].get('Alias_Casa',"Sin Alias")) +
-            "\n\n> **Resultado del Cruce**: {}".format(registro['Metadata']['Etiqueta'])
-            )
+        # Acá mostramos: Casa de Cobro, Alias, Cedula
+        # Creamos el String que va a ser el Guia
+        strGuia = "> **Resultado del Cruce**: '**{}**'".format(registro['Metadata']['Etiqueta'])
+        strGuia += "\n\n> **Cedula**: {}".format(registro['Cedula'] if pd.notna(registro['Cedula']) and (registro['Cedula'] != "nan") else "Sin Cédula Proporcionada")
+        if pd.notna(registro['Numero_Credito']) and registro['Numero_Credito'] != "":
+            strGuia += "\n\n> **Número de Crédito**: {}".format(registro['Numero_Credito'])
+        if pd.notna(registro['Monto_Actual']) and registro['Monto_Actual'] > 0:
+            strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(registro['Monto_Actual'])
+        if 'Monto_Propuesto' in registro['Metadata']:
+            strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(registro['Metadata']['Monto_Propuesto'])
+        st.markdown(strGuia)
 
     with colDeudas:
         key_deudas = 'cruce_deudas_posibles_{}'.format(registro['Cedula'])
@@ -205,7 +212,7 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
         if dfDeudas.empty:
             st.error("Deudas no Encontradas al Ejecutar el Algoritmo de Cruce", icon="❌",title="Sin Deudas")
         else:
-            with st.expander("**👁️ Ver Deudas Posibles**"):
+            with st.expander("**👁️ Ver Deudas Posibles**", expanded=(registro['Metadata']['Etiqueta'] == ETIQUETA_EXACTO)):
                 # Formateamos el DF para que se vea la fila en rojo si esta liquidada
                 st.dataframe(
                     data=estilizar_deudas(dfDeudas), 

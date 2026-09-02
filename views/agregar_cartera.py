@@ -11,7 +11,7 @@ import streamlit as st
 from pandera.errors import SchemaErrors
 # Librerías Locales
 from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas
-from data.data_models import InputCruceSchema
+from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES
 from modules.id_aut_deud.deuda_matcher import match_deudas
@@ -583,7 +583,7 @@ if tab_subida.open:
 # ==============================
 if tab_escogencia.open:
     with tab_escogencia:
-        st.markdown("### ✍️ Escogencia Manual del Id_Deuda Definitivo")
+        st.markdown("### ✍️ Escogencia Manual del Id de Deuda")
         st.info(
             "Aquí puedes revisar los cruces que no fueron exactos y definir manualmente el "
             "Id_Deuda definitivo de cada registro, o marcarlo como Addendum.",
@@ -620,6 +620,13 @@ if tab_escogencia.open:
                     st.warning("No hay cambios de Id_Definitivo pendientes por aplicar.", icon="⚠️")
                 else:
                     df_actualizar = aplicar_cambios_id_definitivo(cruce_df=cruce_df, cambios=cambios)
+                    # Validamos el DF
+                    try: 
+                        df_actualizar = PendienteCruceSchema.validate(df_actualizar, lazy=True)
+                    except SchemaErrors as e:
+                        df_actualizar.to_csv("df_actualizar.csv",index=False,sep=";")
+                        st.error("Error de Esquema")
+                        st.stop()
                     with st.spinner("📤 Registrando Cambios en Google Sheets..."):
                         exito_upd = upload_base_cruce_info(cruce_df=df_actualizar)
                     if exito_upd:
@@ -639,5 +646,5 @@ if tab_escogencia.open:
                 st.rerun()
 
 if tab_control.open:
-    with tab_control:
+    with tab_control:   
         st.info("Sin Implementar")

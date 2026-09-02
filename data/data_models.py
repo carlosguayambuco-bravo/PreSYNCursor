@@ -300,6 +300,7 @@ class MetadataPendienteCruce(TypedDict):
     Cruce_Status: Literal['Sin Reconocer','Reconocido','Subido Alianzas']
     Casa_Cobro: str
     Ejecutivo_Subida: str
+    Monto_Propuesto: NotRequired[float]
     Alias_Casa: NotRequired[str]
     Id_Definitivo: NotRequired[str]
     Portafolio_Ids: NotRequired[str]

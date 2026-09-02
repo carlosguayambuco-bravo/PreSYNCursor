@@ -492,6 +492,7 @@ def create_metadata_cruce(*,
         portafolio_ids: Optional[str] = None,
         monto_actual_original: Optional[float] = None,
         ultima_actualizacion: Optional[pd.Timestamp] = None,
+        monto_propuesto: Optional[float] = None,
     ) -> MetadataPendienteCruce:
     # Paso 1: Crear la Metadata con las Claves Obligatorias
     mtdt = MetadataPendienteCruce(
@@ -518,6 +519,8 @@ def create_metadata_cruce(*,
         mtdt['Portafolio_Ids'] = portafolio_ids
     if monto_actual_original is not None:
         mtdt['Monto_Actual_Original'] = monto_actual_original
+    if pd.notna(monto_propuesto) and monto_propuesto>0:
+        mtdt['Monto_Propuesto'] = monto_propuesto
     # Paso 3: Devolver la Metadata
     return mtdt
 
@@ -623,6 +626,7 @@ def build_pendiente_cruce_df(*,
         # Pagos a Cuotas, Fecha Límite de Pago y Portafolio
         pagos_cuotas = [PagosCuotasCruce(**info) for info in pagos_cuotas_dict.get(fila[COL_ID_CRUCE],[])]
         fecha_limite = fecha_limite_serie.iloc[i] if i < len(fecha_limite_serie) else pd.NaT # type: ignore
+        monto_propuesto = fila.get(COL_MONTO_PROPUESTO)
 
         # Creación de la Metadata del Registro
         mtdt = create_metadata_cruce(
@@ -638,7 +642,8 @@ def build_pendiente_cruce_df(*,
             alias_casa=alias_casa,
             id_definitivo=id_definitivo,
             descuento_maximo = descuento_maximo,
-            nombre_archivo = nombre_archivo, 
+            nombre_archivo = nombre_archivo,
+            monto_propuesto=monto_propuesto
         )
 
         # Agregar la Fila de Salida
@@ -677,6 +682,8 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
         id_cruce = str(fila[COL_ID_CRUCE])
         mtdt['Id_Definitivo'] = cambios[id_cruce]
         mtdt['Ultima_Actualizacion'] = ahora
+        # Actualizamos el Status de Cruce a Reconocido
+        mtdt['Cruce_Status'] = 'Reconocido'
         # Sanitizamos los Valores Anidados para que el JSON quede válido al subir
         if mtdt.get('Deudas_Posibles'):
             mtdt['Deudas_Posibles'] = convert_data_to_string(mtdt['Deudas_Posibles'])
