@@ -139,6 +139,11 @@ INNER JOIN dealer_public.berex_credit_repairs AS bcr
     ON bcr.id = bcrd.credit_repair_id
     AND bcr.document_number = '{cedula}'"""
 
+QUERY_VERIFICAR_DEUDAS = """SELECT
+    bcrd.id AS Id_Deuda
+FROM dealer_public.berex_credit_repair_debts bcrd
+WHERE bcrd.id IN ({debt_ids})"""
+
 ESTADOS_LIQUIDACION = ['liquidation_structured_payment','paid_outside_of_program','liquidation','liquidation_portfolio_payment','client_settled_outside']
 SUB_ESTADOS_LIQUIDACION = ['drop_requested','cancelled','liquidated','liquidation_in_process','liquidation_structured_payment']
 

@@ -16,7 +16,7 @@ from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
@@ -1335,3 +1335,24 @@ def obtener_datos_deuda_cedula(*,cedula: str) -> DataFrame[InputCruceSchema]:
     cedula_df = InputCruceSchema.validate(cedula_df)
     # Devolvemos el DF
     return cedula_df
+
+def verificar_existencias_deudas(*,deudas: list[str], batch_size: int = 20) -> dict[str,bool]:
+    """
+    Función que verifica si las deudas dadas existen en la Cartera Activa.
+    Devuelve un diccionario con la deuda como clave y un booleano como valor.
+    """
+    # Paso 1: Definir la Lista de Guardado
+    resultDict = {}
+    # Paso 2: Iterar sobre las Deudas en Batches
+    for i in range(0, len(deudas), batch_size):
+        batch = deudas[i:i + batch_size]
+        # Paso 3: Ejecutar la Query para el Batch
+        query = QUERY_VERIFICAR_DEUDAS.format(debt_ids=','.join(batch))
+        result_df = execute_query_cache(query)
+        # Paso 4: Limpiamos el Id_Deuda del Resultado
+        result_df['Id_Deuda'] = result_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
+        # Paso 5: Actualizamos el Diccionario de Resultados
+        for debt in batch:
+            resultDict[debt] = debt in result_df['Id_Deuda'].values
+
+    return resultDict
