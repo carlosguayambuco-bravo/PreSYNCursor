@@ -837,6 +837,7 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         "cedula_solicitud_gestion_input",
         "id_deuda_solicitud_gestion_input",
         "organizar_abc_solicitudes_gestion_input",
+        "estado_liq_ejec_input",
     ]
     keys_to_list = [
         'tipo_solicitud_gestion_input',
@@ -850,6 +851,7 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         "id_solicitud_gestion_input",
         "cedula_solicitud_gestion_input",
         "id_deuda_solicitud_gestion_input",
+        "estado_liq_ejec_input",
     ]
     for key in keys_to_remove:
         if key in keys_to_list:
@@ -888,6 +890,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         "fecha_min_solicitud_nego_input",
         "fecha_max_solicitud_nego_input",
         "reasignable_solicitud_nego_input",
+        "estado_liq_nego_input",
     ]
     keys_to_list = [
         'id_deuda_solicitud_nego_input',
@@ -901,6 +904,7 @@ def reiniciar_filtros_solicitudes_negociadores() -> None:
         'id_solicitud_nego_input',
         'persona_solicitud_nego_input',
         'referencia_solicitud_nego_input',
+        "estado_liq_nego_input",
     ]
     keys_to_False = [
         'toggle_exitosas_solicitud_nego_input',
@@ -1074,6 +1078,79 @@ def obtener_resumen_respuestas_automaticas(solicitudes_df: pd.DataFrame) -> dict
         'total_general': total_general,
         'total_por_tipo': total_por_tipo,
         'total_respondidas': len(solicitudes_respondidas),
+    }
+
+def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Calcula el resumen de solicitudes liquidadas entre las solicitudes exitosas.
+
+    Una solicitud liquidada se refiere a una solicitud que tenga alguna de sus solicitudes liquidadas.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, Any]: Diccionario con el resumen de solicitudes con Liquidación.
+            - 'total_general': Total de solicitudes liquidadas.
+            - 'total_tipo_sol_tipo_liq': Total de solicitudes liquidadas por Tipo de Solicitud y Tipo de Liquidación.
+            - 'deudas_clientes_tipo_sol': Total de solicitudes liquidadas en #Deudas Únicas y #Clientes Únicos (Desglose por Tipo_Solicitud)
+            - 'total_deudas_unicas': Número de Deudas Únicas entre las solicitudes liquidadas (Sin importar el Tipo de Solicitud).
+            - 'total_clientes_unicos': Número de Clientes Únicos entre las solicitudes liquidadas (Sin importar el Tipo de Solicitud).
+    """
+    # Paso 1: Crear la Columna de Estado_Liquidacion si no existe
+    solicitudes_aux = solicitudes_df.copy()
+    if 'Estado_Liquidacion' not in solicitudes_aux.columns:
+        serie_liq = solicitudes_aux.apply(lambda r: obtener_estado_liquidacion(solicitud=r), axis=1) # type: ignore
+        solicitudes_aux['Estado_Liquidacion'] = serie_liq.mask(serie_liq.isna(), "N/A")
+
+    # Paso 2: Dejar solo las Solicitudes Liquidadas (Estado_Liquidacion contiene 'Liquidado')
+    mask_liquidadas = solicitudes_aux['Estado_Liquidacion'].astype(str).str.contains("Liquidado", regex=False)
+    solicitudes_liquidadas = solicitudes_aux[mask_liquidadas]
+
+    # Si no hay Solicitudes Liquidadas, devolvemos el Resumen Vacío
+    if solicitudes_liquidadas.empty:
+        return {
+            'total_general': 0,
+            'total_tipo_sol_tipo_liq': {},
+            'deudas_clientes_tipo_sol': {},
+            'total_deudas_unicas': 0,
+            'total_clientes_unicos': 0,
+        }
+
+    # Paso 3: Calcular el Total General de Solicitudes Liquidadas
+    total_general = len(solicitudes_liquidadas)
+
+    # Paso 4: Calcular el Total de Liquidadas por Tipo de Solicitud y Tipo de Liquidación
+    resumen_cruzado = solicitudes_liquidadas.groupby(['Tipo_Solicitud', 'Estado_Liquidacion']).size()
+    total_tipo_sol_tipo_liq = resumen_cruzado.unstack(fill_value=0).to_dict(orient='index')
+
+    # Paso 5: Calcular #Deudas Únicas y #Clientes Únicos por Tipo de Solicitud (y en General)
+    deudas_clientes_tipo_sol = {}
+    ids_deudas_unicos_general: set[str] = set()
+    cedulas_unicas_general: set[str] = set()
+    for tipo_solicitud, grupo in solicitudes_liquidadas.groupby('Tipo_Solicitud'):
+        ids_deudas_unicos: set[str] = set()
+        cedulas_unicas: set[str] = set()
+        for _, solicitud in grupo.iterrows():
+            json_respuesta = solicitud['JSON_Respuesta']
+            if isinstance(json_respuesta, list):
+                ids_deudas_unicos.update(str(d['Id_Deuda']) for d in json_respuesta)
+            cedula = solicitud['Cedula']
+            if pd.notna(cedula):
+                cedulas_unicas.add(str(cedula))
+        ids_deudas_unicos_general.update(ids_deudas_unicos)
+        cedulas_unicas_general.update(cedulas_unicas)
+        deudas_clientes_tipo_sol[tipo_solicitud] = {
+            'num_deudas_unicas': len(ids_deudas_unicos),
+            'num_clientes_unicos': len(cedulas_unicas),
+        }
+
+    return {
+        'total_general': total_general,
+        'total_tipo_sol_tipo_liq': total_tipo_sol_tipo_liq,
+        'deudas_clientes_tipo_sol': deudas_clientes_tipo_sol,
+        'total_deudas_unicas': len(ids_deudas_unicos_general),
+        'total_clientes_unicos': len(cedulas_unicas_general),
     }
 
 def obtener_df_bancos_sin_responder(solicitudes_df: pd.DataFrame) -> pd.DataFrame:

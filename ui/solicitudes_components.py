@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -209,7 +209,7 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
                 label="**🕶️ Estado de Liquidación**",
                 options = ["Todos"] + ESTADOS_POSIBLES_LIQUIDACION,
                 index=0,
-                key="estado_liq_nego_input"
+                key="estado_liq_ejec_input"
             )
         else:
             tipo_liquidacion = None
@@ -3349,6 +3349,10 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     # Días de Respuesta Promedio y Máximo por Tipo de Solicitud
     # Respuestas por Día Promedio por Tipo de Solicitud
 
+    # Añadimos la Columna de Estado_Liquidacion
+    serie_liq = solicitudes.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+    solicitudes['Estado_Liquidacion'] = serie_liq.mask(serie_liq == None, "N/A")
+
     # Además, se muestran 2 Sub-Métricas más en un Segundo Expander: Respuestas Automáticas y Respuestas Vencidas
     
     with st.expander("📊 **KPIs de Solicitudes**", expanded=True):
@@ -3451,7 +3455,7 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         )
 
         # 1.6 KPIs de Respuestas Vencidas y Automáticas (Segundo Expander dentro del Expander de KPIs)
-        with st.expander("**😁 KPIs de Respuestas Vencidas y Automáticas**", expanded=True):
+        with st.expander("**😁 KPIs de Respuestas Vencidas y Automáticas**", expanded=True, type="compact"):
             resumen_vencidas = obtener_resumen_respuestas_vencidas(solicitudes)
             resumen_automaticas = obtener_resumen_respuestas_automaticas(solicitudes)
 
@@ -3496,32 +3500,111 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                     for tipo, total in resumen_automaticas['total_por_tipo'].items():
                         st.caption("**{}**: {} Solicitudes".format(tipo, total))
 
+        # 1.7 KPIs de Liquidaciones (Tercer Expander dentro del Expander de KPIs)
+        with st.expander("**🫡 KPIs de Liquidaciones**", expanded=False, type="compact"):
+            resumen_liquidaciones = obtener_resumen_liquidaciones(solicitudes)
+
+            # Si no hay Solicitudes Liquidadas, mostramos un aviso y no las columnas
+            if resumen_liquidaciones['total_general'] == 0:
+                st.info("No hay solicitudes liquidadas con los filtros aplicados.", icon="ℹ️")
+            else:
+                # Creamos las 4 Columnas
+                colLiqPct, colLiqGeneral, colLiqDeudas, colLiqClientes = st.columns(4, border=True, gap="small")
+
+                # 1.7.1 Métrica General: % de Solicitudes Liquidadas sobre el Total de Solicitudes
+                num_solicitudes = len(solicitudes)
+                porcentaje_liq = (resumen_liquidaciones['total_general'] / num_solicitudes * 100) if num_solicitudes > 0 else 0
+
+                # 1.7.2 Resumen de #Solicitudes Liquidadas (Por Tipo de Liquidación y Tipo de Solicitud)
+                totales_tipo_liq = {
+                    estado: sum(totales.get(estado, 0) for totales in resumen_liquidaciones['total_tipo_sol_tipo_liq'].values())
+                    for estado in ['Liquidado Total', 'Liquidado Parcial']
+                }
+
+                with colLiqPct:
+                    st.metric(
+                        label="**%Liquidación de Solicitudes**",
+                        value="{:.2f}%".format(porcentaje_liq),
+                        help="Porcentaje de solicitudes liquidadas sobre el total de solicitudes.",
+                        delta="{} de {} Solicitudes".format(resumen_liquidaciones['total_general'], num_solicitudes),
+                        delta_color="off",
+                    )
+                    st.caption("**Liquidado Total**: {} Solicitudes".format(totales_tipo_liq['Liquidado Total']))
+                    st.caption("**Liquidado Parcial**: {} Solicitudes".format(totales_tipo_liq['Liquidado Parcial']))
+
+                with colLiqGeneral:
+                    st.metric(
+                        label="**Resumen de #Solicitudes Liquidadas**",
+                        value="{} Liquidadas".format(resumen_liquidaciones['total_general']),
+                        help="Total de solicitudes liquidadas (Liquidado Total + Liquidado Parcial).",
+                        delta=None,  # Sin Delta
+                    )
+                    for tipo_sol, totales in resumen_liquidaciones['total_tipo_sol_tipo_liq'].items():
+                        st.caption("**{}**: LT {}, LP {}".format(
+                            tipo_sol,
+                            totales.get('Liquidado Total', 0),
+                            totales.get('Liquidado Parcial', 0)
+                        ))
+
+                # 1.7.3 Deudas Únicas Liquidadas (Sin Importar el Tipo de Solicitud)
+                with colLiqDeudas:
+                    st.metric(
+                        label="**#Deudas Únicas Liquidadas**",
+                        value="{} Deudas".format(resumen_liquidaciones['total_deudas_unicas']),
+                        help="Número de deudas únicas liquidadas sin importar el tipo de solicitud.",
+                        delta=None,  # Sin Delta
+                    )
+                    for tipo_sol, resumen in resumen_liquidaciones['deudas_clientes_tipo_sol'].items():
+                        st.caption("**{}**: {} Deudas".format(tipo_sol, resumen['num_deudas_unicas']))
+
+                # 1.7.4 Clientes Únicos Liquidadas (Sin Importar el Tipo de Solicitud)
+                with colLiqClientes:
+                    st.metric(
+                        label="**#Clientes Únicos Liquidadas**",
+                        value="{} Clientes".format(resumen_liquidaciones['total_clientes_unicos']),
+                        help="Número de clientes únicos liquidadas sin importar el tipo de solicitud.",
+                        delta=None,  # Sin Delta
+                    )
+                    for tipo_sol, resumen in resumen_liquidaciones['deudas_clientes_tipo_sol'].items():
+                        st.caption("**{}**: {} Clientes".format(tipo_sol, resumen['num_clientes_unicos']))
+
     # Añadimos un Divisor
     st.divider()
 
-    # Paso 2: Solicitudes sin Responder - Se muestra:
+    # Paso 2: Dashboard de Solicitudes - Se muestra:
     # Gráfica de Barras Apiladas de Solicitudes por Aliado por Tipo de Solicitud
     # 2 Columnas: Pie de Pendientes de Responder por Ejecutivo y Pie de Estados de Solicitud
 
-    with st.expander("📊 **Solicitudes Sin Responder**", expanded=False):
+    with st.expander("📊 **Dashboard de Solicitudes**", expanded=False):
+        # Creamos un toggle para poner solicitudes sin responder
+        dejar_sin_responder = st.toggle(
+            label = "Dejar solo Solicitudes **Sin Responder**",
+            value=True,
+            help= "Activar para dejar solo solicitudes sin responder",
+            key = "solicitudes_sin_responder_ejecutivo_resumen",
+        )
+
         # 2.1 Crear el Gráfico de Barras de Solicitudes
-        solicitudes_sin_responder = solicitudes[mask_sin_responder]
+        if dejar_sin_responder:
+            solicitudes_dash = solicitudes[mask_sin_responder]
+        else:
+            solicitudes_dash = solicitudes
 
         # Agrupamos por Aliado y Tipo de Solicitud
-        resumen_sin_responder = solicitudes_sin_responder.groupby(['Casa_Cobro', 'Tipo_Solicitud']).size().reset_index(name='count')
+        resumen_dash = solicitudes_dash.groupby(['Casa_Cobro', 'Tipo_Solicitud']).size().reset_index(name='count')
         # Agregamos la Columna Conteo Total
-        resumen_sin_responder['Conteo_Total'] = resumen_sin_responder.groupby('Casa_Cobro')['count'].transform('sum')
+        resumen_dash['Conteo_Total'] = resumen_dash.groupby('Casa_Cobro')['count'].transform('sum')
         # Ordenamos de Mayor a Menor por Conteo pero General no por Tipo de Solicitud
-        resumen_sin_responder = resumen_sin_responder.sort_values(by='Conteo_Total', ascending=True)
+        resumen_dash = resumen_dash.sort_values(by='Conteo_Total', ascending=True)
 
         # Definimos Configuraciones del Gráfico
         pixels_per_bar = 40
         base_height = 400
-        height = base_height + pixels_per_bar * len(resumen_sin_responder['Casa_Cobro'].unique())
+        height = base_height + pixels_per_bar * len(resumen_dash['Casa_Cobro'].unique())
 
         # Creamos el Gráfico
-        fig_sin_responder = px.bar(
-            resumen_sin_responder,
+        fig_conteo_tipos_casa = px.bar(
+            resumen_dash,
             x='count',
             y='Casa_Cobro',
             color='Tipo_Solicitud',
@@ -3535,24 +3618,24 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         )
 
         # Agregamos el Hover
-        fig_sin_responder.update_traces(
+        fig_conteo_tipos_casa.update_traces(
             hovertemplate="<b>Aliado:</b> %{customdata[0]}<br><b>Tipo de Solicitud:</b> %{customdata[1]}<br><b>Número de Solicitudes:</b> %{customdata[2]}<extra></extra>"
         )
 
         # Agregamos Margen y ajustamos dtick para mostrar todos los aliados
-        fig_sin_responder.update_layout(
+        fig_conteo_tipos_casa.update_layout(
             margin=dict(l=150, r=50, t=50, b=50),
             yaxis=dict(
                 dtick=1, 
                 type='category',
                 categoryorder='array', # Ayuda para ordenamiento de Categorías
-                categoryarray=resumen_sin_responder['Casa_Cobro'].unique()
+                categoryarray=resumen_dash['Casa_Cobro'].unique()
             ),
         )
 
         # Mostramos el Gráfico
         with st.container(border=True):
-            st.plotly_chart(fig_sin_responder)
+            st.plotly_chart(fig_conteo_tipos_casa, key="tipos_solicitud_aliado_ejecutivo_resumen")
 
         # 2.2: Creamos 2 Columnas: Pie de Pendientes de Responder por Ejecutivo y Pie de Estados de Solicitud
         with st.container(border=True):
@@ -3560,35 +3643,107 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
 
             # Pie de Pendientes de Responder por Ejecutivo
             with colPieEjecutivo:
-                resumen_por_ejecutivo = solicitudes_sin_responder.groupby('Ejecutivo').size().reset_index(name='count')
+                resumen_por_ejecutivo = solicitudes_dash.groupby('Ejecutivo').size().reset_index(name='count')
                 fig_pie_ejecutivo = px.pie(
                     resumen_por_ejecutivo,
                     names='Ejecutivo',
                     values='count',
-                    title="Solicitudes Sin Responder por Ejecutivo",
+                    title="Solicitudes por Ejecutivo",
                     color_discrete_sequence=px.colors.qualitative.Set3,
                     hole = .4,
                 )
                 fig_pie_ejecutivo.update_traces(
                     hovertemplate="<b>Ejecutivo:</b> %{label}<br><b>Número de Solicitudes:</b> %{value}<br><b>Porcentaje:</b> %{percent}<extra></extra>"
                 )
-                st.plotly_chart(fig_pie_ejecutivo)
+                st.plotly_chart(fig_pie_ejecutivo, key="pie_solicitudes_ejecutivo_resumen")
 
             # Pie de Estados de Solicitud
             with colPieEstado:
-                resumen_por_estado = solicitudes_sin_responder.groupby('Estado_Solicitud').size().reset_index(name='count')
+                resumen_por_estado = solicitudes_dash.groupby('Estado_Solicitud').size().reset_index(name='count')
                 fig_pie_estado = px.pie(
                     resumen_por_estado,
                     names='Estado_Solicitud',
                     values='count',
-                    title="Solicitudes Sin Responder por Estado",
+                    title="Solicitudes por Estado de Solicitud",
                     color_discrete_sequence=px.colors.qualitative.Set3,
                     hole = .4,
                 )
                 fig_pie_estado.update_traces(
                     hovertemplate="<b>Estado:</b> %{label}<br><b>Número de Solicitudes:</b> %{value}<br><b>Porcentaje:</b> %{percent}<extra></extra>"
                 )
-                st.plotly_chart(fig_pie_estado)
+                st.plotly_chart(fig_pie_estado, key="estados_solicitud_ejecutivo_resumen")
+
+        # 2.3 Resumen de Liquidaciones por Tipo de Solicitud y por Casa de Cobro
+        with st.expander("**🫡 Resumen de Liquidaciones**", expanded=False):
+            # Paso 2: Creamos las Columnas y Vamos Generando los Pies
+            tipos_unicos = solicitudes['Tipo_Solicitud'].unique()
+            colsPieLiqs = st.columns(len(tipos_unicos),border=True)
+            for tipo, col in  zip(tipos_unicos, colsPieLiqs):
+                solicitudes_tipo = solicitudes[solicitudes['Tipo_Solicitud'] == tipo]
+                resumen_tipo = solicitudes_tipo.groupby('Estado_Liquidacion').size().reset_index(name='count')
+                with col:
+                    fig_pie_estado_liq = px.pie(
+                        resumen_tipo,
+                        names='Estado_Liquidacion',
+                        values='count',
+                        title="Solicitudes por Estado de Liquidación <br> ({})".format(tipo),
+                        color_discrete_sequence=px.colors.qualitative.Set3,
+                        hole = .4,
+                    )
+                    fig_pie_estado_liq.update_traces(
+                        hovertemplate="<b>Estado de Liquidación:</b> %{label}<br><b>Número de Solicitudes:</b> %{value}<br><b>Porcentaje:</b> %{percent}<extra></extra>"
+                    )
+                    st.plotly_chart(fig_pie_estado_liq, key="pie_estado_liq_{}_ejecutivo_resumen".format(tipo))
+
+            # 2.3.2 Estados de Liquidación por Aliado
+            # Agrupamos por Aliado y Estado de Liquidación
+            resumen_liqs = solicitudes.groupby(['Casa_Cobro', 'Estado_Liquidacion']).size().reset_index(name='count')
+            # Agregamos la Columna Conteo Liqs
+            # Primero Creamos la Máscara de Liquidaciones
+            mask_liqs = resumen_liqs['Estado_Liquidacion'].str.contains("Liquidado",regex=False)
+            resumen_liqs['Conteo_Liqs'] = mask_liqs.groupby(resumen_liqs['Casa_Cobro']).transform('sum')
+            # Ordenamos de Mayor a Menor por Conteo pero General no por Tipo de Solicitud
+            resumen_liqs = resumen_liqs.sort_values(by='Conteo_Liqs', ascending=True)
+    
+            # Definimos Configuraciones del Gráfico
+            pixels_per_bar = 40
+            base_height = 400
+            height = base_height + pixels_per_bar * len(resumen_liqs['Casa_Cobro'].unique())
+    
+            # Creamos el Gráfico
+            fig_conteo_liqs_casa = px.bar(
+                resumen_liqs,
+                x='count',
+                y='Casa_Cobro',
+                color='Estado_Liquidacion',
+                orientation='h',
+                custom_data=['Casa_Cobro', 'Estado_Liquidacion', 'count'],
+                height=height,
+                labels={'count': 'Número de Solicitudes', 'Casa_Cobro': 'Aliado', 'Estado_Liquidacion': 'Tipo de Solicitud'},
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                title="Solicitudes Sin Responder por Aliado y Tipo de Solicitud",
+                text="Estado_Liquidacion",
+            )
+    
+            # Agregamos el Hover
+            fig_conteo_liqs_casa.update_traces(
+                hovertemplate="<b>Aliado:</b> %{customdata[0]}<br><b>Tipo de Solicitud:</b> %{customdata[1]}<br><b>Número de Solicitudes:</b> %{customdata[2]}<extra></extra>"
+            )
+    
+            # Agregamos Margen y ajustamos dtick para mostrar todos los aliados
+            fig_conteo_liqs_casa.update_layout(
+                margin=dict(l=150, r=50, t=50, b=50),
+                yaxis=dict(
+                    dtick=1, 
+                    type='category',
+                    categoryorder='array', # Ayuda para ordenamiento de Categorías
+                    categoryarray=resumen_liqs['Casa_Cobro'].unique()
+                ),
+            )
+
+            # Mostramos el Gráfico
+            with st.container(border=True):
+                st.plotly_chart(fig_conteo_liqs_casa, key="tipos_liq_aliado_ejecutivo_resumen")
 
     # Añadimos un Divisor
     st.divider()
