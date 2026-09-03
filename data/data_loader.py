@@ -1211,6 +1211,11 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
     # Importante: Normalizamos los Bancos
     deudas_df['Banco'] = deudas_df['Banco'].apply(normalizar_banco)
 
+    # Creamos el Conteo de NaNs
+    deudas_df['NaN_Count'] = deudas_df.isna().sum(axis=1)
+    # Ordenamos de Menor a Mayor según el conteo y eliminamos duplicados por Id_Deuda
+    deudas_df = deudas_df.sort_values(by=['NaN_Count'],ascending=True).drop_duplicates(subset=['Id_Deuda'],keep='first')
+
     # Validamos el DF con el esquema
     deudas_df = DeudasActivasSchema.validate(deudas_df, lazy=True)
 
