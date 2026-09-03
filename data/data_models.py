@@ -121,6 +121,7 @@ class AliadosSchema(pa.DataFrameModel):
 
 
 class MasivasMetadata(TypedDict, total=False):
+    Id_Cruce: Optional[str]
     Es_Maximo_Descuento: Optional[bool]
     Fecha_Limite_Uso: Optional[datetime]
     Alias: Optional[str]

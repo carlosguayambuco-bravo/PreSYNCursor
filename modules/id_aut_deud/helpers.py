@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import obtener_datos_deuda_cedula
+from data.data_loader import obtener_datos_deuda_cedula, parse_metadata_cruce
 from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MetadataPendienteCruce, PendienteCruceSchema
 from modules.constants import (
     COL_BANCO,
@@ -684,12 +684,7 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
         mtdt['Ultima_Actualizacion'] = ahora
         # Actualizamos el Status de Cruce a Reconocido
         mtdt['Cruce_Status'] = 'Reconocido'
-        # Sanitizamos los Valores Anidados para que el JSON quede válido al subir
-        if mtdt.get('Deudas_Posibles'):
-            mtdt['Deudas_Posibles'] = convert_data_to_string(mtdt['Deudas_Posibles'])
-        if mtdt.get('Pagos_Cuotas'):
-            mtdt['Pagos_Cuotas'] = convert_data_to_string(mtdt['Pagos_Cuotas'])
-        return mtdt
+        return parse_metadata_cruce(mtdt)
 
     df_actualizar['Metadata'] = df_actualizar.apply(actualizar_mtdt, axis=1)
 

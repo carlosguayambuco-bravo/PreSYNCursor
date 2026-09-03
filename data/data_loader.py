@@ -853,7 +853,7 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
 
     # Paso 4: Conversión de la Metadata a los Tipados Necesarios
     if 'Metadata' in cruce_df.columns:
-        cruce_df['Metadata'] = cruce_df['Metadata'].apply(_parse_metadata_cruce)
+        cruce_df['Metadata'] = cruce_df['Metadata'].apply(parse_metadata_cruce)
 
     # Paso 5: Dejamos la Última Versión de cada Id_Cruce (las actualizaciones se anexan al final)
     cruce_df = cruce_df.drop_duplicates(subset=['Id_Cruce'], keep='last').reset_index(drop=True)
@@ -871,7 +871,7 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
     return cruce_df
 
 # Función Auxiliar para Parsear la Metadata de un Registro de Cruce desde Sheets
-def _parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
+def parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
     # Si ya es un Diccionario (Cambios Locales) lo devolvemos tal cual
     if isinstance(mtdt_val, dict):
         return MetadataPendienteCruce(**mtdt_val)

@@ -23,6 +23,7 @@ from ui.cruce_deudas_components import (
     LLAVE_CAMBIOS_ID_DEFINITIVO, mostrar_deudas_cruce_paginadas, mostrar_filtros_cruce,
 )
 from utils.helpers_general import cleanNumber
+from utils.helpers_sheets import convert_data_to_string
 
 # Función Auxiliar para Mostrar la Configuración del Cruce (Columnas, Modelo y Subida)
 def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str) -> None:
@@ -621,17 +622,12 @@ if tab_escogencia.open:
                 else:
                     df_actualizar = aplicar_cambios_id_definitivo(cruce_df=cruce_df, cambios=cambios)
                     # Validamos el DF
-                    try: 
-                        df_actualizar = PendienteCruceSchema.validate(df_actualizar, lazy=True)
-                    except SchemaErrors as e:
-                        df_actualizar.to_csv("df_actualizar.csv",index=False,sep=";")
-                        st.error("Error de Esquema")
-                        st.stop()
+                    df_actualizar = PendienteCruceSchema.validate(df_actualizar, lazy=True)
                     with st.spinner("📤 Registrando Cambios en Google Sheets..."):
                         exito_upd = upload_base_cruce_info(cruce_df=df_actualizar)
                     if exito_upd:
                         st.session_state[LLAVE_CAMBIOS_ID_DEFINITIVO] = {}
-                        st.toast("✅ Cambios Registrados con Éxito", icon="✅")
+                        st.toast("Cambios Registrados con Éxito ({} cambios)".format(len(cambios)), icon="✅")
                         sleep(1)
                         st.rerun()
 
