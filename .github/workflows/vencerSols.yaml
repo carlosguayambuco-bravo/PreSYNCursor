@@ -35,4 +35,4 @@ jobs:
       - name: Ejecución de Vencimiento de Solicitudes
         env:
           MI_JSON: ${{ secrets.MI_JSON }}
-        run: jupyter nbconvert --to notebook --execute Automatizaciones/Vencimiento_Automatico_Solicitudes.ipynb --inplace
+        run: jupyter nbconvert --to notebook --execute automations/Vencimiento_Automatico_Solicitudes.ipynb --inplace
