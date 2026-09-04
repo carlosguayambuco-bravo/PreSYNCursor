@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -3458,14 +3458,16 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
         with st.expander("**😁 KPIs de Respuestas Vencidas y Automáticas**", expanded=True, type="compact"):
             resumen_vencidas = obtener_resumen_respuestas_vencidas(solicitudes)
             resumen_automaticas = obtener_resumen_respuestas_automaticas(solicitudes)
+            resumen_faciles = obtener_resumen_subidas_faciles(solicitudes)
 
-            # Si no hay Solicitudes Respondidas, mostramos un aviso y no las columnas
+            # Creamos las 3 Columnas: Vencidas, Automáticas y Subidas Fáciles
+            colVencidas, colAutomaticas, colFaciles = st.columns(3, border=True, gap="small")
+
+            # Si no hay Solicitudes Respondidas, mostramos un aviso en lugar de las columnas
             if resumen_vencidas['total_respondidas'] == 0:
-                st.info("No hay solicitudes respondidas con los filtros aplicados.", icon="ℹ️")
+                with colVencidas:
+                    st.info("No hay solicitudes respondidas con los filtros aplicados.", icon="ℹ️")
             else:
-                # Creamos las 2 Columnas: Vencidas y Automáticas
-                colVencidas, colAutomaticas = st.columns(2, border=True, gap="small")
-
                 # 1.6.1 Solicitudes Vencidas (Total y por Tipo de Solicitud)
                 with colVencidas:
                     porcentaje_vencidas = (resumen_vencidas['total_general'] / resumen_vencidas['total_respondidas'] * 100) if resumen_vencidas['total_respondidas'] > 0 else 0
@@ -3499,6 +3501,23 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                         st.info("No hay Respuestas Automáticas", icon="ℹ️")
                     for tipo, total in resumen_automaticas['total_por_tipo'].items():
                         st.caption("**{}**: {} Solicitudes".format(tipo, total))
+
+            # 1.6.3 Subidas de Forma Fácil (Total y por Tipo de Solicitud)
+            with colFaciles:
+                num_solicitudes = len(solicitudes)
+                porcentaje_faciles = (resumen_faciles['total_general'] / num_solicitudes * 100) if num_solicitudes > 0 else 0
+                st.metric(
+                    label="**Subidas de Forma Fácil**",
+                    value="{} Solicitudes".format(resumen_faciles['total_general']),
+                    help="Solicitudes subidas de forma fácil (desde la vista de datos del negociador) sobre el total de solicitudes.",
+                    delta="{:.1f}% del Total de Solicitudes".format(porcentaje_faciles),
+                    delta_color="green" if porcentaje_faciles >= 10 else "yellow" if porcentaje_faciles >= 5 else "red",
+                    delta_arrow="up" if porcentaje_faciles >= 5 else "down"
+                )
+                if not resumen_faciles['total_por_tipo']:
+                    st.info("No hay Subidas de Forma Fácil", icon="ℹ️")
+                for tipo, total in resumen_faciles['total_por_tipo'].items():
+                    st.caption("**{}**: {} Solicitudes".format(tipo, total))
 
         # 1.7 KPIs de Liquidaciones (Tercer Expander dentro del Expander de KPIs)
         with st.expander("**🫡 KPIs de Liquidaciones**", expanded=False, type="compact"):

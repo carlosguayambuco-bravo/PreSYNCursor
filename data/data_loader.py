@@ -75,6 +75,9 @@ def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataF
         lambda d: MetadataSolicitud(**normalizeMetadata(d))
     )
 
+    # Quitamos Cualquier Columna Unnamed
+    solicitudes_df = solicitudes_df.loc[:, ~solicitudes_df.columns.str.contains('^Unnamed', case=False)]
+
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
         solicitudes_df = SolicitudesSchema.validate(solicitudes_df, lazy=True) 

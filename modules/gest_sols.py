@@ -1080,6 +1080,36 @@ def obtener_resumen_respuestas_automaticas(solicitudes_df: pd.DataFrame) -> dict
         'total_respondidas': len(solicitudes_respondidas),
     }
 
+def obtener_resumen_subidas_faciles(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
+    """
+    Calcula el resumen de solicitudes subidas de forma fácil.
+
+    Una solicitud se considera subida de forma fácil cuando se subió desde la
+    vista mostrar_datos_solicitud_negociador, lo cual queda registrado en la
+    Metadata con la llave 'Origen_Solicitud'.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+
+    Returns:
+        dict[str, Any]: Diccionario con el resumen de subidas fáciles.
+            - 'total_general': Total de solicitudes subidas de forma fácil.
+            - 'total_por_tipo': Total de solicitudes subidas de forma fácil por tipo de solicitud.
+    """
+    # Paso 1: Identificar las Solicitudes Subidas de Forma Fácil (Llave 'Origen_Solicitud' en la Metadata)
+    mask_faciles = solicitudes_df['Metadata_Solicitud'].apply(lambda x: 'Origen_Solicitud' in x)
+
+    # Paso 2: Calcular el Total General de Solicitudes Subidas de Forma Fácil
+    total_general = int(mask_faciles.sum())
+
+    # Paso 3: Calcular el Total de Solicitudes Subidas de Forma Fácil por Tipo de Solicitud
+    total_por_tipo = solicitudes_df[mask_faciles].groupby('Tipo_Solicitud').size().to_dict()
+
+    return {
+        'total_general': total_general,
+        'total_por_tipo': total_por_tipo,
+    }
+
 def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any]:
     """
     Calcula el resumen de solicitudes liquidadas entre las solicitudes exitosas.
