@@ -1216,6 +1216,9 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[Deu
     # Ordenamos de Menor a Mayor según el conteo y eliminamos duplicados por Id_Deuda
     deudas_df = deudas_df.sort_values(by=['NaN_Count'],ascending=True).drop_duplicates(subset=['Id_Deuda'],keep='first')
 
+    # Quitamos la Columna NaN_Count
+    deudas_df = deudas_df.drop(columns=['NaN_Count'])
+
     # Validamos el DF con el esquema
     deudas_df = DeudasActivasSchema.validate(deudas_df, lazy=True)
 
