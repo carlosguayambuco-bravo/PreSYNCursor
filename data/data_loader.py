@@ -112,10 +112,13 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     # Guardamos los Headers en el Session State
     st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
 
-    solicitudes_df = clean_solicitudes(solicitudes_df=solicitudes_df, es_historico=False)
+    # Limpiamos el ID de la Solicitud desde el inicio para verificar los duplicados
+    solicitudes_df['ID_Solicitud'] = solicitudes_df['ID_Solicitud'].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
-    # Corregimos los IDs de Solicitud Duplicados (si existen) antes de validar el esquema
+    # Corregimos los IDs de Solicitud Duplicados (si existen) antes de la limpieza completa
     solicitudes_df = fix_duplicated_solicitud_ids(solicitudes_df)
+
+    solicitudes_df = clean_solicitudes(solicitudes_df=solicitudes_df, es_historico=False)
 
     # Por último, reiniciamos los cambios locales
     st.session_state['local_solicitudes_changes'] = []
@@ -124,7 +127,7 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     return solicitudes_df # type: ignore
 
 # Función Auxiliar para Corregir los IDs de Solicitud Duplicados en la Worksheet y en el DF
-def fix_duplicated_solicitud_ids(solicitudes_df: DataFrame[SolicitudesSchema]) -> DataFrame[SolicitudesSchema]:
+def fix_duplicated_solicitud_ids(solicitudes_df: pd.DataFrame) -> pd.DataFrame:
     # Verificamos si existen IDs Duplicados en las Solicitudes (dejando el primero de cada grupo)
     duplicated_mask = solicitudes_df['ID_Solicitud'].duplicated(keep='first')
 
@@ -141,6 +144,7 @@ def fix_duplicated_solicitud_ids(solicitudes_df: DataFrame[SolicitudesSchema]) -
     last_id = int(numeric_ids.max()) if numeric_ids.notna().any() else 0
 
     # Corregimos cada ID duplicado (siempre el último de cada grupo) con last_id + 1
+    updates = []
     for idx in solicitudes_df.loc[duplicated_mask].index:
         last_id += 1
         new_id = str(last_id)
@@ -148,9 +152,15 @@ def fix_duplicated_solicitud_ids(solicitudes_df: DataFrame[SolicitudesSchema]) -
         # Actualizamos el ID en el DF
         solicitudes_df.loc[idx, 'ID_Solicitud'] = new_id
 
-        # Actualizamos el ID en Sheets (la fila es index + 2 y la columna del ID siempre es A)
+        # Acumulamos la Actualización del ID en Sheets (la fila es index + 2 y la columna del ID siempre es A)
         sheet_row = idx + 2
-        _retry(lambda nid=new_id, row=sheet_row: solicitudes_ws.update(range_name=f"A{row}", values=[[nid]]), label=f"Fix duplicated ID row {sheet_row}")
+        updates.append({'range': f'A{sheet_row}', 'values': [[new_id]]})
+
+    # Aplicamos todas las Correcciones en una sola llamada batch para no saturar el API de Google Sheets
+    _retry(
+        lambda: solicitudes_ws.batch_update(updates, value_input_option='USER_ENTERED'), # type: ignore
+        label=f"Fix duplicated solicitud IDs ({len(updates)} ranges)"
+    )
 
     # Reiniciamos el cache del mapeo de IDs a Filas para evitar errores de mapeo
     get_solicitud_id_to_row_mapping.clear()

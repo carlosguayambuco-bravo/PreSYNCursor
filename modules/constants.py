@@ -101,6 +101,8 @@ INNER JOIN dealer_public.berex_credit_repairs AS bcr
     ON bcr.id = bcrd.credit_repair_id AND bcr.bank_reference = '{reference}'
 LEFT JOIN vanex_public.leads_lead AS ll
     ON bcr.tracker_id = ll.tracker_id
+WHERE
+    bcr.status IN ('active','partial_credit')
 """
 
 QUERY_PLANES = """
