@@ -343,7 +343,7 @@ def distribuir_resultado_solicitud(
     if solicitud['Tipo_Solicitud'] == 'Validación':
         maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
     elif solicitud['Tipo_Solicitud'] in ['Oferta de Acuerdo','Acuerdo de Pago']:
-        maskTipo = ((solicitud['Estado_Solicitud'] == 'Exitosa')) | (solicitud['Tipo_Solicitud'].isin(['Oferta de Acuerdo','Acuerdo de Pago']))
+        maskTipo = ((solicitud['Estado_Solicitud'] == 'Exitosa')) | (solicitudes_df['Tipo_Solicitud'].isin(['Oferta de Acuerdo','Acuerdo de Pago']))
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
     maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
     maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder & maskDiffID
