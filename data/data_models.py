@@ -162,16 +162,6 @@ class AddendumsSchema(pa.DataFrameModel):
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
 
-class LiquidationsSchema(pa.DataFrameModel):
-    """
-    Esquema para validar la estructura de los datos de liquidaciones.
-    """
-    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
-
-    class Config:
-        strict = True  # Validación estricta de columnas
-        coerce = True  # Coerción automática de tipos
-
 class HeadCountSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de headcount.
@@ -344,3 +334,11 @@ class ActualizacionesSchema(pa.DataFrameModel):
     Referencia: str
     Fecha_Act: pa.dtypes.Timestamp
     Nombre: str
+
+class LiquidationsSchema(pa.DataFrameModel):
+    Id_Deuda: str
+    PaB_Liq: float
+    Ingreso_Liq: float
+    Negociador_Liq: str
+    Tipo_Liq: str = pa.Field(isin=['Tradicional','Credito'])
+    Fecha_Liq: pa.dtypes.Timestamp

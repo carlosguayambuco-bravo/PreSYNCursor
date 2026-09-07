@@ -661,6 +661,33 @@ def load_liquidaciones() -> set[str]:
     # Volvemos la Id_Deuda a String
     liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
 
+    # Creamos un Set con las Deudas Liquidadas
+    liquidaciones_set = set(liquidacionesDF['Id_Deuda'].tolist())
+
+    # Devolvemos el Set de Deudas Liquidadas
+    return liquidaciones_set
+
+# Función Auxiliar para Obtener las Deudas Liquidadas del MEC
+@st.cache_data(show_spinner="Cargando Liquidaciones Históricas desde Google Sheets...", ttl=HOUR_WAIT)
+def load_liquidaciones_hist() -> set[str]:
+    # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "BD del mes"
+    liquidacionesDF = google_sheets_service.get_sheet_as_dataframe(LIQUIDACIONES_SHEET_ID, 'BD del mes')
+
+    # Renombramos la Columna ID a Id_Deuda
+    liquidacionesDF = liquidacionesDF.rename(columns={'Deuda Berex':'Id_Deuda'})
+
+    # Quitamos Datos donde Id_Deuda sea NaN
+    liquidacionesDF = liquidacionesDF.dropna(subset=['Id_Deuda'])
+
+    # Dejamos solo la Columna Id_Deuda
+    liquidacionesDF = liquidacionesDF[['Id_Deuda']].drop_duplicates()
+
+    # Volvemos la Id_Deuda a String
+    liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+
     # Si el DF está vacío, lo validamos con el esquema vacío
     if liquidacionesDF.empty:
         liquidacionesDF = LiquidationsSchema.empty()
@@ -673,7 +700,6 @@ def load_liquidaciones() -> set[str]:
 
     # Devolvemos el Set de Deudas Liquidadas
     return liquidaciones_set
-
 
 # Función Auxiliar para Cargar el HeadCount de Negociación
 @st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=HOUR_WAIT)
