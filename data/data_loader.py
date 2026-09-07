@@ -14,13 +14,75 @@ import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
-from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
 from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
+
+# Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
+@st.cache_data(ttl=180, show_spinner="Cargando mapeo de IDs de Solicitud desde Google Sheets...")
+def get_solicitud_id_to_row_mapping() -> dict[str, int]:
+    """
+    Obtiene un diccionario que mapea ID_Solicitud -> Fila en Google Sheets
+    Se cachea por 3 minutos (180 segundos) para evitar lecturas constantes
+    
+    Returns:
+        dict[str, int]: Diccionario con ID_Solicitud como clave y fila de sheets como valor
+    """
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    solicitudes_ws = sheets_service.get_worksheet(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
+    
+    # Obtener todos los valores de la primera columna (ID_Solicitud)
+    id_column = _retry(lambda: solicitudes_ws.col_values(1), label="Get ID_Solicitud column")
+    
+    # Crear el mapeo: ID_Solicitud (desde fila 2) -> número de fila
+    # Fila 1 es el header, así que empezamos desde fila 2
+    mapping = {}
+    for row_num, solicitud_id in enumerate(id_column[1:], start=2):
+        id_cleaned = str(solicitud_id).replace('.0','').strip()
+        if solicitud_id and not (id_cleaned in mapping):  # Si no está vacío y no esta ya presente
+            mapping[id_cleaned] = row_num
+    
+    return mapping
+
+# Función Auxiliar para Obtener la Fila de Sheets basado en el ID de Solicitud
+def get_solicitud_row_in_google_sheets(solicitud_id: str) -> int:
+    """
+    Obtiene la fila de Google Sheets para una solicitud específica
+    usando el mapeo de IDs cacheado. Si el ID no se encuentra,
+    resetea el cache y reintenta una vez.
+    
+    Args:
+        solicitud_id (str): ID de la solicitud
+        
+    Returns:
+        int: Número de fila en Google Sheets
+        
+    Raises:
+        ValueError: Si el ID no es string o no se encuentra en Google Sheets
+    """
+    if not isinstance(solicitud_id, str):
+        raise ValueError("El ID de Solicitud debe ser una cadena de texto (str)., se encontro: {} ({})".format(
+            type(solicitud_id), solicitud_id
+        ))
+    
+    solicitud_id_clean = str(solicitud_id).replace('.0','').strip()
+    
+    # Obtener el mapeo cacheado
+    mapping = get_solicitud_id_to_row_mapping()
+    
+    # Si el ID no está en el mapeo, resetear cache y recargar
+    if solicitud_id_clean not in mapping:
+        st.cache_data.clear()
+        mapping = get_solicitud_id_to_row_mapping()
+    
+    # Si aún no está, lanzar error
+    if solicitud_id_clean not in mapping:
+        raise ValueError(f"No se encontró ID de Solicitud '{solicitud_id}' en Google Sheets")
+    
+    return mapping[solicitud_id_clean]
 
 # Función Auxiliar para Normalizar una Deuda al tipo DeudasSolicitud
 def normalizeDeuda(deuda: dict) -> dict:
