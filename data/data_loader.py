@@ -120,6 +120,10 @@ def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataF
     for col in ['Datos_Solicitud', 'Metadata_Solicitud','JSON_Respuesta']:
         solicitudes_df[col] = solicitudes_df[col].apply(lambda s: json.loads(s) if pd.notna(s) else {})
 
+    # Las Columnas Vácias las Volvemos NaNs
+    for col in ['Tipo_Pago']:
+        solicitudes_df[col] = solicitudes_df[col].mask(solicitudes_df[col] == '', np.nan)
+
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
 
