@@ -50,7 +50,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     Tipo_Solicitud: Series[str] = pa.Field(isin=['Validación','Acuerdo de Pago','Oferta de Acuerdo'])
     Datos_Solicitud: Series[list[DeudasSolicitud]]
     Fecha_Esperada_Pago: Series[pa.dtypes.Timestamp] = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha esperada de pago
-    Tipo_Pago: Series[str] = pa.Field(isin=PAGOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay tipo de pago
+    Tipo_Pago: Series[str] = pa.Field(nullable=True, isin=PAGOS_POSIBLES_SOLICITUD, ignore_na=True)  # Puede ser nulo si no hay tipo de pago
     Ejecutivo: Series[str] = pa.Field(nullable=True)  # Puede ser nulo si no hay ejecutivo asignado
     Metadata_Solicitud: Series[MetadataSolicitud]
     Estado_Solicitud: Series[str] = pa.Field(isin=ESTADOS_POSIBLES_SOLICITUD, nullable=True)  # Puede ser nulo si no hay estado definido

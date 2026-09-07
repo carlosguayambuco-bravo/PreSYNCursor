@@ -78,13 +78,14 @@ def get_massive_solicitudes_txt(solicitudes_df: pd.DataFrame) -> str:
 
     return "\n___\n".join(massive_txt)
 
-def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
+def get_descuento_en_base(*, debt: str, original_amount: float, show_casa: bool) -> list[str]:
     """
     Obtiene el descuento en base de datos para una deuda específica.
 
     Args:
         debt (str): Identificador de la deuda.
         original_amount (float): Monto original de la deuda.
+        show_casa (bool): Si mostrar el Nombre de la Casa de Cobro o No
 
     Returns:
         list[str]: Lista de descuentos en base de datos. Formato 'Casa Cobro - Valor - Descuento - Es Portafolio'.
@@ -110,7 +111,7 @@ def get_descuento_en_base(*, debt: str, original_amount: float) -> list[str]:
             str_portafolio = f"**Portafolio**: {monto_portafolio:,.0f}"
         else:
             str_portafolio = "***No es Portafolio***"
-        descuento_formateado = f"(*{debt}*) **{casa_cobro}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
+        descuento_formateado = f"(*{debt}*) **{casa_cobro if show_casa else 'Directo Base'}**: {valor:,.0f} ({descuento:.1%}) - {str_portafolio}"
         descuentos_formateados.append(descuento_formateado)
 
     return descuentos_formateados

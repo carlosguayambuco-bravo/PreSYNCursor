@@ -2522,7 +2522,7 @@ def dialog_confirmar_actualizacion_vencidas(*, solicitudes: pd.DataFrame) -> Non
                 st.toast("Intenta de Nuevo actualizar las Solicitudes",icon="❌")
 
 # Función Auxiliar para Mostrar los Detalles de los Solicitudes de Deuda
-def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False, origen: str) -> None:
+def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: bool = False, origen: Literal['ejecutivo','negociador']) -> None:
     # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Actualizaciones en Base, Monto Propuesto , Cuotas(Si Hay)
     hay_cuotas = any(d['Num_Cuotas'] > 1 for d in solicitud["Datos_Solicitud"])
 
@@ -2571,7 +2571,7 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
                 key="numero_credito_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
             )
         with colActualizaciones:
-            datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
+            datos_act = get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'], show_casa=(origen == 'ejecutivo'))
             st.space("small")
             with st.popover(
                 "**Descuentos - {}**".format(d['Id_Deuda']),
@@ -2956,7 +2956,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         casas_en_base = ["**{}**".format(casa.title().strip()) for casa in casas_en_base]
         # Traemos los Descuentos en Base
         descuentos_en_base = [
-            get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'])
+            get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'], show_casa=True)
             for d in solicitud['Datos_Solicitud']
         ]
         # Volvemos los Descuentos Uniendolos por '|'

@@ -4,6 +4,7 @@ from typing import Optional
 import json
 # Librerías de Terceros
 from pandera.typing import DataFrame
+import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
@@ -69,6 +70,11 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         # Si Fecha_Esperada_Pago no es nula, la convertimos a Datetime
         if 'Fecha_Esperada_Pago' in response_df.columns:
             response_df['Fecha_Esperada_Pago'] = pd.to_datetime(response_df['Fecha_Esperada_Pago'], errors='coerce', format='%Y-%m-%d %H:%M:%S')
+        response_df['Tipo_Pago'] = response_df["Tipo_Pago"].replace(r'^\s*$', np.nan, regex=True)
+        # Agregamos que no es Histórico
+        response_df['Es_Historico'] = False
+        # Agregamos el JSON_Respuesta como NaN
+        response_df['JSON_Respuesta'] = pd.NA
         add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:
