@@ -122,7 +122,7 @@ def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataF
 
     # Las Columnas Vácias las Volvemos NaNs
     for col in ['Tipo_Pago']:
-        solicitudes_df[col] = solicitudes_df[col].mask(solicitudes_df[col] == '', np.nan)
+        solicitudes_df[col] = solicitudes_df[col].mask(solicitudes_df[col] == '', np.nan).str.strip()
 
     # Imputamos Ejecutivo con 'Sin Asignar'
     imputeNans(solicitudes_df, 'Ejecutivo', 'Sin Asignar')
