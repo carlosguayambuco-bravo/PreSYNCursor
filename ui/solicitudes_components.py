@@ -3057,7 +3057,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         tipo='**{}**'.format(solicitud["Tipo_Solicitud"]),
         fecha=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
         estado=solicitud["Estado_Solicitud"],
-        aliado=solicitud["Casa_Cobro"],
+        aliado=solicitud["Casa_Cobro"] if not solicitud['Metadata_Solicitud'].get('Es_Directo_Base',False) else 'DIRECTO BASE',
         id=solicitud["ID_Solicitud"]
     )
     etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))

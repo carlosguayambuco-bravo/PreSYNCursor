@@ -33,6 +33,7 @@ class MetadataSolicitud(TypedDict):
     Id_Respuesta_Autom: NotRequired[str]
     Fecha_Solicitado: NotRequired[str]
     Max_Descuento_Otorgado: NotRequired[bool]
+    Es_Directo_Base: NotRequired[bool]
     Addendums: NotRequired[List[DeudasSolicitud]]
 
 class SolicitudesSchema(pa.DataFrameModel):

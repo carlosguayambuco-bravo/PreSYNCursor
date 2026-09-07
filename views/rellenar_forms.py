@@ -448,6 +448,7 @@ response_info = {
     'Metadata_Solicitud': json.dumps({
         'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0].title(),
         'Comentario_Negociador': comentario_adicional,
+        'Es_Directo_Base': aliado_cambiado,
     }, ensure_ascii=False),
     'Estado_Solicitud': 'Sin Tocar',
 }
