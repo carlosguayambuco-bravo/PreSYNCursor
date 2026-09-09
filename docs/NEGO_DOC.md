@@ -45,7 +45,7 @@ La primera sección solicita la identificación del cliente:
 - **Id_Deuda del Cliente**: campo auxiliar que normalmente aparece **deshabilitado**. Solo se habilita cuando la referencia ingresada no arroja deudas (ver sección 1.2).
 - **Toggle "Buscar Todas las Deudas - No solo activas"**: por defecto la búsqueda trae únicamente las deudas **activas** del cliente. Si se activa el toggle, la búsqueda incluye **todas las deudas** de la referencia (útil cuando se desea subir una solicitud que involucre deudas no activas).
 
-> **IMAGEN PENDIENTE:** Captura de la sección "Referencia del Cliente" mostrando los campos Referencia, Id_Deuda y el toggle "Buscar Todas las Deudas".
+![Referencia del Cliente](./assets/Inicio_Formulario.png)
 
 ## 1.2 Paso 2: Búsqueda y validación de las deudas
 
@@ -56,8 +56,6 @@ Después de ingresar la referencia, el sistema realiza las siguientes validacion
 3. **Verificación de actualización:** se muestra un mensaje con la **"Última Actualización de las Deudas Activas"** (fecha y días hábiles transcurridos). Si la última actualización de las deudas del cliente supera el mínimo de días hábiles permitido, el formulario se bloquea con un aviso: es necesario **actualizar las deudas del cliente** antes de poder continuar. Se ofrece un botón **"Reintentar"** para volver a verificar después de realizar la actualización.
 4. **Addendums:** si el cliente tiene addendums activos, estos se agregan automáticamente a la lista de deudas para poder incluirlos en la selección.
 
-> **IMAGEN PENDIENTE:** Captura del mensaje de "Última Actualización de las Deudas Activas" y del aviso de bloqueo con el botón Reintentar.
-
 ## 1.3 Paso 3: Características del Cliente
 
 En un expander llamado **"Características del Cliente"** se muestra información del cliente obtenida de SALDOS:
@@ -66,7 +64,7 @@ En un expander llamado **"Características del Cliente"** se muestra informació
 - **Por Cobrar del Cliente**: editable (se puede ajustar manualmente si es necesario).
 - **Pricing del Cliente**: solo lectura, se calcula a partir de la base de datos.
 
-> **IMAGEN PENDIENTE:** Captura del expander "Características del Cliente" con los campos Saldo, Por Cobrar y Pricing.
+![Última Actualización](./assets/Actualizacion_Detalles_Cl.png)
 
 ## 1.4 Paso 4: Selección de deudas
 
@@ -84,7 +82,7 @@ Se pueden seleccionar **una o varias deudas** de forma independiente. Adicionalm
 
 Es obligatorio seleccionar **al menos una deuda** para poder continuar.
 
-> **IMAGEN PENDIENTE:** Captura de la tabla de "Selección de Deudas Activas" con los toggles de selección por deuda y los botones Seleccionar Todas / Deseleccionar Todas.
+![Deudas a Seleccionar](./assets/Seleccion_Deudas.png)
 
 ## 1.5 Paso 5: Tipo de Solicitud y Aliado
 
@@ -98,7 +96,7 @@ Esta sección define el objetivo de la solicitud:
 
 Ambos campos son obligatorios para continuar.
 
-> **IMAGEN PENDIENTE:** Captura de la sección "Selección de Tipo de Solicitud y Aliado".
+![Tipo y Aliado](./assets/Solicitud_y_Aliado.png)
 
 ## 1.6 Paso 6: Montos propuestos por deuda
 
@@ -113,13 +111,13 @@ En la sección **"Montos Propuestos por Deuda"** se define el valor a solicitar 
 
 La tabla muestra por deuda: **Id Deuda**, **Deuda Bravo** (valor original), **Descuento en Base** (si existe), **% Total** (participación de la deuda) y **Monto Propuesto** (editable cuando la distribución está desactivada).
 
-> **IMAGEN PENDIENTE:** Captura de la sección "Montos Propuestos por Deuda" mostrando el Monto Total, el toggle de distribución y la tabla de deudas.
+![Montos por Deuda](./assets/Montos_Deudas.png)
 
 ## 1.7 Monto recomendado
 
 Para los tipos de solicitud **Validación** y **Oferta de Acuerdo**, el sistema muestra la sección **"Monto Recomendado para la Solicitud"**, que sugiere un monto con su **Descuento Óptimo** y el **Tipo de Pago** sugerido (Tradicional o Crédito - PaB Ideal). Si no hay ahorro suficiente para recomendar un monto, se muestra el mensaje "No hay Recomendación de Monto, falta ahorro".
 
-> **IMAGEN PENDIENTE:** Captura de la sección "Monto Recomendado para el Acuerdo" con el monto sugerido y el descuento óptimo.
+![Sugerencia Monto](./assets/Recomendado_Base.png)
 
 ## 1.8 Alertas y verificaciones
 
@@ -131,20 +129,18 @@ Antes de llegar al resumen, el sistema muestra alertas que conviene revisar ante
 - **Verificación de Descuentos en Base**: en un expander se valida deuda por deuda que el monto propuesto no supere el descuento en base existente (individual o de portafolio). Si alguna deuda no cumple, la solicitud no se puede enviar.
 - **Montos inválidos**: ninguna deuda puede tener monto propuesto igual o menor a 0.
 
-> **IMAGEN PENDIENTE:** Captura de las alertas/verificaciones (por ejemplo, la "Verificación de Descuentos en Base" deuda por deuda).
-
 ## 1.9 Paso 7: Especificaciones del Acuerdo de Pago
 
 Esta sección solo aparece cuando el Tipo de Solicitud es **Acuerdo de Pago** u **Oferta de Acuerdo**:
 
 - **Fecha Esperada de Pago**: la fecha en la que se esperaría realizar el pago de la deuda. Por defecto es hoy y **no puede ser anterior** a la fecha actual.
 - **Tipo de Pago**: depende de si la solicitud es a cuotas o no:
-  - Solicitud **a cuotas**: `Estructuraado` (así aparece escrito en el sistema) o `Refi`.
+  - Solicitud **a cuotas**: `Estructuraado`  o `Refi`.
   - Solicitud **sin cuotas**: `Tradicional` o `Crédito`.
 
 Ambos campos son obligatorios para continuar.
 
-> **IMAGEN PENDIENTE:** Captura de la sección "Especificaciones del Acuerdo de Pago" con Fecha Esperada de Pago y Tipo de Pago.
+![Especificaciones Acuerdos](./assets/Especifico_Acuerdo.png)
 
 ## 1.10 Comentarios adicionales
 
@@ -167,7 +163,7 @@ Finalmente, el botón **"Enviar Formulario"**:
 - Al enviar con éxito se muestra una notificación con el **ID de Solicitud** asignado.
 - Si la misma referencia con las mismas deudas ya fue enviada, el botón queda **deshabilitado** con el mensaje "Esta referencia ya fue enviada previamente con esas deudas."
 
-> **IMAGEN PENDIENTE:** Captura del expander "Ver Resumen de la Solicitud" y del botón "Enviar Formulario".
+![Resumen de Solicitud](./assets/Resumen_Solicitud.png)
 
 ---
 
@@ -179,8 +175,6 @@ La vista tiene dos pestañas:
 
 - **"Ver Solicitudes"**: lista de solicitudes con filtros (se aborda en este documento).
 - **"Resumen de Solicitudes"**: dashboard de indicadores (no se aborda en este documento).
-
-> **IMAGEN PENDIENTE:** Captura general de la página "Ver Mis Solicitudes" con los filtros y las pestañas.
 
 ## 2.1 Filtros
 
@@ -194,7 +188,7 @@ Los filtros permiten ubicar a un cliente o buscar solicitudes específicas. Est�
 4. **Aliado - Casa de Cobro**, más el toggle **"Ordenar de Primera a Última"**, que invierte el orden por fecha (las más recientes primero).
 5. **Estado de Liquidación** (Sin Liquidar, Liquidado Parcial, Liquidado Total, N/A), más el toggle **"Reasignable"**.
 
-> **REASIGNABLE - PENDIENTE:** *(Espacio reservado para que el autor complete la explicación del filtro/toggle "Reasignable".)*
+**REASIGNABLE:** En estos momentos todas las solicitudes bajo esta etiqueta son acuerdos de pago caídos que buscan una segunda oportunidad de ser liquidados
 
 ### Filtros específicos (expander "Filtros Específicos")
 
@@ -211,7 +205,7 @@ Los filtros permiten ubicar a un cliente o buscar solicitudes específicas. Est�
 - Si después de aplicar los filtros no hay resultados, se muestra un aviso y el botón **"Reiniciar Filtros"**.
 - Al final de la página también existe un botón **"Reiniciar Filtros"** para limpiar todas las selecciones.
 
-> **IMAGEN PENDIENTE:** Captura de los filtros generales y del expander "Filtros Específicos".
+![Filtros Solicitudes](./assets/Filtros%20Totales.png)
 
 ## 2.2 Vista de solicitudes paginadas
 
@@ -222,7 +216,7 @@ Las solicitudes filtradas se muestran en **páginas**, cada una en un expander p
 - **Botones de navegación** (máximo 5): ir al inicio (`<<`), página anterior, página actual (resaltada), página siguiente e ir al final (`>>`).
 - **Indicador de avance**: un texto muestra "Mostrando X-Y de Z Solicitudes. (P%, N páginas en total)".
 
-> **IMAGEN PENDIENTE:** Captura de los controles de paginación (selector de registros por página, página actual y botones de navegación).
+![Paginación de Solicitudes](./assets/Paginacion.png)
 
 ## 2.3 Contenido de cada solicitud (expander)
 
@@ -252,9 +246,14 @@ Además:
 - Para **Acuerdo de Pago** y **Oferta de Acuerdo**: métricas de **Fecha de Pago** (con días hábiles restantes o retraso) y **Tipo de Pago**.
 - Expander **"Detalles de la Solicitud por Deuda"**: por cada deuda se muestra Id Deuda, Banco, Número de Crédito, Descuentos en Base (popover), Monto Propuesto y Número de Cuotas.
 
+![Detalles de la Solicitud](./assets/Detalles_Solicitud.png)
+
 ### Según el estado, la solicitud muestra además
 
 - **Si requiere aprobación**: se muestra el comentario del ejecutivo, el tipo de aprobación requerida, un campo de comentario y los botones **"Aprobar Solicitud"** / **"Desaprobar Solicitud"**. Mientras no se apruebe o desapruebe, la solicitud no continúa.
+
+![Detalles de Aprobación](./assets/Resultado_Comite.png)
+
 - **Si aún no ha sido respondida**: un mensaje informativo indicando que se debe esperar a que un ejecutivo la gestione.
 - **Si ya fue respondida**: la sección **"Información de la Respuesta a la Solicitud"** con:
   - Fecha de Respuesta, Estado de Solicitud y (si fue exitosa) Monto Respuesta con su descuento.
@@ -263,16 +262,19 @@ Además:
   - Expander **"Detalles de la Respuesta por Deuda"**: compara por deuda el Monto Solicitado vs. el Monto Respuesta (y cuotas si aplica).
   - **Fecha Límite de Pago**, **Pago Total Obligatorio** (sí/no) y **Método de Pago** (cuando no es Validación).
 
+![Detalles de la Respuesta](./assets/Detalles_Respuesta.png)
+
 ### Acciones sobre solicitudes exitosas
 
 - **Acuerdo de Pago / Oferta de Acuerdo**: botón **"Ver Acuerdo de Pago"** (abre el PDF del acuerdo) y botón para copiar el resultado de la solicitud.
 - **Validación**: si el ejecutivo la catalogó como máximo descuento, se muestra la alerta correspondiente. Además están los botones **"Subir Solicitud de Acuerdo de Pago"** (para convertir la validación en un acuerdo) y **"Generar ContraOferta"** (para ajustar la oferta), junto con el botón para copiar el resultado.
+- **Copiar Resultado**: Botón para copiar el resultado de la solicitud a modo de mensaje 
 
-> **IMAGEN PENDIENTE:** Captura de un expander de solicitud abierto mostrando las métricas principales y la sección "Información de la Respuesta a la Solicitud".
+![Acciones de Respuesta a Solicitud](./assets/Botones_Usar.png)
 
 ---
 
-# 3. Glosario de estados de solicitud
+# 3. Glosario de Estados de Solicitud
 
 | Estado | Descripción |
 | --- | --- |
