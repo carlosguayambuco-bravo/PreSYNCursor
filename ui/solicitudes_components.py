@@ -4006,7 +4006,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
 
     with colSols:
         _renderizar_columna_top(
-            titulo="Top de Solicitudes",
+            titulo="Solicitudes",
             emoji_titulo="📥",
             entradas=tops['top_solicitudes'],
             info_usuario=tops['usuario']['solicitudes'],
@@ -4016,7 +4016,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
 
     with colEfec:
         _renderizar_columna_top(
-            titulo="Top de Efectividad",
+            titulo="% Efectividad",
             emoji_titulo="🎯",
             entradas=tops['top_efectividad'],
             info_usuario=tops['usuario']['efectividad'],
@@ -4026,7 +4026,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
 
     with colLiqs:
         _renderizar_columna_top(
-            titulo="Top de Liquidaciones",
+            titulo="Liquidaciones",
             emoji_titulo="💵",
             entradas=tops['top_liquidaciones'],
             info_usuario=tops['usuario']['liquidaciones'],
