@@ -107,7 +107,7 @@ class MetabaseService:
     
                 return self.execute_query(query)  # Reintento de la Consulta
             else:
-                print('🚯Error por Rechazo de Metabase (Código {}): {}'.format(response.status_code,err))
+                print('🚯Error por Rechazo de Metabase (Código {}): {}. Detalle: {}'.format(response.status_code,err, response.text))
                 return pd.DataFrame()
         # Segundo Error: Algun Error Adicional
         except Exception as e:

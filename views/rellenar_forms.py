@@ -44,6 +44,13 @@ cols = st.columns([1, 1])
 # Referencia del Cliente
 with cols[0]:
     referencia_cliente = st.number_input("Referencia del Cliente", help="Ingrese la referencia del cliente, Ejemplo: 3007083770", format="%d", step=1, min_value=0)
+    # Agregamos un Toggle para las Deudas Totales
+    busar_todas = st.toggle(
+        label="Buscar Todas las Deudas - No solo activas",
+        value=False,
+        key="toggle_buscar_todas_forms",
+        help="Si activado, busca todas las Deudas Activas para una Referencia"
+    )
 
 # Deuda Representante del Cliente
 with cols[1]:
@@ -52,14 +59,12 @@ with cols[1]:
     format="%d", step=1, min_value=0,
     disabled = (not st.session_state.get('id_rep_needed',False)),
     )
-
-# Agregamos un Toggle para las Deudas Totales
-busar_todas = st.toggle(
-    label="Buscar Todas las Deudas - No solo activas",
-    value=False,
-    key="toggle_buscar_todas_forms",
-    help="Si activado, busca todas las Deudas Activas para una Referencia"
-)
+    todas_reparadoras = st.toggle(
+        label="Buscar todas bajo esa Referencia (NO RECOMENDADO)",
+        value=False,
+        key="toggle_todas_reparadoras_forms",
+        help="Si esta activado, se buscaran todas las reparadoras (incluyendo bajas,inactivas,etc)"
+    )
 
 # Validamos la Referencia
 if not referencia_cliente:
@@ -72,7 +77,7 @@ id_deuda = str(id_deuda).strip().replace('.0','') if id_deuda else ''
 
 # Paso Siguiente: Obtener las Deudas Activas y la Última Actualización
 # --- Deudas Activas ---
-deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas)
+deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas,todas_reparadoras=todas_reparadoras)
 
 # Si ésta vácio entonces pasamos al segundo fallback: -> Buscar Referencia por Id_Deuda
 if deudas_activas_df.empty:
@@ -98,7 +103,7 @@ if deudas_activas_df.empty:
         st.stop()
 
     # Obtenemos las Deudas Activas con la Referencia Obtenida
-    deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas)
+    deudas_activas_df = obtener_deudas_activas_con_retry(referencia=referencia_cliente,todas=busar_todas,todas_reparadoras=todas_reparadoras)
 else:
     ref_antigua = referencia_cliente
 

@@ -1160,7 +1160,8 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     )
 
     # Imputamos el Nombre con el Correo
-    maskSinNombre = actsDF['Correo']
+    maskSinNombre = actsDF['Correo'].isna()
+    actsDF.loc[maskSinNombre,'Nombre'] = actsDF.loc[maskSinNombre,'Correo']
 
     # Validamos el DF
     if actsDF.empty:
@@ -1185,14 +1186,14 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
     return ""
 
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
-def obtener_deudas_activas_con_retry(*, referencia: str, todas: bool) -> DataFrame[DeudasActivasSchema]:
+def obtener_deudas_activas_con_retry(*, referencia: str, todas: bool, todas_reparadoras: bool) -> DataFrame[DeudasActivasSchema]:
     """
     Función principal que intenta obtener las Deudas Activas desde Metabase.
     Si la consulta falla, se cargan las Deudas Activas desde la Cartera Backup.
     """
     try:
         # Intentamos obtener los datos desde Metabase
-        return obtener_deudas_activas(referencia=referencia, usar_todas=todas)
+        return obtener_deudas_activas(referencia=referencia, usar_todas=todas, todas_reparadoras=todas_reparadoras)
     except LookupError:
         # Si la consulta a Metabase falla, cargamos la Cartera Backup
         st.warning('Berex no se encuentra disponible, cargando la Cartera Backup', icon="⚠️")
@@ -1242,12 +1243,15 @@ def execute_query_cache(query: str):
     return metabase_service.execute_query(query)
 
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia (Usando Progreso)
-def obtener_deudas_activas(*,referencia: str, usar_todas: bool) -> DataFrame[DeudasActivasSchema]:
+def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadoras: bool) -> DataFrame[DeudasActivasSchema]:
 
     st.space("medium")
     
     # Paso 1: Obtener los Datos de la Consulta SQL para Obtener las Deudas Activas
-    query_deudas = QUERY_DEUDAS.format(reference=referencia)
+    query_deudas = QUERY_DEUDAS.format(
+        reference=referencia,
+        status_cond = "IN ('active','partial_credit')" if not todas_reparadoras else "IS NOT NULL",
+    )
     progreso_busqueda = st.progress(1/5,"Buscando Deudas para la Referencia")
 
     # 2.1 Ejecutamos la Query de las Deudas
