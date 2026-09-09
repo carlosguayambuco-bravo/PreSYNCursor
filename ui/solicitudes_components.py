@@ -1625,7 +1625,13 @@ def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 @st.dialog("🗒️ Subir Solicitud de Acuerdo de Pago", dismissible=True, width="large", on_dismiss="rerun")
 def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
 
-    st.markdown("### **ℹ️ Información de la Solicitud de Acuerdo de Pago**")
+    # Definimos que es Reasignación verificando que el Correo de la Solicitud es Diferente
+    es_reasignacion = solicitud['Correo'] != st.session_state.get('user_email','')
+
+    if es_reasignacion:
+        st.markdown("### **ℹ️ Información de la Re-Subida del Acuerdo de Pago (Reasignación)**")
+    else:
+        st.markdown("### **ℹ️ Información de la Solicitud de Acuerdo de Pago**")
     st.divider()
 
     # Paso 1: Mostrar la Escogencia de Deudas de la Respuesta de la Solicitud
@@ -1742,6 +1748,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         fecha_pago=fecha_esperada_pago,
         tipo_pago=tipo_pago,
         comentario=cm_final or "",
+        es_reasignacion=es_reasignacion,
     )
 
     # Verificamos que esta solicitud no exista ya
@@ -1761,7 +1768,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
 
     with colSubir:
         if st.button(
-            label="**Subir Solicitud de Acuerdo de Pago**",
+            label="**Re-Subir Acuerdo de Pago (Reasignación)**" if es_reasignacion else "**Subir Solicitud de Acuerdo de Pago**",
             key="subir_solicitud_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
             help="Haga clic para subir la solicitud de acuerdo de pago.",
             type="primary",
@@ -3274,13 +3281,19 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
+            es_reasignable_acuerdo = (es_acuerdo_reasignable(solicitud) is True)
             file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
-            if file_id is None or file_id == "":
-                st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
+
+            # Creamos las Columnas: Link al Acuerdo, (Reasignación si Aplica) y Botón para Copiar Datos
+            if es_reasignable_acuerdo:
+                colLinkAcuerdo, colReasignar, colBotonCopiar = st.columns([3, 2, 1], vertical_alignment="center")
             else:
-                # Creamos 2 Botonos: Link al Acuerdo de Pago y Botón para Copiar datos de la solicitud
                 colLinkAcuerdo, colBotonCopiar = st.columns([4, 1], vertical_alignment="center")
-                with colLinkAcuerdo:
+
+            with colLinkAcuerdo:
+                if file_id is None or file_id == "":
+                    st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
+                else:
                     url_acuerdo_pago = obtener_link_acuerdo_pago(file_id)
                     st.link_button(
                         label="📄 Ver Acuerdo de Pago",
@@ -3289,9 +3302,22 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                         type="primary",
                         help="Haga clic para ver el Acuerdo de Pago en PDF.",
                     )
-                with colBotonCopiar:
-                    txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
-                    copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
+
+            if es_reasignable_acuerdo:
+                with colReasignar: # type: ignore
+                    if st.button(
+                        label="**Re-Subir Acuerdo de Pago**",
+                        width="stretch",
+                        type="primary",
+                        key="reasignar_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+                        help="Botón para Re-Subir un Acuerdo de Pago de una Solicitud Reasignable (Fecha Límite de Pago Vencida y Sin Liquidar).",
+                        icon="🔄",
+                    ):
+                        dialog_subir_acuerdo_pago(solicitud=solicitud)
+
+            with colBotonCopiar:
+                txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
+                copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
         else:
 
             # Mostramos la Respuesta de Max_Descuento_Otorgado

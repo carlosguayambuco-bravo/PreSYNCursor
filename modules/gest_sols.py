@@ -1354,12 +1354,17 @@ def crear_plantilla_solicitud_acuerdo_pago(
         fecha_pago: pd.Timestamp,
         tipo_pago: str,
         comentario: str,
+        es_reasignacion: bool = False,
     ) -> dict[str, Any]:
     """Crea la Plantilla de Solicitud a subir a partir de la validación exitosa
 
     Args:
         solicitud (pd.Series): Los Datos de la Solicitud actual
         selected_ids (list[str]): Lista de los ID_Deuda a subir para la nueva solicitud
+        fecha_pago (pd.Timestamp): La Fecha Esperada de Pago de la nueva solicitud
+        tipo_pago (str): El Tipo de Pago de la nueva solicitud
+        comentario (str): El Comentario del Negociador para la nueva solicitud
+        es_reasignacion (bool): Si la nueva solicitud es una Reasignación de un Acuerdo Caído
 
     Returns:
         pd.Series: La plantilla de la nueva solicitud de acuerdo de pago.
@@ -1392,7 +1397,7 @@ def crear_plantilla_solicitud_acuerdo_pago(
             'Nombre_Cliente': solicitud['Metadata_Solicitud']['Nombre_Cliente'],
             'Comentario_Negociador': comentario,
             'Origen_Solicitud': solicitud['ID_Solicitud'],
-            'Es_Reasignado': (solicitud['Correo'] != st.session_state['user_email']),
+            'Es_Reasignado': es_reasignacion,
         }),
         'Estado_Solicitud': 'Sin Tocar',
     }
