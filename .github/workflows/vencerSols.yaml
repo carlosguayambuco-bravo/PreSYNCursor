@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install nbconvert ipykernel
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f automations/requirements.txt ]; then pip install -r automations/requirements.txt; fi
       - name: Ejecución de Vencimiento de Solicitudes
         env:
           MI_JSON: ${{ secrets.MI_JSON }}
