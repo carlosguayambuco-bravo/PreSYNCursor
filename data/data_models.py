@@ -8,7 +8,7 @@ import pandas as pd
 import pandera.pandas as pa
 from pandera.typing import Series
 # Librerías Locales
-from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD
+from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD, TIPOS_CONTRAOFERTAS, TIPOS_ETIQUETAS, TIPOS_STATUS
 
 class DeudasSolicitud(TypedDict):
     Id_Deuda: str
@@ -286,12 +286,13 @@ class MetadataPendienteCruce(TypedDict):
     Fecha_Identificacion: datetime
     Fecha_Limite_Pago: datetime
     Maximo_Descuento: bool
-    Etiqueta: Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
+    Etiqueta: TIPOS_ETIQUETAS
     Motivos_Cruce: list[str]
     Deudas_Posibles: List[DeudasPosiblesCruce]
-    Cruce_Status: Literal['Sin Reconocer','Reconocido','Subido Alianzas']
+    Cruce_Status: TIPOS_STATUS
     Casa_Cobro: str
     Ejecutivo_Subida: str
+    Tipo_Contraoferta: TIPOS_CONTRAOFERTAS
     Monto_Propuesto: NotRequired[float]
     Alias_Casa: NotRequired[str]
     Id_Definitivo: NotRequired[str]

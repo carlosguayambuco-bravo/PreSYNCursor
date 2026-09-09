@@ -321,6 +321,36 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
     elif serie_fecha.min() < pd.Timestamp.now('America/Bogota').tz_localize(None).normalize():
         st.warning("Se están subiendo actualizaciones ya vencidas (**Fecha Límite Menor a Hoy**)")
 
+    tipo_descuento = tipo_descuento.replace('*','')
+
+    if tipo_descuento != "Descuento Máximo":
+        # Ahora Agregamos la Definición de ContraOfertas
+        with st.container(border=True):
+            st.markdown("### **🗒️ Tipo de ContraOferta Posible**")
+            tipo_contraoferta = st.radio(
+                label="**Tipo de ContraOferta**",
+                options=[
+                    "**ContraOferta sin Compromiso**",
+                    "**ContraOferta de Pago Obligatorio**",
+                ],
+                captions = [
+                    "Se pueden hacer validaciones sin necesidad de pago",
+                    "Todas las contraofertas son directamente para pago",
+                ],
+                index=None,
+                key = "tipo_contraoferta_{}".format(base_key),
+                horizontal=True,
+            )
+
+        if tipo_contraoferta is None:
+            st.info("Selecciona el Tipo de Contraoferta que se acepta")
+            st.stop()
+
+        tipo_contraoferta = tipo_contraoferta.replace("*","")
+    else:
+        tipo_contraoferta = tipo_descuento
+
+
     st.divider()
 
     # --- 4. Ejecución del Algoritmo de Identificación de Deudas ---
@@ -418,6 +448,7 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                     'fecha_limite_serie': serie_fecha,
                     'tipo_descuento_base': tipo_descuento,
                     'nombre_archivo': uploaded_file.name or "Sin Nombre",
+                    'tipo_contraoferta_base': tipo_contraoferta,
                 }
                 st.toast("✅ Modelo Ejecutado con Éxito", icon="⚙️")
 
@@ -505,6 +536,7 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                             ejecutivo_subida=st.session_state.get('user_email', 'Sin Correo'),
                             descuento_maximo = pkg['tipo_descuento_base'] == 'Descuento Máximo',
                             nombre_archivo = pkg['nombre_archivo'],
+                            tipo_contraoferta = pkg['tipo_contraoferta_base'],
                             alias_casa=(alias or None),
                             id_deuda_col=(COL_ID_DEUDA if COL_ID_DEUDA in pkg['cruce_std'].columns else None),
                         )

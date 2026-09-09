@@ -25,7 +25,8 @@ from modules.constants import (
     COLUMNAS_MAPEABLES,
     ETIQUETA_EXACTO,
     ETIQUETA_NULO,
-    MIN_LEN_TEXTO
+    MIN_LEN_TEXTO,
+    TIPOS_CONTRAOFERTAS
 )
 from services import GoogleDriveService
 from utils.helpers_general import cleanNumber
@@ -484,9 +485,10 @@ def create_metadata_cruce(*,
         etiqueta: str,
         motivos_cruce: list[str],
         deudas_posibles: list[DeudasPosiblesCruce],
-        cruce_status: str = 'Sin Reconocer',
         casa_cobro: str,
         ejecutivo_subida: str,
+        tipo_contraoferta: TIPOS_CONTRAOFERTAS,
+        cruce_status: str = 'Sin Reconocer',
         alias_casa: Optional[str] = None,
         id_definitivo: Optional[str] = None,
         portafolio_ids: Optional[str] = None,
@@ -509,6 +511,7 @@ def create_metadata_cruce(*,
         Casa_Cobro=casa_cobro,
         Ejecutivo_Subida=ejecutivo_subida,
         Ultima_Actualizacion=ultima_actualizacion,
+        Tipo_Contraoferta = tipo_contraoferta,
     )
     # Paso 2: Agregar las Claves Opcionales (solo si tienen valor)
     if alias_casa:
@@ -564,6 +567,7 @@ def build_pendiente_cruce_df(*,
         ejecutivo_subida: str,
         descuento_maximo: bool,
         nombre_archivo: str,
+        tipo_contraoferta: TIPOS_CONTRAOFERTAS,
         alias_casa: Optional[str] = None,
         id_deuda_col: Optional[str] = None,
     ) -> DataFrame[PendienteCruceSchema]:
@@ -643,7 +647,8 @@ def build_pendiente_cruce_df(*,
             id_definitivo=id_definitivo,
             descuento_maximo = descuento_maximo,
             nombre_archivo = nombre_archivo,
-            monto_propuesto=monto_propuesto
+            monto_propuesto=monto_propuesto,
+            tipo_contraoferta = tipo_contraoferta,
         )
 
         # Agregar la Fila de Salida

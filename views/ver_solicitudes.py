@@ -67,13 +67,22 @@ if tabResumen.open:
         else:
             correos_revisar = solicitudes_filtered['Correo'].unique().tolist()
 
-        # Mostramos un Resumen general de las solicitudes 
-        st.header("📊 Resumen General de Solicitudes")
+        # Mostramos el Top de Solicitudes, Efectividad y Liquidaciones de los Negociadores
+        mostrar_resumen_solicitudes_negociador(
+            solicitudes=solicitudes_df,
+            nego_name='tops_negociadores',
+            show_header=False,
+            mostrar_top=True,
+        )
+
+        st.divider()
+
         mostrar_resumen_solicitudes_negociador(solicitudes=solicitudes_filtered, nego_name='general', show_header=False)
 
         st.divider()
 
         st.header("👌 Resumen de Solicitudes por Negociador")
+
         for correo in correos_revisar:
             # Definimos el Nombre del Expander
             nombre_negociador = obtener_nombre_negociador(email=correo)

@@ -19,7 +19,7 @@ from data.data_uploader import update_massive_solicitudes_in_google_sheets, upda
 from data.data_models import MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
-from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador
+from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador, obtener_nombres_negociadores_masivo
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized
 
@@ -1183,6 +1183,122 @@ def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any
         'deudas_clientes_tipo_sol': deudas_clientes_tipo_sol,
         'total_deudas_unicas': len(ids_deudas_unicos_general),
         'total_clientes_unicos': len(cedulas_unicas_general),
+    }
+
+# Función Auxiliar para Construir un Top (Top 5) y la Posición del Usuario Actual
+def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, user_email: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    Construye el Top 5 de una Métrica por Negociador junto con la Posición del Usuario Actual.
+
+    Args:
+        conteo (pd.Series): Serie con el Valor de la Métrica por Correo del Negociador.
+        nombres_serie (pd.Series): Serie con el Nombre Corto de cada Negociador indexada por Correo.
+        user_email (str): Correo del Usuario Actual.
+
+    Returns:
+        tuple[list[dict[str, Any]], dict[str, Any]]:
+            - Lista con el Top 5: [{'correo': str, 'nombre': str, 'valor': int|float}].
+            - Diccionario con la Posición, Nombre y Valor del Usuario Actual.
+    """
+    # Paso 1: Crear el DataFrame del Conteo con el Nombre Corto de cada Negociador
+    top_df = conteo.reset_index()
+    top_df.columns = ['correo', 'valor']
+    top_df['nombre'] = top_df['correo'].map(nombres_serie).fillna(top_df['correo'])
+
+    # Paso 2: Ordenar de Mayor a Menor (Desempate Alfabético por Nombre para Determinismo)
+    top_df = top_df.sort_values(['valor', 'nombre'], ascending=[False, True]).reset_index(drop=True)
+
+    # Paso 3: Obtener el Top 5
+    top_5 = top_df.head(5).to_dict('records')
+
+    # Paso 4: Obtener la Posición y el Valor del Usuario Actual
+    mask_usuario = (top_df['correo'] == user_email)
+    if mask_usuario.any():
+        idx_usuario = int(mask_usuario.idxmax())
+        info_usuario = {
+            'posicion': idx_usuario + 1,
+            'valor': top_df.loc[idx_usuario, 'valor'],
+            'nombre': top_df.loc[idx_usuario, 'nombre'],
+        }
+    else:
+        # Si el Usuario no ha subido Solicitudes se deja de Últimas
+        info_usuario = {
+            'posicion': len(top_df) + 1,
+            'valor': 0,
+            'nombre': nombres_serie.get(user_email, user_email),
+        }
+
+    return top_5, info_usuario
+
+# Función para Obtener los Tops de los Negociadores (Solicitudes, Liquidaciones y Efectividad)
+def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) -> dict[str, Any]:
+    """
+    Calcula los Tops de los Negociadores a partir de las Solicitudes:
+    - Top de Solicitudes: Conteo de Solicitudes por Negociador (Correo).
+    - Top de Liquidaciones: Conteo de Solicitudes con al menos una Deuda Liquidada.
+    - Top de Efectividad: Porcentaje de Efectividad (Liquidado / Solicitado) por Negociador.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+        user_email (str): Correo del Usuario Actual (para Resaltar su Posición).
+
+    Returns:
+        dict[str, Any]: Diccionario con los Tops (Top 5) y la Posición del Usuario:
+            - 'top_solicitudes': Top 5 de Solicitudes ('correo', 'nombre', 'valor').
+            - 'top_liquidaciones': Top 5 de Liquidaciones ('correo', 'nombre', 'valor').
+            - 'top_efectividad': Top 5 de Efectividad ('correo', 'nombre', 'valor' en %).
+            - 'usuario': Posición, Nombre y Valor del Usuario en cada Top.
+    """
+    # Paso 0: Si no hay Solicitudes devolvemos los Tops Vacíos
+    if solicitudes_df.empty:
+        return {
+            'top_solicitudes': [],
+            'top_liquidaciones': [],
+            'top_efectividad': [],
+            'usuario': {
+                'solicitudes': {'posicion': 0, 'valor': 0, 'nombre': user_email},
+                'liquidaciones': {'posicion': 0, 'valor': 0, 'nombre': user_email},
+                'efectividad': {'posicion': 0, 'valor': 0.0, 'nombre': user_email},
+            },
+        }
+
+    # Paso 1: Obtener los Nombres Cortos de los Negociadores de Forma Masiva
+    correos_unicos = list(dict.fromkeys(solicitudes_df['Correo'].dropna().astype(str).tolist()))
+    if user_email and (user_email not in correos_unicos):
+        correos_unicos.append(user_email)
+    nombres_serie = obtener_nombres_negociadores_masivo(correos=pd.Series(correos_unicos))
+
+    # Paso 2: Top de Solicitudes (Conteo de Solicitudes por Correo del Negociador)
+    conteo_sols = solicitudes_df.groupby('Correo').size()
+
+    # Paso 3: Crear la Columna Estado_Liquidacion si no Existe (Pronto será Nativa del DF)
+    solicitudes_aux = solicitudes_df.copy()
+    if 'Estado_Liquidacion' not in solicitudes_aux.columns:
+        serie_liq = solicitudes_aux.apply(lambda r: obtener_estado_liquidacion(solicitud=r), axis=1) # type: ignore
+        solicitudes_aux['Estado_Liquidacion'] = serie_liq.mask(serie_liq.isna(), "N/A")
+
+    # Paso 4: Top de Liquidaciones (Conteo de Solicitudes Liquidadas por Correo)
+    mask_liquidadas = solicitudes_aux['Estado_Liquidacion'].astype(str).str.contains("Liquidado", regex=False)
+    conteo_liqs = solicitudes_aux.loc[mask_liquidadas].groupby('Correo').size()
+
+    # Paso 5: Top de Efectividad (Liquidado / Solicitado en Porcentaje)
+    efectividad = (conteo_liqs.reindex(conteo_sols.index, fill_value=0) / conteo_sols) * 100
+
+    # Paso 6: Construir los Tops y la Posición del Usuario en cada Uno
+    top_solicitudes, usuario_sols = _construir_top_negociador(conteo=conteo_sols, nombres_serie=nombres_serie, user_email=user_email)
+    top_liquidaciones, usuario_liqs = _construir_top_negociador(conteo=conteo_liqs, nombres_serie=nombres_serie, user_email=user_email)
+    top_efectividad, usuario_efec = _construir_top_negociador(conteo=efectividad, nombres_serie=nombres_serie, user_email=user_email)
+
+    # Devolvemos los Tops y la Posición del Usuario
+    return {
+        'top_solicitudes': top_solicitudes,
+        'top_liquidaciones': top_liquidaciones,
+        'top_efectividad': top_efectividad,
+        'usuario': {
+            'solicitudes': usuario_sols,
+            'liquidaciones': usuario_liqs,
+            'efectividad': usuario_efec,
+        },
     }
 
 def obtener_df_bancos_sin_responder(solicitudes_df: pd.DataFrame) -> pd.DataFrame:

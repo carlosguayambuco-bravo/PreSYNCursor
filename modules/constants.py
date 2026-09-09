@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from typing import Literal
 # Librerías de Terceros
 # Librerías Locales
 
@@ -269,3 +270,7 @@ COLUMNAS_MAPEABLES = [
     (COL_ID_DEUDA, 'Id_Deuda (Opcional)', ['id deuda', 'id_deuda', 'id de la deuda']),
     (COL_MONTO_PROPUESTO, 'Monto Propuesto (Opcional)', ['monto propuesto', 'propuesta', 'descuento']),
 ]
+
+TIPOS_ETIQUETAS = Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
+TIPOS_STATUS = Literal['Sin Reconocer','Reconocido','Subido Alianzas']
+TIPOS_CONTRAOFERTAS = Literal['ContraOferta sin Compromiso','ContraOferta de Pago Obligatorio','Descuento Máximo']

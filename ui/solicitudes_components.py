@@ -1,7 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 import math
-from typing import Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 from time import sleep
 # Librerías de Terceros
 import numpy as np
@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -3939,8 +3939,108 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
             with st.container(border=True):
                 st.plotly_chart(fig_solicitudes, width="stretch", key="timeline_solicitudes_ejecutivo")
 
-# Función Auxiliar para mostrar el resumen de una persona de sus solicitudes
-def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True) -> None:
+# Función Auxiliar para Obtener el Estilo (Emoji y Color de Fondo) de una Entrada del Top según su Puesto
+def _obtener_estilo_entrada_top(puesto: int) -> tuple[str, str]:
+    if puesto == 1:
+        # Top 1: Fondo RAINBOW y Emoji de Cabra
+        return "🐐", "background: linear-gradient(90deg, #e53935, #f57c00, #fbc02d, #43a047, #1e88e5, #5e35b1); color: #ffffff;"
+    elif puesto == 2:
+        # Top 2: Fondo Plateado/Gris y Emoji de Medalla de 2do Puesto
+        return "🥈", "background: linear-gradient(135deg, #bdbdbd, #e0e0e0); color: #212121;"
+    elif puesto == 3:
+        # Top 3: Fondo Naranja y Emoji de Medalla sin Puesto
+        return "🏅", "background: linear-gradient(135deg, #ffa726, #ef6c00); color: #ffffff;"
+    else:
+        # Top 4-5: Fondo Azul y Emoji de Saludo Militar
+        return "🫡", "background: linear-gradient(135deg, #42a5f5, #1e88e5); color: #ffffff;"
+
+# Función Auxiliar para Renderizar una Columna de un Top de Negociadores
+def _renderizar_columna_top(
+    *,
+    titulo: str,
+    emoji_titulo: str,
+    entradas: list[dict[str, Any]],
+    info_usuario: dict[str, Any],
+    user_email: str,
+    formato_valor: Callable[[Any], str],
+) -> None:
+    # Paso 1: Mostrar el Título de la Columna
+    st.markdown("### {} **{}**".format(emoji_titulo, titulo))
+
+    filas_html = []
+
+    # Paso 2: Construir las Entradas del Top 5 (El Usuario Actual siempre en Bold)
+    for i, entrada in enumerate(entradas, start=1):
+        emoji, estilo = _obtener_estilo_entrada_top(i)
+        es_usuario = (entrada.get('correo') == user_email)
+        texto = "{} {}: {}".format(emoji, entrada['nombre'], formato_valor(entrada['valor']))
+        if es_usuario:
+            texto = "<strong>{}</strong>".format(texto)
+        filas_html.append('<div style="{} padding: 8px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo, texto))
+
+    # Paso 3: Si el Usuario no está en el Top 5, Mostrar Puntos y su Posición al Final (Sin Emoji)
+    if info_usuario['posicion'] > len(entradas):
+        filas_html.append('<div style="text-align: center; color: #9e9e9e; padding: 2px 0 4px 0;">•••</div>')
+        texto_usuario = "#{} <strong>{}</strong>: {}".format(info_usuario['posicion'], info_usuario['nombre'], formato_valor(info_usuario['valor']))
+        estilo_usuario = "background: linear-gradient(135deg, #455a64, #37474f); color: #ffffff;"
+        filas_html.append('<div style="{} padding: 8px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo_usuario, texto_usuario))
+
+    # Paso 4: Renderizar el HTML de la Columna
+    st.markdown("".join(filas_html), unsafe_allow_html=True)
+
+# Función Auxiliar para Mostrar el Top de Solicitudes, Efectividad y Liquidaciones de los Negociadores
+def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
+    # Paso 0: Si no hay Solicitudes no hay Tops que Mostrar
+    if solicitudes.empty:
+        st.info("No hay solicitudes disponibles para calcular los Tops de los Negociadores.", icon="ℹ️")
+        return
+
+    # Paso 1: Obtener el Correo del Usuario Actual
+    user_email = st.session_state.get('user_email', '')
+
+    # Paso 2: Calcular los Tops de los Negociadores
+    tops = obtener_tops_negociadores(solicitudes_df=solicitudes, user_email=user_email)
+
+    # Paso 3: Mostrar los Tops en 3 Columnas (La de Efectividad un Poco más Grande que las Otras)
+    colSols, colEfec, colLiqs = st.columns([3, 4, 3], vertical_alignment="top", gap="small")
+
+    with colSols:
+        _renderizar_columna_top(
+            titulo="Top de Solicitudes",
+            emoji_titulo="📥",
+            entradas=tops['top_solicitudes'],
+            info_usuario=tops['usuario']['solicitudes'],
+            user_email=user_email,
+            formato_valor=lambda v: "1 solicitud" if int(v) == 1 else "{} solicitudes".format(int(v)),
+        )
+
+    with colEfec:
+        _renderizar_columna_top(
+            titulo="Top de Efectividad",
+            emoji_titulo="🎯",
+            entradas=tops['top_efectividad'],
+            info_usuario=tops['usuario']['efectividad'],
+            user_email=user_email,
+            formato_valor=lambda v: "{:.1f}%".format(v),
+        )
+
+    with colLiqs:
+        _renderizar_columna_top(
+            titulo="Top de Liquidaciones",
+            emoji_titulo="💵",
+            entradas=tops['top_liquidaciones'],
+            info_usuario=tops['usuario']['liquidaciones'],
+            user_email=user_email,
+            formato_valor=lambda v: "1 liquidación" if int(v) == 1 else "{} liquidaciones".format(int(v)),
+        )
+
+# Función para Mostrar el Resumen de Solicitudes del Negociador (y opcionalmente los Tops de Negociadores)
+def mostrar_resumen_solicitudes_negociador(*, solicitudes: pd.DataFrame, nego_name: str, show_header: bool = True, mostrar_top: bool = False) -> None:
+    # Paso 0: Si se pide mostrar el Top de Negociadores, solo mostramos los Tops
+    if mostrar_top:
+        mostrar_tops_negociadores(solicitudes=solicitudes)
+        return
+
     # Paso 1: Verificar si hay solicitudes
     if solicitudes.empty:
         st.info("No hay solicitudes disponibles para mostrar.", icon="ℹ️")

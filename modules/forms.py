@@ -141,6 +141,18 @@ def validar_descuento_base(*, deuda: str, deudas_info: dict[str, float]) -> tupl
 
     return True, "La deuda cumple con la restriccion de ofertas menores a base."
 
+# Función Auxiliar para Acortar el Nombre Completo de un Negociador (Primer Nombre y Primer Apellido)
+def _obtener_nombre_corto_negociador(nombre_completo: str) -> str:
+    # Si el Nombre es NaN devolvemos Vacío para poder dejar el Correo después
+    if pd.isna(nombre_completo):
+        return ""
+
+    # Ahora Vamos a dejar solo el Primer Nombre y el Primer Apellido
+    nombre_partes = str(nombre_completo).split()
+    if len(nombre_partes) >= 4:
+        return "{} {}".format(nombre_partes[0], nombre_partes[2])
+    return str(nombre_completo)
+
 # Función para Obtener el Nombre del Negociador dado el Email
 def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
     # Paso 1: Obtener los Datos del Headcount
@@ -156,13 +168,37 @@ def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
             return nombre_completo # type: ignore
 
         # Ahora Vamos a dejar solo el Primer Nombre y el Primer Apellido
-        nombre_partes = nombre_completo.split() # type: ignore
-        if len(nombre_partes) >= 4:
-            return "{} {}".format(nombre_partes[0], nombre_partes[2])
-        else:
-            return nombre_completo # type: ignore
+        return _obtener_nombre_corto_negociador(nombre_completo)
 
     return "No Encontrado"
+
+# Función para Obtener los Nombres (Cortos) de los Negociadores de Forma Masiva
+def obtener_nombres_negociadores_masivo(*, correos: pd.Series) -> pd.Series:
+    """
+    Obtiene los Nombres Cortos (Primer Nombre y Primer Apellido) de los Negociadores
+    dados sus Correos, de forma Masiva mediante un Merge con el HeadCount de Negociación.
+    En caso de no Encontrar el Nombre de un Correo se deja el Correo para que los
+    groupby funcionen correctamente.
+
+    Args:
+        correos (pd.Series): Serie con los Correos de los Negociadores.
+
+    Returns:
+        pd.Series: Serie con el Nombre Corto de cada Negociador indexada por su Correo.
+    """
+    # Paso 1: Obtener los Datos del Headcount
+    headcount_df = load_headcount_negociacion()
+    # Paso 2: Crear un DataFrame con los Correos Únicos (Sin NaN y Sin Duplicados)
+    correos_unicos = list(dict.fromkeys(correos.dropna().astype(str).tolist()))
+    correos_df = pd.DataFrame({'Correo': correos_unicos})
+    # Paso 3: Hacer el Merge con el HeadCount para Obtener los Nombres Completos
+    nombres_df = correos_df.merge(headcount_df[['Correo', 'Nombre']], on='Correo', how='left')
+    # Paso 4: Dejar solo el Primer Nombre y el Primer Apellido
+    nombres_df['Nombre_Corto'] = nombres_df['Nombre'].apply(_obtener_nombre_corto_negociador)
+    # Paso 5: En caso de No Encontrar el Nombre, Dejar el Correo
+    nombres_df['Nombre_Corto'] = nombres_df['Nombre_Corto'].mask(nombres_df['Nombre_Corto'] == "", nombres_df['Correo'])
+    # Paso 6: Devolver la Serie con el Nombre Corto indexado por el Correo
+    return pd.Series(nombres_df['Nombre_Corto'].values, index=nombres_df['Correo'])
 
 def obtener_correo_lider_negociador(*, email: str) -> Optional[str]:
     # Paso 1: Obtener los Datos del Headcount
