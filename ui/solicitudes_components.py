@@ -1709,7 +1709,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
 
     with colTipoPago:
         if hay_cuotas:
-            posibles_pagos = ['Estructuraado','Refi']
+            posibles_pagos = ['Estructurado','Refi']
         else:
             posibles_pagos = ['Tradicional','Crédito']
         tipo_pago = st.selectbox(

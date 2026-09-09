@@ -135,7 +135,7 @@ Esta sección solo aparece cuando el Tipo de Solicitud es **Acuerdo de Pago** u 
 
 - **Fecha Esperada de Pago**: la fecha en la que se esperaría realizar el pago de la deuda. Por defecto es hoy y **no puede ser anterior** a la fecha actual.
 - **Tipo de Pago**: depende de si la solicitud es a cuotas o no:
-  - Solicitud **a cuotas**: `Estructuraado`  o `Refi`.
+  - Solicitud **a cuotas**: `Estructurado`  o `Refi`.
   - Solicitud **sin cuotas**: `Tradicional` o `Crédito`.
 
 Ambos campos son obligatorios para continuar.

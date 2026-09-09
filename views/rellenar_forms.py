@@ -388,7 +388,7 @@ if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
         # Verificamos los Pagos Posibles según la Cantidad de Cuotas
         solicitud_a_cuotas = any(deuda_info['Num_Cuotas'] > 1 for deuda_info in info_completa_deudas)
         if solicitud_a_cuotas:
-            posibles_pagos = ['Estructuraado','Refi']
+            posibles_pagos = ['Estructurado','Refi']
         else:
             posibles_pagos = ['Tradicional','Crédito']
 

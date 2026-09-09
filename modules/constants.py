@@ -45,7 +45,7 @@ ESTADOS_PREFINALIZAR_SOLICITUD = [
 
 PAGOS_POSIBLES_SOLICITUD = [
     'Tradicional',
-    'Estructuraado',
+    'Estructurado',
     'Refi',
     'Crédito',
 ]
