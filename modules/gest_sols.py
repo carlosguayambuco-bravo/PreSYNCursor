@@ -8,6 +8,7 @@ from io import BytesIO
 import numpy as np
 import pandas as pd
 from pandera.typing import DataFrame
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import NameObject, TextStringObject
 from pypdf.errors import FileNotDecryptedError, WrongPasswordError
@@ -1571,3 +1572,73 @@ def unir_pdfs(*,archivos_pdf, contrasenia_inicial: str|None =None) -> bytes:
     pdf_buffer.close()
 
     return bytes_resultado
+
+def convertir_imagenes_a_pdf(*, imagenes) -> bytes:
+    """
+    Convierte una lista de archivos de imagen (provenientes de st.file_uploader)
+    en un PDF en memoria con una página por cada imagen.
+
+    Args:
+        imagenes: Lista de archivos de imagen subidos.
+
+    Returns:
+        bytes: Bytes del PDF generado a partir de las imágenes.
+    """
+    if not isinstance(imagenes, list):
+        imagenes = [imagenes]
+
+    # Paso 1: Abrir cada Imagen y Normalizarla a RGB (Para Compatibilidad con el PDF)
+    imagenes_pil = []
+    for imagen in imagenes:
+        imagen.seek(0)
+        with Image.open(imagen) as img:
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            imagenes_pil.append(img.copy())
+
+    # Si no hay Imágenes, devolvemos un PDF Vacío
+    if not imagenes_pil:
+        return bytes()
+
+    # Paso 2: Guardar las Imágenes como un PDF en Memoria (Una Página por Imagen)
+    pdf_buffer = BytesIO()
+    imagenes_pil[0].save(
+        pdf_buffer,
+        format="PDF",
+        save_all=True,
+        append_images=imagenes_pil[1:],
+    )
+    return pdf_buffer.getvalue()
+
+def add_images_to_pdf(*, pdf_bytes: bytes, images) -> bytes:
+    """
+    Añade las Imágenes al Final de un PDF existente como Páginas Adicionales.
+
+    Si no hay imágenes, devuelve el PDF original sin cambios.
+
+    Args:
+        pdf_bytes (bytes): Bytes del PDF base al que se añadirán las imágenes.
+        images: Lista de archivos de imagen a añadir al final del PDF.
+
+    Returns:
+        bytes: Bytes del PDF final con las imágenes añadidas al final.
+    """
+    # Paso 1: Si no hay Imágenes, devolvemos el PDF Original sin cambios
+    if not images:
+        return pdf_bytes
+
+    # Paso 2: Convertimos las Imágenes a un PDF en Memoria
+    imagenes_pdf_bytes = convertir_imagenes_a_pdf(imagenes=images)
+    if not imagenes_pdf_bytes:
+        return pdf_bytes
+
+    # Paso 3: Unimos el PDF Base con el PDF de Imágenes al Final
+    merger = PdfWriter()
+    merger.append(PdfReader(BytesIO(pdf_bytes)))
+    merger.append(PdfReader(BytesIO(imagenes_pdf_bytes)))
+
+    pdf_buffer = BytesIO()
+    merger.write(pdf_buffer)
+    merger.close()
+
+    return pdf_buffer.getvalue()

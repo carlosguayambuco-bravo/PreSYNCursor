@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
 
@@ -815,31 +815,41 @@ def construir_respuesta_solicitud_acuerdo_pago(*, solicitud: pd.Series, solicitu
             )
 
             acuerdo_pdf_list = st.file_uploader(
-                label="**Subir Acuerdo(s) de Pago**",
-                type=["pdf"],
+                label="**Subir Acuerdo(s) de Pago e Imágenes**",
+                type=["pdf", "png", "jpg", "jpeg"],
                 key="subir_acuerdo_pago_{}{}".format(solicitud['ID_Solicitud'], sufijo),
-                help="Suba el archivo PDF del acuerdo de pago.",
+                help="Suba el archivo PDF del acuerdo de pago y/o imágenes que se añadirán al final del PDF.",
                 accept_multiple_files=True,
             )
             if acuerdo_pdf_list is None or not acuerdo_pdf_list or len(acuerdo_pdf_list) == 0:
-                st.warning("Debe subir un archivo PDF del acuerdo de pago para poder finalizar la solicitud.")
+                st.warning("Debe subir un archivo PDF o imagen del acuerdo de pago para poder finalizar la solicitud.")
                 st.stop()
+
+            # Separamos los Archivos Subidos entre PDFs e Imágenes (Los PDFs se priorizan primero)
+            archivos_pdf = [f for f in acuerdo_pdf_list if (f.type == "application/pdf") or f.name.lower().endswith(".pdf")]
+            imagenes_subidas = [f for f in acuerdo_pdf_list if (f.type.startswith("image/")) or f.name.lower().endswith((".png", ".jpg", ".jpeg"))]
 
             # Generamos la Metadata de la Solicitud
             metadata_to_add_acuerdo = generate_plantilla_serie_acuerdo(solicitud=solicitud_respuesta, deudas=selected_ids, sufijo=sufijo)
 
             # Guardamos la Metadata en el PDF
             try:
-                # Obtenemos los bytes del archivo subido
-                bytes_acuerdo = unir_pdfs(
-                    archivos_pdf = acuerdo_pdf_list,
-                    contrasenia_inicial = st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula'])
-                )
+                # Obtenemos los bytes del archivo subido (Los PDFs primero; si solo hay Imágenes, son el PDF Base)
+                if archivos_pdf:
+                    bytes_acuerdo = unir_pdfs(
+                        archivos_pdf = archivos_pdf,
+                        contrasenia_inicial = st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula'])
+                    )
+                else:
+                    bytes_acuerdo = convertir_imagenes_a_pdf(imagenes=imagenes_subidas)
                 bytes_acuerdo = add_metadata_to_uploaded_pdf(
                     pdf_bytes=bytes_acuerdo,
                     metadata=metadata_to_add_acuerdo.to_dict(),
                     password=st.session_state.get("pdf_password_{}{}".format(metadata_to_add_acuerdo['ID_Solicitud'], sufijo), solicitud['Cedula'])
                 )
+                # Añadimos las Imágenes al Final del PDF (Solo si hay PDF Base, para no Duplicarlas)
+                if archivos_pdf:
+                    bytes_acuerdo = add_images_to_pdf(pdf_bytes=bytes_acuerdo, images=imagenes_subidas)
             except Exception as e:
                 st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
                     str(e)
@@ -864,6 +874,17 @@ def construir_respuesta_solicitud_acuerdo_pago(*, solicitud: pd.Series, solicitu
             if (bytes_acuerdo is None) or (len(bytes_acuerdo) == 0):
                 st.warning("Debes oprimir el Botón de Generar PDF para poder generar el Acuerdo de Pago")
                 st.stop()
+
+            # Añadimos la Posibilidad de Subir Imágenes para Añadirlas al Final del PDF Generado
+            imagenes_subidas = st.file_uploader(
+                label="**Subir Imagen(es) para Añadir al Final del Acuerdo**",
+                type=["png", "jpg", "jpeg"],
+                key="subir_imagenes_acuerdo_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                help="Suba imágenes (soportes de pago, comprobantes, etc.) que se añadirán al final del acuerdo de pago generado.",
+                accept_multiple_files=True,
+            )
+            # Añadimos las Imágenes al Final del PDF Generado (si hay)
+            bytes_acuerdo = add_images_to_pdf(pdf_bytes=bytes_acuerdo, images=imagenes_subidas or [])
 
         # Creamos un popover para mostrar el PDF generado o subido
         with st.expander("**📄 Vista Previa del Acuerdo de Pago**", expanded=False):
@@ -957,6 +978,7 @@ def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
         'formato_pago_{}',
         'deudas_addendums_solicitud_info_{}',
         'subir_acuerdo_pago_{}',
+        'subir_imagenes_acuerdo_{}',
         'pdf_password_{}',
         'acuerdo_pago_subido_{}',
         'id_acuerdo_pago_subido_{}',
