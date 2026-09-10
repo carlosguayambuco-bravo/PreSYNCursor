@@ -241,12 +241,7 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
         solicitudes_df = solicitudes_df[solicitudes_df["Timestamp"] < pd.Timestamp(fecha_max) + pd.Timedelta(days=1)]
 
     if not (tipo_liquidacion is None) and tipo_liquidacion != "Todos":
-        # Primero Obtenemos el Tipo de Liquidación para cada Fila
-        if not 'Estado_Liquidacion' in solicitudes_df.columns:
-            liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
-            liq_serie = liq_serie.mask(liq_serie == None, "N/A")
-        else:
-            liq_serie = solicitudes_df['Estado_Liquidacion']
+        liq_serie = solicitudes_df['Estado_Liquidacion']
         # Ahora definimos el Filtro
         filtro_liq = (liq_serie == tipo_liquidacion)
         # Por último, Aplicamos el Filtro
@@ -505,7 +500,7 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
 
     if tipo_liquidacion != "Todos":
         # Primero Obtenemos el Tipo de Liquidación para cada Fila
-        liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+        liq_serie = solicitudes_df['Estado_Liquidacion']
         liq_serie = liq_serie.mask(liq_serie == None, "N/A")
         # Ahora definimos el Filtro
         filtro_liq = (liq_serie == tipo_liquidacion)
@@ -2865,7 +2860,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     etiqueta_subestado = obtener_etiqueta_subestado_transitorio(subestado=obtener_subestado_transitorio(solicitud))
     if etiqueta_subestado:
         expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
-    estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
+    estado_liquidacion = solicitud['Estado_Liquidacion']
     if estado_liquidacion != "N/A":
         color_liquidacion = {
             "Sin Liquidar": "red",
@@ -3108,7 +3103,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
     # Añadimos Nombre de Cliente
     expander_name = "{} | :gray-background[{}]".format(expander_name, solicitud['Metadata_Solicitud'].get('Nombre_Cliente','Nombre no Encontrado'))
 
-    estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
+    estado_liquidacion = solicitud['Estado_Liquidacion']
     if estado_liquidacion != "N/A":
         color_liquidacion = {
             "Sin Liquidar": "red",
@@ -3399,11 +3394,6 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     # Solicitudes sin Responder por Tipo de Solicitud
     # Días de Respuesta Promedio y Máximo por Tipo de Solicitud
     # Respuestas por Día Promedio por Tipo de Solicitud
-
-    # Añadimos la Columna de Estado_Liquidacion
-    if not 'Estado_Liquidacion' in solicitudes.columns:
-        serie_liq = solicitudes.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
-        solicitudes['Estado_Liquidacion'] = serie_liq.mask(serie_liq == None, "N/A")
 
     # Además, se muestran 2 Sub-Métricas más en un Segundo Expander: Respuestas Automáticas y Respuestas Vencidas
     
@@ -3963,6 +3953,7 @@ def _renderizar_columna_top(
     *,
     titulo: str,
     emoji_titulo: str,
+    caption: str,
     entradas: list[dict[str, Any]],
     info_usuario: dict[str, Any],
     user_email: str,
@@ -3970,6 +3961,8 @@ def _renderizar_columna_top(
 ) -> None:
     # Paso 1: Mostrar el Título de la Columna
     st.markdown("### {} **{}**".format(emoji_titulo, titulo))
+
+    st.caption(caption)
 
     filas_html = []
 
@@ -4012,6 +4005,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
         _renderizar_columna_top(
             titulo="Solicitudes",
             emoji_titulo="📥",
+            caption="Todas las Solicitudes subidas al **Nuevo Formulario**",
             entradas=tops['top_solicitudes'],
             info_usuario=tops['usuario']['solicitudes'],
             user_email=user_email,
@@ -4022,20 +4016,22 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
         _renderizar_columna_top(
             titulo="% Efectividad",
             emoji_titulo="🎯",
+            caption="**Efectividad**: Liquidadas/Exitosas",
             entradas=tops['top_efectividad'],
             info_usuario=tops['usuario']['efectividad'],
             user_email=user_email,
-            formato_valor=lambda v: "{:.1f}%".format(v),
+            formato_valor=lambda v: "{:.1f}% de Efectividad".format(v),
         )
 
     with colLiqs:
         _renderizar_columna_top(
             titulo="Liquidaciones",
             emoji_titulo="💵",
+            caption="Solicitudes Exitosas con **alguna deuda liquidada**",
             entradas=tops['top_liquidaciones'],
             info_usuario=tops['usuario']['liquidaciones'],
             user_email=user_email,
-            formato_valor=lambda v: "1 liquidación" if int(v) == 1 else "{} liquidaciones".format(int(v)),
+            formato_valor=lambda v: "1 Sol. con Liq." if int(v) == 1 else "{} Sols. con Liq.".format(int(v)),
         )
 
 # Función para Mostrar el Resumen de Solicitudes del Negociador (y opcionalmente los Tops de Negociadores)

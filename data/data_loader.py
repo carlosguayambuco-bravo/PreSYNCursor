@@ -734,7 +734,7 @@ def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
     # --- Limpieza de Datos ---
     # Volvemos a Id_Deuda a String
     liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
-     # Volvemos Fecha_Liq a Datetiem con dayfirst=True
+    # Volvemos Fecha_Liq a Datetiem con dayfirst=True
     liqsDF['Fecha_Liq'] = pd.to_datetime(liqsDF['Fecha_Liq'], errors='coerce',dayfirst=True)
     # Quitamos NaNs de Fecha_liq
     liqsDF = liqsDF.dropna(subset=['Fecha_Liq','Id_Deuda'])
@@ -782,6 +782,7 @@ def crearBuscadorPeriodo():
     fechasMax = limites["Fecha_Max_Liq"].dt.tz_localize(None).to_numpy()
 
     fechaMaxima = limites["Fecha_Max_Liq"].max()
+    periodoMaximo = limites["Periodo_Liq"].max()
 
     # Paso 3: Construcción del Buscador de Periodo
     def buscarPeriodo(fecha: pd.Timestamp):
@@ -789,22 +790,19 @@ def crearBuscadorPeriodo():
 
         # Eliminamos timezone si existe
         if fecha.tzinfo is not None:
-          fecha = fecha.tz_localize(None)
+            fecha = fecha.tz_localize(None)
 
         fecha_np = np.datetime64(fecha, "ns")
 
         # Primera Verificación: Si es mayor a la Fecha Máxima, entonces es del periódo en Curso
         if fecha_np > np.datetime64(fechaMaxima, "ns"):
-            if fechaMaxima.day >= 15:
-                return pd.Timestamp(fechaMaxima).replace(day=1) + pd.offsets.MonthBegin(1)
-            else:
-                return pd.Timestamp(fechaMaxima).replace(day=1)
+            return periodoMaximo + pd.offsets.MonthBegin(1)
 
         # Buscamos el primer límite superior >= a la fecha
         idx = np.searchsorted(fechasMax, fecha_np, side="left")
 
         # Si existe un periodo que contenga la fecha, lo devolvemos
-        return pd.Timestamp(periodos[idx]) if idx < len(periodos) else None
+        return pd.Timestamp(periodos[idx]) if idx < len(periodos) else periodoMaximo + pd.offsets.MonthBegin(1)
 
     # Devolvemos la función de búsqueda
     return buscarPeriodo

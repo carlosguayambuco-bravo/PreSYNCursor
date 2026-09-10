@@ -159,7 +159,7 @@ def es_acuerdo_reasignable(solicitud: pd.Series) -> Optional[bool]:
         Optional[bool]: True si la solicitud es reasignable, False en caso contrario. None si no aplica
     """    
     # Paso 1: Verificar que sea de Acuerdo y Exitosa, y que no sea Histórica y que no este liquidada
-    if solicitud['Estado_Solicitud'] != "Exitosa" or solicitud['Tipo_Solicitud'] == 'Validación' or solicitud['Es_Historico'] or ("Liquidado" in (obtener_estado_liquidacion(solicitud=solicitud) or "a")):
+    if solicitud['Estado_Solicitud'] != "Exitosa" or solicitud['Tipo_Solicitud'] == 'Validación' or solicitud['Es_Historico'] or ("Liquidado" in solicitud['Estado_Liquidacion']):
         return None
     # Paso 2: Verificamos que la Fecha_Limite_Pago no se haya cumplido
     elif solicitud['Fecha_Limite_Pago'].normalize() >= pd.Timestamp.now('America/Bogota').tz_localize(None).normalize():
@@ -233,7 +233,7 @@ def obtener_mascara_reasignable(solicitudes_df: pd.DataFrame) -> pd.Series:
     # Máscara 4: Que no sea Histórica
     maskHist = ~(solicitudes_df['Es_Historico'])
     # Máscara 5: Que no sea Liquidado
-    maskLiq = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) == "Sin Liquidar" # type: ignore
+    maskLiq = (solicitudes_df['Estado_Liquidacion'] == "Sin Liquidar")
     # Devolvemos la Consecución de Estas
     return maskTipo & maskExitosa & maskVencida & maskHist & maskLiq
 
@@ -1131,9 +1131,6 @@ def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any
     """
     # Paso 1: Crear la Columna de Estado_Liquidacion si no existe
     solicitudes_aux = solicitudes_df.copy()
-    if 'Estado_Liquidacion' not in solicitudes_aux.columns:
-        serie_liq = solicitudes_aux.apply(lambda r: obtener_estado_liquidacion(solicitud=r), axis=1) # type: ignore
-        solicitudes_aux['Estado_Liquidacion'] = serie_liq.mask(serie_liq.isna(), "N/A")
 
     # Paso 2: Dejar solo las Solicitudes Liquidadas (Estado_Liquidacion contiene 'Liquidado')
     mask_liquidadas = solicitudes_aux['Estado_Liquidacion'].astype(str).str.contains("Liquidado", regex=False)
@@ -1273,16 +1270,15 @@ def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) 
 
     # Paso 3: Crear la Columna Estado_Liquidacion si no Existe (Pronto será Nativa del DF)
     solicitudes_aux = solicitudes_df.copy()
-    if 'Estado_Liquidacion' not in solicitudes_aux.columns:
-        serie_liq = solicitudes_aux.apply(lambda r: obtener_estado_liquidacion(solicitud=r), axis=1) # type: ignore
-        solicitudes_aux['Estado_Liquidacion'] = serie_liq.mask(serie_liq.isna(), "N/A")
 
     # Paso 4: Top de Liquidaciones (Conteo de Solicitudes Liquidadas por Correo)
     mask_liquidadas = solicitudes_aux['Estado_Liquidacion'].astype(str).str.contains("Liquidado", regex=False)
     conteo_liqs = solicitudes_aux.loc[mask_liquidadas].groupby('Correo').size()
 
-    # Paso 5: Top de Efectividad (Liquidado / Solicitado en Porcentaje)
-    efectividad = (conteo_liqs.reindex(conteo_sols.index, fill_value=0) / conteo_sols) * 100
+    # Paso 5: Top de Efectividad (Liquidado / Exitoso en Porcentaje)
+    # Creamos el Conteo de Exitosas
+    conteo_exitosas = solicitudes_df[obtener_mascara_exitosas(solicitudes_df)].groupby('Correo').size()
+    efectividad = (conteo_liqs.reindex(conteo_exitosas.index, fill_value=0) / conteo_exitosas) * 100
 
     # Paso 6: Construir los Tops y la Posición del Usuario en cada Uno
     top_solicitudes, usuario_sols = _construir_top_negociador(conteo=conteo_sols, nombres_serie=nombres_serie, user_email=user_email)
