@@ -10,9 +10,8 @@ from data.data_loader import (
     load_pendiente_cruce, load_reference_changes, load_solicitudes_mec,
     load_special_user_permissions, obtener_datos_completos_deudas,
     obtener_deudas_activas_con_retry, obtener_referencia_por_deuda,
-    obtener_ultima_actualizacion_deudas,
+    obtener_ultima_actualizacion_deudas, get_solicitud_id_to_row_mapping
 )
-from data.data_uploader import get_solicitud_id_to_row_mapping
 from modules.classes import get_banned_manager
 from ui.cache_components import mostrar_seccion_cache
 

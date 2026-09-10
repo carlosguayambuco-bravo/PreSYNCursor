@@ -242,8 +242,11 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
 
     if not (tipo_liquidacion is None) and tipo_liquidacion != "Todos":
         # Primero Obtenemos el Tipo de Liquidación para cada Fila
-        liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
-        liq_serie = liq_serie.mask(liq_serie == None, "N/A")
+        if not 'Estado_Liquidacion' in solicitudes_df.columns:
+            liq_serie = solicitudes_df.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+            liq_serie = liq_serie.mask(liq_serie == None, "N/A")
+        else:
+            liq_serie = solicitudes_df['Estado_Liquidacion']
         # Ahora definimos el Filtro
         filtro_liq = (liq_serie == tipo_liquidacion)
         # Por último, Aplicamos el Filtro
@@ -2863,12 +2866,12 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
     if etiqueta_subestado:
         expander_name = "{} | :violet-background[{}]".format(expander_name, etiqueta_subestado)
     estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
-    if estado_liquidacion:
+    if estado_liquidacion != "N/A":
         color_liquidacion = {
             "Sin Liquidar": "red",
             "Liquidado Parcial": "yellow",
             "Liquidado Total": "green",
-        }[estado_liquidacion]
+        }[estado_liquidacion] # type: ignore
         expander_name = "{} | :{}-background[**{}**]".format(expander_name, color_liquidacion, estado_liquidacion)
     expander_key = "solicitud_ejecutivo_{}_expander".format(solicitud["ID_Solicitud"])
 
@@ -3106,12 +3109,12 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
     expander_name = "{} | :gray-background[{}]".format(expander_name, solicitud['Metadata_Solicitud'].get('Nombre_Cliente','Nombre no Encontrado'))
 
     estado_liquidacion = obtener_estado_liquidacion(solicitud=solicitud)
-    if estado_liquidacion:
+    if estado_liquidacion != "N/A":
         color_liquidacion = {
             "Sin Liquidar": "red",
             "Liquidado Parcial": "yellow",
             "Liquidado Total": "green",
-        }[estado_liquidacion]
+        }[estado_liquidacion] # type: ignore
         expander_name = "{} | :{}-background[**{}**]".format(expander_name, color_liquidacion, estado_liquidacion)
 
     if es_acuerdo_reasignable(solicitud):
@@ -3398,8 +3401,9 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
     # Respuestas por Día Promedio por Tipo de Solicitud
 
     # Añadimos la Columna de Estado_Liquidacion
-    serie_liq = solicitudes.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
-    solicitudes['Estado_Liquidacion'] = serie_liq.mask(serie_liq == None, "N/A")
+    if not 'Estado_Liquidacion' in solicitudes.columns:
+        serie_liq = solicitudes.apply(lambda r: obtener_estado_liquidacion(solicitud=r),axis=1) # type: ignore
+        solicitudes['Estado_Liquidacion'] = serie_liq.mask(serie_liq == None, "N/A")
 
     # Además, se muestran 2 Sub-Métricas más en un Segundo Expander: Respuestas Automáticas y Respuestas Vencidas
     

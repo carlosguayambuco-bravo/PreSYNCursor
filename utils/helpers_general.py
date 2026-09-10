@@ -262,16 +262,16 @@ def formatNumber(num_str: str|float) -> str:
 
 # Función Auxiliar para Permitir diferentes Nombres de Columnas
 def cleanCols(df: pd.DataFrame, realCol: str, colPossibleVals: list = []) -> pd.DataFrame:
-    dfCols = df.columns.tolist()
-    # Por cada una de las Columnas Posibles
-    for col in colPossibleVals:
+  dfCols = df.columns.tolist()
+  # Por cada una de las Columnas Posibles
+  for col in colPossibleVals:
         # Si existe se actualiza y se termina la Ejecución
         if col in dfCols:
             if col != realCol and realCol in dfCols:
                 df = df.drop(columns=[realCol])
-        df = df.rename(columns={col: realCol})
-        break
-    else:
+            df = df.rename(columns={col: realCol})
+            break
+  else:
         print('✖️No se realizó el cambió para {} con {} posibles valores.'.format(realCol, ', '.join(colPossibleVals)))
         df[realCol] = np.nan
-    return df
+  return df

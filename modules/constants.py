@@ -150,6 +150,19 @@ WHERE bcrd.id IN ({debt_ids})"""
 ESTADOS_LIQUIDACION = ['liquidation_structured_payment','paid_outside_of_program','liquidation','liquidation_portfolio_payment','client_settled_outside']
 SUB_ESTADOS_LIQUIDACION = ['drop_requested','cancelled','liquidated','liquidation_in_process','liquidation_structured_payment']
 
+# --- Constantes de Lectura de Bases
+COL_MAPPER_LIQ = {
+    'PaB_Liq': ['Pago a banco'],
+    'Id_Deuda': ['Deuda Berex'],
+    'Ingreso_Liq': ['Comisión','Comisión RESUELVE','Comisión RESUELVE ',' Comisión RESUELVE','Comisión RESUELVE','Comision RESUELVE'],
+    'Negociador_Liq': ['Negociador'],
+    'Tipo_Liq': ['Tipo de liquidacion'],
+    'Fecha_Liq': ['Fecha de Liquidación','Fecha de Liquidación ','Fecha de Liquidacion','Fecha de Liquidacion ',"Fecha de Liquidación ",'Fecha de Liquidación '],
+    'Portafolio_Liq': ['Portafolio','Portafolio'],
+    'Mes_Liq' : ['Mes'],
+    'Año_Liq': ['Año'],
+}
+
 # --- Constantes de Solicitudes ---
 
 SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud para que no se repita con el ID de la Deuda

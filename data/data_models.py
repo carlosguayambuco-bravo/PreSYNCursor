@@ -58,6 +58,7 @@ class SolicitudesSchema(pa.DataFrameModel):
     Fecha_Limite_Pago: Series[pa.dtypes.Timestamp] = pa.Field(nullable=True)  # Puede ser nulo si no hay fecha límite de pago
     JSON_Respuesta: Series[list[DeudasSolicitud]] = pa.Field(nullable=True)
     Es_Historico: Series[bool]
+    Estado_Liquidacion: Series[str] = pa.Field(isin=["N/A","Sin Liquidar", "Liquidado Parcial", "Liquidado Total"])
 
     class Config:
         strict = True  # Validación estricta de columnas
@@ -337,9 +338,10 @@ class ActualizacionesSchema(pa.DataFrameModel):
     Nombre: str
 
 class LiquidationsSchema(pa.DataFrameModel):
-    Id_Deuda: str
+    Id_Deuda: str = pa.Field(unique=True)
     PaB_Liq: float
-    Ingreso_Liq: float
+    Ingreso_Liq: float = pa.Field(nullable=True)
     Negociador_Liq: str
     Tipo_Liq: str = pa.Field(isin=['Tradicional','Credito'])
     Fecha_Liq: pa.dtypes.Timestamp
+    Periodo_Liq: pa.dtypes.Timestamp

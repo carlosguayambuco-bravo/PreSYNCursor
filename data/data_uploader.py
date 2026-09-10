@@ -2,6 +2,7 @@
 # Librerías de Python
 from typing import Optional
 import json
+from urllib import response
 # Librerías de Terceros
 from pandera.typing import DataFrame
 import numpy as np
@@ -75,6 +76,8 @@ def upload_form_response_to_google_sheets(response_info: dict) -> tuple[bool, in
         response_df['Es_Historico'] = False
         # Agregamos el JSON_Respuesta como NaN
         response_df['JSON_Respuesta'] = pd.NA
+        # Agregamos Tipo_Liquidacion como "N/A"
+        response_df['Tipo_Liquidacion'] = "N/A"
         add_cambios_locales_to_session_state(response_df)
         return True, new_id
     except Exception as e:

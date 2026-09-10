@@ -237,7 +237,7 @@ def obtener_mascara_reasignable(solicitudes_df: pd.DataFrame) -> pd.Series:
     # Devolvemos la Consecución de Estas
     return maskTipo & maskExitosa & maskVencida & maskHist & maskLiq
 
-def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
+def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["N/A","Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
     """
     Obtiene el Estado de Liquidación de una Solicitud Exitosa de Acuerdo de Pago u Oferta de Acuerdo.
 
@@ -245,7 +245,7 @@ def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin
         solicitud (pd.Series): Información de la solicitud.
 
     Returns:
-        Optional[Literal["Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
+        Optional[Literal["N/A","Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]]:
             - "Sin Liquidar": Ningún Id_Deuda de la Respuesta está en las Liquidaciones.
             - "Liquidado Parcial": Algunos Ids de la Respuesta están en las Liquidaciones, pero no todos.
             - "Liquidado Total": Todos los Ids de la Respuesta están en las Liquidaciones.
@@ -254,15 +254,15 @@ def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["Sin
     """
     # Solo Aplica para Solicitudes Exitosas
     if (solicitud['Estado_Solicitud'] != 'Exitosa'):
-        return None
+        return "N/A"
 
     # Paso 1: Obtener los Ids de Deuda de la Respuesta
     json_respuesta = solicitud['JSON_Respuesta']
     if not isinstance(json_respuesta, list):
-        return None
+        return "N/A"
     ids_respuesta = [str(d['Id_Deuda']) for d in json_respuesta]
     if not ids_respuesta:
-        return None
+        return "N/A"
 
     # Paso 2: Cargar los Ids de Deuda Liquidados
     liquidaciones_ids: set[str] = load_liquidaciones()
@@ -1228,7 +1228,7 @@ def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, us
             'nombre': nombres_serie.get(user_email, user_email),
         }
 
-    return top_5, info_usuario
+    return top_5, info_usuario # type: ignore
 
 # Función para Obtener los Tops de los Negociadores (Solicitudes, Liquidaciones y Efectividad)
 def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) -> dict[str, Any]:

@@ -3,9 +3,9 @@
 # Librerías de Python
 from collections import defaultdict
 import json
+from typing import Callable, Literal
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
-from pandas import notna
 from pandera.typing import DataFrame
 import gspread
 import numpy as np
@@ -15,10 +15,10 @@ import streamlit as st
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
-from utils.helpers_general import cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
+from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
 from utils.helpers_sheets import _retry
 
 # Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
@@ -106,6 +106,43 @@ def normalizeMetadata(metadata: dict) -> dict:
         metadata['Addendums'] = [normalizeDeuda(dd) for dd in metadata['Addendums']]
     return metadata
 
+# Función Auxiliar para Añadir el Tipo de Liquidación
+def add_tipo_liq(solicitud: pd.Series) -> Literal["N/A","Sin Liquidar", "Liquidado Parcial", "Liquidado Total"]:
+
+    # Verificamos que la Solicitud sea exitosa
+    if (solicitud['Estado_Solicitud'] != 'Exitosa'):
+        return "N/A"
+
+    # Paso 1: Obtener los Ids de Deuda de la Respuesta
+    json_respuesta = solicitud['JSON_Respuesta']
+    if not isinstance(json_respuesta, list):
+        return "N/A"
+    ids_respuesta = [str(d['Id_Deuda']) for d in json_respuesta]
+    if not ids_respuesta:
+        return "N/A"
+
+    # Primero Obtenemos el buscador de Periodo
+    buscadorP = save_buscador_periodo()
+    # Obtenemos el Período para la Fecha
+    periodo = buscadorP(solicitud['Fecha_Respuesta']) # type: ignore
+
+    # Obtenemos las Deudas del Periodó
+    deudasPeriodo = obtain_periodo_liqs_set(periodo=periodo)
+
+    # Obtenemos los Ids de Respuesta
+    ids_response = [d['Id_Deuda'] for d in solicitud['JSON_Respuesta'] if cleanNumber(d['Monto_Propuesto'])>0]
+    # Verificamos la Correspondencia Total
+    correspondencia = sum((1 for d in solicitud['JSON_Respuesta'] if (d['Id_Deuda'] in deudasPeriodo)))
+    # Devolvemos según el caso
+    if correspondencia == 0:
+        return "Sin Liquidar"
+    elif correspondencia < len(ids_response):
+        return "Liquidado Parcial"
+    elif correspondencia == len(ids_response):
+        return "Liquidado Total"
+    else:
+        return "N/A"
+
 # Función Auxiliar para Limpiar Solicitudes
 def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataFrame[SolicitudesSchema]:
     # Volvemos las Columnas Necesarias a Timestamp
@@ -144,6 +181,9 @@ def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataF
     # Quitamos Cualquier Columna Unnamed
     solicitudes_df = solicitudes_df.loc[:, ~solicitudes_df.columns.str.contains('^Unnamed', case=False)]
 
+    # Añadimos el Estado de Liquidacion
+    solicitudes_df['Estado_Liquidacion'] = solicitudes_df.apply(lambda r: add_tipo_liq(solicitud=r),axis=1)
+
     # Validamos el DataFrame con el esquema (Si no esta vacio)
     if not solicitudes_df.empty:
         solicitudes_df = SolicitudesSchema.validate(solicitudes_df, lazy=True) 
@@ -153,7 +193,7 @@ def clean_solicitudes(solicitudes_df: pd.DataFrame, es_historico: bool) -> DataF
     return solicitudes_df
 
 #--> Carga de Solicitudes Históricas
-@st.cache_data(show_spinner="Cargando Solicitudes del Mes en Curso desde Google Sheets...", ttl=WEEK_WAIT)
+@st.cache_data(show_spinner="Cargando Solicitudes Históricas desde Google Sheets...", ttl=WEEK_WAIT)
 def load_solicitudes_hist()-> DataFrame[SolicitudesSchema]:
 
     # Primero Obtenemos la Spreadsheet de Solicitudes desde Google Sheets
@@ -668,38 +708,119 @@ def load_liquidaciones() -> set[str]:
     return liquidaciones_set
 
 # Función Auxiliar para Obtener las Deudas Liquidadas del MEC
-@st.cache_data(show_spinner="Cargando Liquidaciones Históricas desde Google Sheets...", ttl=HOUR_WAIT)
-def load_liquidaciones_hist() -> set[str]:
+@st.cache_data(show_spinner="Cargando Liquidaciones Históricas desde Google Sheets...", ttl=WEEK_WAIT)
+def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
     # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
-    # Obtenemos el DF de la Hoja "BD del mes"
-    liquidacionesDF = google_sheets_service.get_sheet_as_dataframe(LIQUIDACIONES_SHEET_ID, 'BD del mes')
+    # Definimos la Lista de Guardado de Datos
+    liqsList = []
 
-    # Renombramos la Columna ID a Id_Deuda
-    liquidacionesDF = liquidacionesDF.rename(columns={'Deuda Berex':'Id_Deuda'})
+    # Vamos a Iterar desde 2026 a hoy Obteniendo los Datos
+    for y in range(2026, pd.Timestamp.now().year+1):
+        # Obtenemos los Datos
+        liqsDF = google_sheets_service.get_sheet_as_dataframe(LIQUIDACIONES_SHEET_ID, f'BD {y}')
+        # Limpiamos las Columnas
+        for col, possibleVals in COL_MAPPER_LIQ.items():
+            liqsDF = cleanCols(liqsDF, col, possibleVals)
+        # Dejamos las Columnas Necesarias
+        liqsDF = liqsDF[list(COL_MAPPER_LIQ.keys())]
+        # Agregamos el DF a la Lista
+        liqsList.append(liqsDF)
 
-    # Quitamos Datos donde Id_Deuda sea NaN
-    liquidacionesDF = liquidacionesDF.dropna(subset=['Id_Deuda'])
+    # Concatenamos el DF
+    liqsDF = pd.concat(liqsList, ignore_index=True)
 
-    # Dejamos solo la Columna Id_Deuda
-    liquidacionesDF = liquidacionesDF[['Id_Deuda']].drop_duplicates()
+    # --- Limpieza de Datos ---
+    # Volvemos a Id_Deuda a String
+    liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+     # Volvemos Fecha_Liq a Datetiem con dayfirst=True
+    liqsDF['Fecha_Liq'] = pd.to_datetime(liqsDF['Fecha_Liq'], errors='coerce',dayfirst=True)
+    # Quitamos NaNs de Fecha_liq
+    liqsDF = liqsDF.dropna(subset=['Fecha_Liq','Id_Deuda'])
+    # Volvemos el PaB_Liq, Mes_Liq y Año_Liq a Númerico
+    liqsDF['PaB_Liq'] = liqsDF['PaB_Liq'].apply(cleanNumber)
+    liqsDF['Mes_Liq'] = liqsDF['Mes_Liq'].apply(cleanNumber)
+    liqsDF['Año_Liq'] = liqsDF['Año_Liq'].apply(cleanNumber)
+    # Hacemos Strip a la Columna Negociador_Liq
+    liqsDF['Negociador_Liq'] = liqsDF['Negociador_Liq'].astype(str).str.strip()
+    # Creamos la Columna Periodo_Liq
+    liqsDF["Periodo_Liq"] = liqsDF.apply(
+        lambda r: pd.Timestamp(r['Año_Liq'],r['Mes_Liq'],1), axis=1
+    )
+    # Quitamos las Columnas Año_Liq y Mes_Liq
+    liqsDF = liqsDF.drop(columns=["Año_Liq","Mes_Liq"])
 
-    # Volvemos la Id_Deuda a String
-    liquidacionesDF['Id_Deuda'] = liquidacionesDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    # Eliminamos Duplicados por Id_Deuda
+    liqsDF = liqsDF.drop_duplicates(subset=['Id_Deuda'],keep='last')
 
-    # Si el DF está vacío, lo validamos con el esquema vacío
-    if liquidacionesDF.empty:
-        liquidacionesDF = LiquidationsSchema.empty()
+    # Validamos el modelo
+    if liqsDF.empty:
+        return LiquidationsSchema.empty()
     else:
-        # Validad el DF con el esquema
-        liquidacionesDF = LiquidationsSchema.validate(liquidacionesDF)
+        return LiquidationsSchema.validate(liqsDF)
 
-    # Creamos un Set con las Deudas Liquidadas
-    liquidaciones_set = set(liquidacionesDF['Id_Deuda'].tolist())
+# Función para Guardar el Buscador de Periodo con Cache
+@st.cache_resource
+def save_buscador_periodo() -> Callable:
+    return crearBuscadorPeriodo() # type: ignore
 
-    # Devolvemos el Set de Deudas Liquidadas
-    return liquidaciones_set
+# Función Auxiliar apra crear el Buscador de Periodo
+def crearBuscadorPeriodo():
+    # Cargamos las liquidaciones
+    liqs = load_liquidaciones_hist()
+    # Paso 1: Obtener la Fecha Máxima de Liquidación por Mes Operativo
+    limites = (
+        liqs.groupby("Periodo_Liq")["Fecha_Liq"]
+        .max()
+        .reset_index(name="Fecha_Max_Liq")
+        .sort_values("Fecha_Max_Liq")
+    )
+
+    # Paso 2: Cambiamos a Numpy para mayor velocidad
+    periodos = limites["Periodo_Liq"].dt.tz_localize(None).to_numpy()
+    fechasMax = limites["Fecha_Max_Liq"].dt.tz_localize(None).to_numpy()
+
+    fechaMaxima = limites["Fecha_Max_Liq"].max()
+
+    # Paso 3: Construcción del Buscador de Periodo
+    def buscarPeriodo(fecha: pd.Timestamp):
+        fecha = fecha.normalize()
+
+        # Eliminamos timezone si existe
+        if fecha.tzinfo is not None:
+          fecha = fecha.tz_localize(None)
+
+        fecha_np = np.datetime64(fecha, "ns")
+
+        # Primera Verificación: Si es mayor a la Fecha Máxima, entonces es del periódo en Curso
+        if fecha_np > np.datetime64(fechaMaxima, "ns"):
+            if fechaMaxima.day >= 15:
+                return pd.Timestamp(fechaMaxima).replace(day=1) + pd.offsets.MonthBegin(1)
+            else:
+                return pd.Timestamp(fechaMaxima).replace(day=1)
+
+        # Buscamos el primer límite superior >= a la fecha
+        idx = np.searchsorted(fechasMax, fecha_np, side="left")
+
+        # Si existe un periodo que contenga la fecha, lo devolvemos
+        return pd.Timestamp(periodos[idx]) if idx < len(periodos) else None
+
+    # Devolvemos la función de búsqueda
+    return buscarPeriodo
+
+# Función Auxiliar para obtener las Liquidaciones de un Periodo
+@st.cache_data(show_spinner="Obteniendo Información de Liquidaciones...",ttl=WEEK_WAIT)
+def obtain_periodo_liqs_set(periodo: pd.Timestamp) -> set[str]:
+    # Paso 1: Obtener las Liquidaciones
+    liqsDF = load_liquidaciones_hist()
+    # Paso 2: Verificamos si el Período es mayor al máximo
+    if periodo > liqsDF['Periodo_Liq'].max():
+        return load_liquidaciones()
+    # Paso 3: Filtramos las Deudas para ese periodo
+    deudasPeriodo = liqsDF[liqsDF['Periodo_Liq'] == periodo]['Id_Deuda'].tolist()
+    # Paso 4: Devolvemos el set creado
+    return set(deudasPeriodo)
 
 # Función Auxiliar para Cargar el HeadCount de Negociación
 @st.cache_data(show_spinner="Cargando HeadCount de Negociación desde Google Sheets...", ttl=HOUR_WAIT)
