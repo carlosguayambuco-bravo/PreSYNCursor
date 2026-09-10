@@ -1,7 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 import io
-from typing import Optional
+from typing import Optional, get_args
 import uuid
 from time import sleep, time
 # Librerías de Terceros
@@ -13,10 +13,10 @@ from pandera.errors import SchemaErrors
 from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info
-from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES
+from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
-    aplicar_cambios_id_definitivo, build_pendiente_cruce_df, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
+    aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
@@ -569,6 +569,52 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
         if st.session_state.get(key_sheets_subido, False):
             st.success("Esta base ya fue subida a Google Drive y Google Sheets.", icon="✅")
+
+# --- Funciones Auxiliares para la Pestaña de Control (Subida a la Base del Mes) ---
+
+# Función Auxiliar para Extraer las Columnas de Control desde la Metadata
+def _extraer_columnas_control(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
+    df = cruce_df.copy()
+    df['_Casa_Cobro'] = df['Metadata'].apply(lambda m: str(m.get('Casa_Cobro') or ''))
+    df['_Alias_Casa'] = df['Metadata'].apply(lambda m: str(m.get('Alias_Casa') or ''))
+    df['_Archivo_Origen'] = df['Metadata'].apply(lambda m: str(m.get('Archivo_Origen') or ''))
+    df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or ''))
+    df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta') or ''))
+    df['_Cruce_Status'] = df['Metadata'].apply(lambda m: str(m.get('Cruce_Status') or 'Sin Reconocer'))
+    df['_Monto_Propuesto'] = df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan))
+    df['_Pagos_Cuotas'] = df['Metadata'].apply(lambda m: m.get('Pagos_Cuotas') or [])
+    return df
+
+# Función Auxiliar para Formatear una Base del Cruce (Casa de Cobro | Alias | Archivo)
+def _formatear_base(base: tuple) -> str:
+    casa, alias, archivo = base
+    return "{} | {} | {}".format(
+        casa or 'SIN CASA DE COBRO',
+        alias or 'SIN ALIAS',
+        archivo or 'SIN ARCHIVO',
+    )
+
+# Función Auxiliar para Construir la Vista Previa de la Base a Subir
+def _construir_preview_control(*, base_df: pd.DataFrame) -> pd.DataFrame:
+    filas = []
+    for _, fila in base_df.iterrows():
+        mtdt = dict(fila['Metadata'])
+        filas.append({
+            COL_ID_CRUCE: fila.get(COL_ID_CRUCE),
+            COL_CEDULA: fila.get(COL_CEDULA),
+            COL_NOMBRE: fila.get(COL_NOMBRE),
+            COL_BANCO: fila.get(COL_BANCO),
+            COL_CREDITO: fila.get(COL_CREDITO),
+            COL_MONTO_ACTUAL: fila.get(COL_MONTO_ACTUAL),
+            'Id_Definitivo': mtdt.get('Id_Definitivo', ''),
+            'Etiqueta': mtdt.get('Etiqueta', ''),
+            'Cruce_Status': mtdt.get('Cruce_Status', 'Sin Reconocer'),
+            'Monto_Actual_Original': mtdt.get('Monto_Actual_Original', np.nan),
+            'Monto_Propuesto': mtdt.get('Monto_Propuesto', np.nan),
+            'Pagos_Cuotas': len(mtdt.get('Pagos_Cuotas') or []),
+        })
+    return pd.DataFrame(filas)
+
 # --- Página Principal ---
 tab_subida, tab_escogencia, tab_control = st.tabs(
     tabs = ["📤 Subida de Datos", "✍️ Identificación Manual", "🟢 Control"],
@@ -691,7 +737,213 @@ if tab_escogencia.open:
                 st.rerun()
 
 if tab_control.open:
-    with tab_control:   
-        st.info("Sin Implementar")
-        # Van a Existir 3 Fases:
-        # Fase de 
+    with tab_control:
+        st.markdown("### 🟢 Control de Subida a la Base del Mes")
+        st.info(
+            "Selecciona la base que deseas subir, revisa el resumen del cruce y define si los "
+            "montos corresponden a un portafolio para redistribuirlos entre sus deudas.",
+            icon="ℹ️",
+        )
+
+        # --- 1. Selección de la Base a Subir ---
+        st.markdown("#### 🗂️ Selección de la Base")
+        cruce_df = load_pendiente_cruce_con_cambios()
+
+        if cruce_df.empty:
+            st.warning(
+                "No hay bases de cruce disponibles para subir. Sube una base en la pestaña de Subida de Datos.",
+                icon="⚠️",
+            )
+        else:
+            control_df = _extraer_columnas_control(cruce_df=cruce_df)
+
+            # Bases Únicas (Casa de Cobro + Alias + Archivo)
+            bases_df = (
+                control_df[['_Casa_Cobro', '_Alias_Casa', '_Archivo_Origen']]
+                .drop_duplicates()
+                .sort_values(by=['_Casa_Cobro', '_Alias_Casa', '_Archivo_Origen'], kind='stable')
+                .reset_index(drop=True)
+            )
+            opciones_bases = list(bases_df.itertuples(index=False, name=None))
+
+            base_seleccionada = st.selectbox(
+                label="**🗂️ Base a Subir**",
+                options=opciones_bases,
+                format_func=_formatear_base,
+                key="control_base_seleccionada",
+                help="Selecciona la base (Casa de Cobro | Alias | Archivo) que se desea subir a la base del mes.",
+            )
+
+            # Filtramos los Registros de la Base Seleccionada
+            casa_sel, alias_sel, archivo_sel = base_seleccionada
+            base_df = control_df[
+                (control_df['_Casa_Cobro'] == casa_sel)
+                & (control_df['_Alias_Casa'] == alias_sel)
+                & (control_df['_Archivo_Origen'] == archivo_sel)
+            ].copy()
+            st.caption("✅ Base seleccionada: **{:,}** registro(s)".format(len(base_df)))
+
+            # --- 2. Resumen del Cruce de la Base Seleccionada ---
+            st.space()
+            st.markdown("#### 📊 Resumen del Cruce")
+
+            total_registros = len(base_df)
+            total_identificados = int(base_df['_Id_Definitivo'].ne('').sum())
+            total_addendums = int((base_df['_Id_Definitivo'] == ETIQUETA_ADDENDUM).sum())
+            total_sin_identificar = total_registros - total_identificados
+            monto_actual_total = base_df[COL_MONTO_ACTUAL].sum() if COL_MONTO_ACTUAL in base_df.columns else 0.0
+            monto_propuesto_total = base_df['_Monto_Propuesto'].sum()
+            total_con_pagos = int(base_df['_Pagos_Cuotas'].apply(lambda p: len(p) > 0).sum())
+
+            colRegistros, colIdentificados, colSinIdentificar, colAddendums = st.columns(4, border=True)
+            with colRegistros:
+                st.metric(label="**📄 Registros**", value=total_registros)
+            with colIdentificados:
+                st.metric(
+                    label="**✅ Identificados**",
+                    value=total_identificados,
+                    delta="{:.1%} del Total".format(total_identificados / total_registros) if total_registros else None,
+                    delta_color="green",
+                    delta_arrow="off",
+                )
+            with colSinIdentificar:
+                st.metric(
+                    label="**⏳ Sin Identificar**",
+                    value=total_sin_identificar,
+                    delta="{:.1%} del Total".format(total_sin_identificar / total_registros) if total_registros else None,
+                    delta_color="gray",
+                    delta_arrow="off",
+                )
+            with colAddendums:
+                st.metric(label="**📝 Addendums**", value=total_addendums)
+
+            colMontoActual, colMontoPropuesto, colPagosCuotas = st.columns(3, border=True)
+            with colMontoActual:
+                st.metric(label="**💵 Monto_Actual Total**", value="${:,.0f}".format(monto_actual_total))
+            with colMontoPropuesto:
+                st.metric(label="**💸 Monto_Propuesto Total**", value="${:,.0f}".format(monto_propuesto_total))
+            with colPagosCuotas:
+                st.metric(label="**🧾 Registros con Pagos a Cuotas**", value=total_con_pagos)
+
+            with st.expander("🔎 Vista Previa de la Base a Subir", expanded=False):
+                st.dataframe(
+                    _construir_preview_control(base_df=base_df),
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        COL_MONTO_ACTUAL: st.column_config.NumberColumn(COL_MONTO_ACTUAL, format="localized"),
+                        "Monto_Actual_Original": st.column_config.NumberColumn("Monto_Actual_Original", format="localized"),
+                        "Monto_Propuesto": st.column_config.NumberColumn("Monto_Propuesto", format="localized"),
+                    },
+                )
+
+            # --- 3. Distribución de Portafolio ---
+            st.divider()
+            st.markdown("### 💼 Distribución de Portafolio")
+            with st.container(border=True):
+                st.markdown("#### **💼 ¿La Base Maneja Portafolios?**")
+                tipo_portafolio = st.radio(
+                    label="**Tipo de Manejo de Portafolio**",
+                    options=[
+                        "**Sin Portafolio**",
+                        "**Distribuir Monto de Portafolio**",
+                    ],
+                    captions=[
+                        "Cada deuda trae su propio monto a pagar de forma individual",
+                        "El monto se repite para las deudas del portafolio y se redistribuye por participación",
+                    ],
+                    horizontal=True,
+                    index=None,
+                    key="control_tipo_portafolio",
+                )
+
+            if tipo_portafolio is None:
+                st.info("Selecciona cómo se manejan los montos de la base para continuar.", icon="ℹ️")
+                st.stop()
+
+            tipo_portafolio = tipo_portafolio.replace('*', '')
+            if tipo_portafolio == 'Distribuir Monto de Portafolio':
+                with st.container(border=True):
+                    columnas_disponibles = [
+                        c for c in [COL_CEDULA, COL_NOMBRE, COL_BANCO, COL_MONTO_ACTUAL, COL_CREDITO]
+                        if c in base_df.columns
+                    ]
+                    columnas_portafolio = st.multiselect(
+                        label="**Columnas que definen el Portafolio**",
+                        options=columnas_disponibles,
+                        default=[c for c in [COL_CEDULA, COL_MONTO_ACTUAL] if c in columnas_disponibles],
+                        key="control_columnas_portafolio",
+                        help="Selecciona las columnas que identifican un mismo portafolio. Como mínimo Cédula y Monto_Actual.",
+                    )
+
+                if not {COL_CEDULA, COL_MONTO_ACTUAL}.issubset(set(columnas_portafolio)):
+                    st.warning(
+                        "Selecciona como mínimo las columnas **Cédula** y **Monto_Actual** para definir el portafolio.",
+                        icon="⚠️",
+                    )
+                else:
+                    with st.spinner("💼 Distribuyendo los montos del portafolio..."):
+                        base_df, df_distribucion = distribuir_montos_portafolio(
+                            cruce_df=base_df,
+                            columnas_portafolio=columnas_portafolio,
+                        )
+                    registros_distribuidos = int(df_distribucion['Portafolio_Distribuido'].sum())
+                    st.success(
+                        "✅ Se redistribuyeron los montos de **{:,}** registro(s).".format(registros_distribuidos),
+                        icon="💼",
+                    )
+                    colAntes, colDespues = st.columns(2, border=True)
+                    with colAntes:
+                        st.metric(
+                            label="**💸 Monto_Propuesto (Antes)**",
+                            value="${:,.0f}".format(df_distribucion['Monto_Propuesto_Original'].sum()),
+                        )
+                    with colDespues:
+                        st.metric(
+                            label="**💸 Monto_Propuesto (Distribuido)**",
+                            value="${:,.0f}".format(df_distribucion['Monto_Propuesto_Distribuido'].sum()),
+                        )
+                    with st.expander("🔎 Ver Detalle de la Distribución", expanded=False):
+                        st.dataframe(
+                            df_distribucion,
+                            width="stretch",
+                            hide_index=True,
+                            column_config={
+                                COL_MONTO_ACTUAL: st.column_config.NumberColumn(COL_MONTO_ACTUAL, format="localized"),
+                                'Monto_Actual_Base': st.column_config.NumberColumn('Monto_Actual_Base', format="localized"),
+                                'Monto_Propuesto_Original': st.column_config.NumberColumn('Monto_Propuesto_Original', format="localized"),
+                                'Monto_Propuesto_Distribuido': st.column_config.NumberColumn('Monto_Propuesto_Distribuido', format="localized"),
+                                'Participacion': st.column_config.NumberColumn('Participacion', format="percent"),
+                            },
+                        )
+
+            # --- 4. Resumen de los Cruce_Status ---
+            st.divider()
+            st.markdown("#### 🚦 Resumen de los Estados del Cruce")
+            conteo_status = base_df['_Cruce_Status'].value_counts().to_dict()
+            tipos_status = list(get_args(TIPOS_STATUS))
+            cols_status = st.columns(len(tipos_status), border=True)
+
+            for col_metrica, status in zip(cols_status, tipos_status):
+                with col_metrica:
+                    num_status = conteo_status.get(status, 0)
+                    st.metric(
+                        label="**{}**".format(status),
+                        value=num_status,
+                        delta="{:.1%} del Total".format(num_status / total_registros) if total_registros else None,
+                        delta_color="green" if status == 'Reconocido' else "gray",
+                        delta_arrow="off",
+                    )
+
+            # --- 5. Subida de Información (Deshabilitada) ---
+            st.divider()
+            st.markdown("### 🚀 Subida de Información")
+            st.button(
+                label="🚀 Subir Información a la Base del Mes",
+                type="primary",
+                key="control_subir_base_mes",
+                width="stretch",
+                disabled=True,
+                help="Botón deshabilitado temporalmente: la subida a Google Sheets se implementará próximamente.",
+            )
+            st.caption("ℹ️ La subida de información se encuentra deshabilitada por el momento.")

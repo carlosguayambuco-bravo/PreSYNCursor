@@ -23,6 +23,7 @@ from modules.constants import (
     COL_MONTO_PROPUESTO,
     COL_NOMBRE,
     COLUMNAS_MAPEABLES,
+    ETIQUETA_ADDENDUM,
     ETIQUETA_EXACTO,
     ETIQUETA_NULO,
     MIN_LEN_TEXTO,
@@ -558,6 +559,16 @@ def build_pendiente_cruce_df(*,
         fecha_limite = fecha_limite_serie.iloc[i] if i < len(fecha_limite_serie) else pd.NaT # type: ignore
         monto_propuesto = fila.get(COL_MONTO_PROPUESTO)
 
+        # Monto_Actual Original de la Deuda Identificada (Necesario para la Distribución de Portafolios)
+        monto_actual_original = None
+        if id_definitivo:
+            info_definitiva = next(
+                (d for d in deudas_posibles if str(d.get(COL_ID_DEUDA, '')) == str(id_definitivo)),
+                None,
+            )
+            if (info_definitiva is not None) and pd.notna(info_definitiva.get(COL_MONTO_ACTUAL)):
+                monto_actual_original = float(info_definitiva[COL_MONTO_ACTUAL])
+
         # Creación de la Metadata del Registro
         mtdt = create_metadata_cruce(
             id_registro=(i + 1), # type: ignore
@@ -574,6 +585,7 @@ def build_pendiente_cruce_df(*,
             descuento_maximo = descuento_maximo,
             nombre_archivo = nombre_archivo,
             monto_propuesto=monto_propuesto,
+            monto_actual_original=monto_actual_original,
             tipo_contraoferta = tipo_contraoferta,
         )
 
@@ -611,16 +623,130 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
     def actualizar_mtdt(fila):
         mtdt = dict(fila['Metadata'])
         id_cruce = str(fila[COL_ID_CRUCE])
-        mtdt['Id_Definitivo'] = cambios[id_cruce]
+        id_definitivo = cambios[id_cruce]
+        mtdt['Id_Definitivo'] = id_definitivo
         mtdt['Ultima_Actualizacion'] = ahora
         # Actualizamos el Status de Cruce a Reconocido
         mtdt['Cruce_Status'] = 'Reconocido'
+        # Guardamos la Info de la Deuda Escogida (Monto_Actual Original) para la Distribución de Portafolios
+        mtdt.pop('Monto_Actual_Original', None)
+        if str(id_definitivo) != ETIQUETA_ADDENDUM:
+            info_deuda = next(
+                (d for d in (mtdt.get('Deudas_Posibles') or []) if str(d.get('Id_Deuda', '') or '') == str(id_definitivo)),
+                None,
+            )
+            if (info_deuda is not None) and pd.notna(info_deuda.get(COL_MONTO_ACTUAL)):
+                mtdt['Monto_Actual_Original'] = float(info_deuda[COL_MONTO_ACTUAL])
         return parse_metadata_cruce(mtdt)
 
     df_actualizar['Metadata'] = df_actualizar.apply(actualizar_mtdt, axis=1)
 
     # Paso 4: Devolver el DataFrame Actualizado
     return df_actualizar
+
+# Función Auxiliar para Distribuir los Montos de un Portafolio entre sus Deudas
+def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Distribuye el Monto_Propuesto y los Pagos_Cuotas de un portafolio entre las deudas que lo componen.
+
+    El portafolio se define agrupando por las `columnas_portafolio` indicadas (mínimo Cédula y
+    Monto_Actual). Dentro de cada grupo la participación de cada deuda se calcula como
+    `Monto_Actual del Id_Definitivo / suma de los Montos_Actuales del grupo`. Si algún registro
+    del grupo no tiene Id_Definitivo, el grupo completo se deja sin distribuir (usando
+    `transform('all')`).
+
+    Returns:
+        tuple: (DataFrame del cruce con los montos distribuidos, DataFrame resumen de la distribución)
+    """
+    df = cruce_df.copy()
+    columnas_portafolio = [c for c in columnas_portafolio if c in df.columns]
+    # Si no hay Columnas o Datos, no se realiza ninguna distribución
+    if (not columnas_portafolio) or df.empty:
+        return df, pd.DataFrame()
+
+    # Paso 1: Extraer la Información de la Metadata a Columnas Auxiliares
+    def _id_definitivo(mtdt) -> str:
+        id_def = mtdt.get('Id_Definitivo')
+        return '' if id_def in (None, '') else str(id_def)
+
+    def _monto_base(fila) -> float:
+        mtdt = fila['Metadata']
+        id_def = _id_definitivo(mtdt)
+        # Si no tiene Id_Definitivo (o es ADDENDUM), no existe Monto_Actual del Id
+        if (not id_def) or (id_def == ETIQUETA_ADDENDUM):
+            return np.nan
+        # Se prioriza el Monto_Actual Original guardado en la Metadata
+        monto_original = mtdt.get('Monto_Actual_Original')
+        if (monto_original is not None) and pd.notna(monto_original):
+            return float(monto_original)
+        # Si no está guardado, se busca entre las Deudas Posibles del Id_Definitivo
+        for deuda in (mtdt.get('Deudas_Posibles') or []):
+            if str(deuda.get('Id_Deuda', '') or '') == id_def:
+                monto_deuda = deuda.get(COL_MONTO_ACTUAL)
+                if (monto_deuda is not None) and pd.notna(monto_deuda):
+                    return float(monto_deuda)
+        # Último caso: se usa el Monto_Actual de la fila
+        monto_fila = fila.get(COL_MONTO_ACTUAL)
+        return float(monto_fila) if pd.notna(monto_fila) else np.nan
+
+    df['_dist_Id_Definitivo'] = df['Metadata'].apply(_id_definitivo)
+    df['_dist_Monto_Base'] = df.apply(_monto_base, axis=1)
+    df['_dist_Monto_Propuesto'] = df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan))
+
+    # Paso 2: Validar que TODO el Portafolio tenga Id_Definitivo y Monto_Actual del Id
+    df['_dist_Id_Valido'] = df['_dist_Id_Definitivo'] != ''
+    grupo = df.groupby(columnas_portafolio, dropna=False)
+    df['_dist_Grupo_Id_Completo'] = grupo['_dist_Id_Valido'].transform('all')
+    df['_dist_Grupo_Monto_Completo'] = grupo['_dist_Monto_Base'].transform(lambda s: s.notna().all())
+    df['_dist_Puede_Distribuir'] = df['_dist_Grupo_Id_Completo'] & df['_dist_Grupo_Monto_Completo']
+
+    # Paso 3: Calcular la Participación de cada Deuda (Monto_Actual / Suma del Grupo)
+    df['_dist_Suma_Base'] = grupo['_dist_Monto_Base'].transform('sum')
+    df['_dist_Participacion'] = np.where(
+        df['_dist_Puede_Distribuir'] & (df['_dist_Suma_Base'] > 0),
+        df['_dist_Monto_Base'] / df['_dist_Suma_Base'],
+        np.nan,
+    )
+
+    # Paso 4: Aplicar la Distribución (Monto_Propuesto y Pagos a Cuotas) a la Metadata
+    def _aplicar_distribucion(fila) -> MetadataPendienteCruce:
+        mtdt = dict(fila['Metadata'])
+        if not fila['_dist_Puede_Distribuir']:
+            return parse_metadata_cruce(mtdt)
+        participacion = float(fila['_dist_Participacion'])
+        # Monto Propuesto del Portafolio
+        monto_propuesto = mtdt.get('Monto_Propuesto')
+        if (monto_propuesto is not None) and pd.notna(monto_propuesto):
+            mtdt['Monto_Propuesto'] = float(monto_propuesto) * participacion
+        # Pagos a Cuotas del Portafolio
+        pagos_distribuidos = []
+        for pago in (mtdt.get('Pagos_Cuotas') or []):
+            pago_distribuido = dict(pago)
+            monto_pago = pago.get('Monto')
+            if (monto_pago is not None) and pd.notna(monto_pago):
+                pago_distribuido['Monto'] = float(monto_pago) * participacion
+            pagos_distribuidos.append(pago_distribuido)
+        mtdt['Pagos_Cuotas'] = pagos_distribuidos
+        return parse_metadata_cruce(mtdt)
+
+    df['Metadata'] = df.apply(_aplicar_distribucion, axis=1)
+
+    # Paso 5: Construir el Resumen de la Distribución (para la Vista)
+    resumen = pd.DataFrame({
+        COL_ID_CRUCE: df[COL_ID_CRUCE],
+        COL_CEDULA: df[COL_CEDULA] if COL_CEDULA in df.columns else np.nan,
+        COL_NOMBRE: df[COL_NOMBRE] if COL_NOMBRE in df.columns else np.nan,
+        COL_MONTO_ACTUAL: df[COL_MONTO_ACTUAL] if COL_MONTO_ACTUAL in df.columns else np.nan,
+        'Id_Definitivo': df['_dist_Id_Definitivo'],
+        'Monto_Actual_Base': df['_dist_Monto_Base'],
+        'Participacion': df['_dist_Participacion'],
+        'Monto_Propuesto_Original': df['_dist_Monto_Propuesto'],
+        'Monto_Propuesto_Distribuido': df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan)),
+        'Portafolio_Distribuido': df['_dist_Puede_Distribuir'],
+    })
+
+    # Paso 6: Limpiar las Columnas Auxiliares de la Distribución y Devolver el Resultado
+    df = df.drop(columns=[c for c in df.columns if c.startswith('_dist_')])
+    return df, resumen
 
 # Función Auxiliar para Buscar los Datos de las Deudas
 def search_data_deudas(*,cedula: str):
