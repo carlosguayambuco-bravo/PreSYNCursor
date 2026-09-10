@@ -693,3 +693,5 @@ if tab_escogencia.open:
 if tab_control.open:
     with tab_control:   
         st.info("Sin Implementar")
+        # Van a Existir 3 Fases:
+        # Fase de 

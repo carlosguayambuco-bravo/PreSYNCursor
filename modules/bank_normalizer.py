@@ -27,7 +27,8 @@ PATRONES_UNICOS_BANCOS = {
     'Litigamos Abogados Asociados':'Litigamos Abogados Asociados','Sinerjoy':'Sinerjoy','Coopcentral':'Coopcentral','Summa Valor S.A.S':'Summa Valor',
     'Megalinea':'Megalinea','Comultrasan':'Financiera Comultrasan','Asesores Legales Gama':'Asesores Legales Gama','Rapicredit':'Rappicredit',
     'Aslegal Servicios Cred':'Aslegal','Davi Bank':'Davi Bank','Recupera S.A.S':'Recupera','Aslegal':'Aslegal','Baninca':'Baninca',
-    'Dinamica':'Dinamica',
+    'Dinamica':'Dinamica',"Fon Garantias Empr Y Consult":"FGA","Banco De Bogotá": "Banco de Bogotá","Contacto Solucion Serfinanza": "Serfinanza",
+    "Nu": "Nubank","Qnt Bogota": "QNT","John": "John F. Kennedy","Mundo Mujer": "Banco Mundo Mujer",
 }
 
 # Agregar el Diccionario Completo
