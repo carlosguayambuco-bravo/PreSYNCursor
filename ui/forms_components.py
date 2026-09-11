@@ -408,3 +408,93 @@ def mostrar_resumen_solicitud(*,
             )
 
     st.info(comentario or "Sin Comentario", title="Comentario de la Solicitud", icon="🫡")
+
+# Diálogo de Confirmación para Subir una Solicitud con Saldo Negativo
+@st.dialog("⚠️ Confirmar Subida de Solicitud", dismissible=True, width="large", on_dismiss="rerun")
+def mostrar_dialogo_alerta_saldo(*,
+        referencia: str,
+        saldo_real: float,
+        por_cobrar_real: float,
+        ultima_actualizacion: Optional[pd.Timestamp],
+        cumple_condicion_actualizacion: bool,
+        dias_habiles_diff: float,
+        min_dias_actualizacion: float,
+    ) -> None:
+    # Calculamos el Saldo Neto del Cliente (Saldo - Por Cobrar)
+    saldo_neto = saldo_real - por_cobrar_real
+
+    # Mostramos la Alerta de Poco Ahorro del Cliente
+    st.error(
+        "El cliente con Referencia **{}** presenta poco ahorro para cubrir el Por Cobrar (Saldo Neto: ${:,.0f}). ¿Está seguro de querer subir la solicitud?".format(referencia, saldo_neto),
+        icon="⚠️",
+    )
+
+    # Mostramos el Saldo, el Por Cobrar y el Saldo Neto del Cliente
+    colSaldo, colPorCobrar, colSaldoNeto = st.columns(3, vertical_alignment="center", border=True)
+
+    with colSaldo:
+        st.metric(
+            label="**💰 Saldo del Cliente**",
+            value="${:,.0f}".format(saldo_real),
+            border=True,
+        )
+
+    with colPorCobrar:
+        st.metric(
+            label="**💸 Por Cobrar del Cliente**",
+            value="${:,.0f}".format(por_cobrar_real),
+            border=True,
+        )
+
+    with colSaldoNeto:
+        st.metric(
+            label="**📉 Saldo Neto (Saldo - Por Cobrar)**",
+            value="${:,.0f}".format(saldo_neto),
+            delta="Poco Ahorro" if saldo_neto <= 0 else None,
+            delta_color="red",
+            border=True,
+        )
+
+    st.divider()
+
+    # Mostramos de Nuevo la Última Actualización de las Deudas Activas
+    st.markdown("#### **ℹ️ Última Actualización de las Deudas Activas**")
+    st.info('Última Actualización: {} (Hace {:.2f} días hábiles)'.format(
+        ultima_actualizacion.strftime('%Y-%m-%d') if ultima_actualizacion else 'No Disponible',
+        dias_habiles_diff,
+    ))
+
+    if not cumple_condicion_actualizacion:
+        st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles. Verifique nuevamente antes de subir la solicitud.".format(
+            dias_habiles_diff, min_dias_actualizacion
+        ))
+
+    st.divider()
+
+    # Creamos 2 Columnas: Confirmar y Cancelar la Solicitud
+    colConfirmar, colCancelar = st.columns(2, vertical_alignment="center", gap="large")
+
+    with colConfirmar:
+        if st.button(
+            label="**Confirmar Solicitud**",
+            key="confirmar_solicitud_saldo",
+            help="Presione este botón para confirmar y subir la solicitud.",
+            type="primary",
+            icon="✅",
+            width="stretch",
+        ):
+            # Marcamos la Confirmación para que la Vista Suba la Solicitud
+            st.session_state['confirmar_envio_saldo_bajo'] = True
+            st.rerun()
+
+    with colCancelar:
+        if st.button(
+            label="**Cancelar Solicitud**",
+            key="cancelar_solicitud_saldo",
+            help="Presione este botón para cancelar la subida de la solicitud.",
+            type="secondary",
+            icon="❌",
+            width="stretch",
+        ):
+            st.session_state['confirmar_envio_saldo_bajo'] = False
+            st.rerun()

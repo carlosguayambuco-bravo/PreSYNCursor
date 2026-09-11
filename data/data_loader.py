@@ -1234,7 +1234,7 @@ def load_pendiente_cruce_con_cambios() -> pd.DataFrame:
     return cruce_ajustado
 
 # --> Carga de Actualizaciones desde Sheets 
-@st.cache_data(show_spinner="Cargando Cartera Activa de Respaldo (berex malo :( )", ttl=2*HOUR_WAIT)
+@st.cache_data(show_spinner=False, ttl=2*HOUR_WAIT)
 def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     # Paso 1: Obtener el Servicio de Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -1455,9 +1455,35 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadora
     # Paso 5: Devolver el DataFrame de Deudas Activas
     return deudas_df
 
+# Función Auxiliar para Obtener la Última Actualización desde el Backup de Google Sheets
+def obtener_ultima_actualizacion_deudas_backup(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
+    # Definimos la Fecha por Defecto (100 Días Atrás) por si no se Encuentran Actualizaciones
+    fecha_porDefecto = pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100)
+    try:
+        # Cargamos el Backup de Actualizaciones desde Google Sheets
+        acts_backup_df = load_actualizacines_negos()
+
+        # Filtramos por las Deudas y el Correo del Usuario
+        acts_backup_df = acts_backup_df[
+            (acts_backup_df['Id_Deuda'].isin(debt_ids)) &
+            (acts_backup_df['Correo'] == user_email)
+        ]
+
+        # Si No Hay Registros, Devolvemos la Fecha por Defecto
+        if acts_backup_df.empty:
+            return fecha_porDefecto
+
+        # Devolvemos la Última Actualización Encontrada en el Backup
+        return acts_backup_df['Fecha_Act'].max()
+    except:
+        return fecha_porDefecto
+
 # Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 500,)
 def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
+
+    # Definimos la Fecha por Defecto (100 Días Atrás) por si no se Encuentran Actualizaciones
+    fecha_porDefecto = pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100)
 
     # Paso 1: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
     try:
@@ -1466,8 +1492,12 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
         # Paso 2: Obtener las Últimas Actualizaciones desde Metabase
         ultima_actualizacion_df = execute_query_cache(query)
 
+        # Si Metabase Falló (DataFrame sin Filas ni Columnas), Buscamos en el Backup de Google Sheets
+        if ultima_actualizacion_df.empty and ultima_actualizacion_df.columns.empty:
+            return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)
+
         if ultima_actualizacion_df.empty:
-            return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+            return fecha_porDefecto # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
 
         # Paso 3: -- Limpieza de Datos --
         # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
@@ -1479,9 +1509,10 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
         # Paso 4: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
         if not ultima_actualizacion_df.empty:
             return ultima_actualizacion_df['Ultima_Actualizacion'].max()
-        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 30 Días Atrás si No Hay Actualizaciones
+        return fecha_porDefecto # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
     except:
-        return pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100) # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+        # Si la Consulta a Metabase Falla, Buscamos en el Backup de Google Sheets
+        return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)
 
 # Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
 @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")

@@ -8,7 +8,7 @@ import pandas as pd
 from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base  # pyright: ignore[reportAttributeAccessIssue]
-from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
+from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
 from utils.helpers_general import cleanNumber
 
 # Carga de Información Necesaria para el Formulario
@@ -473,8 +473,31 @@ with colBoton:
         disabled=ya_enviado,
     )
 
+# Verificamos si se Requiere Confirmación por Saldo Negativo (Solo Acuerdo de Pago y Oferta de Acuerdo)
+saldo_real = st.session_state.get('saldo_real', 0)
+por_cobrar_real = st.session_state.get('por_cobrar_real', 0)
+saldo_neto = saldo_real - por_cobrar_real
+requiere_confirmacion_saldo = (
+    tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo'] and (saldo_neto <= 0)
+)
+
+# Si se Oprime Enviar y el Saldo es Negativo, Abrimos el Diálogo de Confirmación
+if enviar_formulario and (not ya_enviado) and requiere_confirmacion_saldo:
+    mostrar_dialogo_alerta_saldo(
+        referencia=referencia_cliente,
+        saldo_real=saldo_real,
+        por_cobrar_real=por_cobrar_real,
+        ultima_actualizacion=ultima_actualizacion,
+        cumple_condicion_actualizacion=cumple_condicion,
+        dias_habiles_diff=dias_habiles_diff,
+        min_dias_actualizacion=float(appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']),
+    )
+
+# Verificamos si la Subida fue Confirmada desde el Diálogo
+confirmado_desde_dialogo = st.session_state.pop('confirmar_envio_saldo_bajo', False)
+
 with colMensaje:
-    if enviar_formulario and not ya_enviado:
+    if ((enviar_formulario and not requiere_confirmacion_saldo) or confirmado_desde_dialogo) and not ya_enviado:
         # 1. Bloqueamos inmediatamente para evitar dobles clics en cola
         st.session_state['ultima_referencia_enviada'] = ref_enviar_completa
 
