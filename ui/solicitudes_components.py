@@ -2687,11 +2687,16 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
             colFechaResp, colEstadoSolicitud = st.columns([2, 2], vertical_alignment="center")
     
         with colFechaResp:
+            # Calculamos los Días a Hoy
+            dia_diff = getBDDaysDiffFloat(solicitud["Fecha_Respuesta"], pd.Timestamp.now('America/Bogota').tz_localize(None))
             st.metric(
                 label="**Fecha de Respuesta:**",
                 value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
                 help = "La Fecha de Respuesta de la solicitud",
                 width="stretch",
+                delta = "Hace {:.2f} días hábiles".format(dia_diff),
+                delta_color="green" if dia_diff <= 5 else "red",
+                delta_arrow="up" if dia_diff <=5 else "down",
             )
         with colEstadoSolicitud:
             st.metric(
