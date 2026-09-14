@@ -34,7 +34,6 @@ ESTADOS_RESPONDIBLES_SOLICITUD = [
     'Validada por Fuera',
 ]
 ESTADOS_PREFINALIZAR_SOLICITUD = [
-    'Bajo Comité',
     'Titular Ilocalizable',
     'Vencida',
     'No esta con Aliado',

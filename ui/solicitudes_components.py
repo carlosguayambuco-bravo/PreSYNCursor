@@ -19,7 +19,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -973,6 +973,7 @@ def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
         'quitar_addendum_{}',
         'agregar_addendum_{}',
         'pago_total_obligatorio_{}',
+        'max_descuento_otorgado_{}',
         'metodo_pago_{}',
         'formato_pago_{}',
         'deudas_addendums_solicitud_info_{}',
@@ -1080,6 +1081,12 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     if estado_final == "Titular Ilocalizable":
         solicitud_respuesta["Metadata_Solicitud"]["Estado_Titular_Ilocalizable"] = 1
 
+    # Definimos si la Solicitud se está Enviando Bajo Comité (Con Valores Otorgados)
+    es_bajo_comite = (estado_final == "Bajo Comité")
+
+    # Obtenemos los Valores Otorgados previamente (Si la Solicitud viene de una Aprobación de Comité)
+    valores_bajo_comite = obtener_valores_bajo_comite(solicitud=solicitud)
+
     # Siguente: Agregar Fecha_Solicitado si el estado es "Solicitado"
     if estado_final == "Solicitado":
         solicitud_respuesta["Metadata_Solicitud"]["Fecha_Solicitado"] = pd.Timestamp.now(tz='America/Bogota').tz_localize(None).strftime("%Y-%m-%d %H:%M:%S")
@@ -1108,8 +1115,9 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     colFechaLimite, colMontoTotal, colUsarMontoTotal, colCuotas = st.columns([2, 2, 1, 1], vertical_alignment="center")
 
     # Paso 2: Inicializar Valores en el Session_State por Primera Vez
-    # En Modo Edición usamos el JSON_Respuesta como Base de los Montos (si existe)
-    if modo_edicion and len(solicitud["JSON_Respuesta"]) > 0:
+    # En Modo Edición o si la Solicitud viene de una Aprobación de Comité usamos el JSON_Respuesta como Base de los Montos (si existe)
+    usar_json_como_base = (modo_edicion or (valores_bajo_comite is not None)) and (len(solicitud["JSON_Respuesta"]) > 0)
+    if usar_json_como_base:
         datos_montos = solicitud["JSON_Respuesta"]
     else:
         datos_montos = solicitud["Datos_Solicitud"]
@@ -1130,13 +1138,13 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
         key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
         key_cuotas = 'cuotas_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
         if not (key_monto in st.session_state):
-            if modo_edicion:
+            if usar_json_como_base:
                 respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
                 st.session_state[key_monto] = formatNumber(respuesta_deuda['Monto_Propuesto']) if respuesta_deuda is not None else "Sin Oferta"
             else:
                 st.session_state[key_monto] = formatNumber(d['Monto_Propuesto'])
         if not (key_cuotas in st.session_state):
-            if modo_edicion:
+            if usar_json_como_base:
                 respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
                 st.session_state[key_cuotas] = int(respuesta_deuda.get('Num_Cuotas', 1)) if respuesta_deuda is not None else 1
             else:
@@ -1184,7 +1192,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
             st.session_state[key_monto] = formatNumber(estado_deuda)
 
     with colFechaLimite:
-        if modo_edicion and pd.notna(solicitud["Fecha_Limite_Pago"]):
+        if usar_json_como_base and pd.notna(solicitud["Fecha_Limite_Pago"]):
             fecha_limite_default = solicitud["Fecha_Limite_Pago"]
         else:
             fecha_limite_default = None
@@ -1537,26 +1545,39 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     if len(json_respuesta) > 1:
         colToggle, colInfo = st.columns([1, 4], vertical_alignment="center")
         with colToggle:
+            # Para Bajo Comité el Pago Total es Obligatorio: se fuerza a True y se deshabilita
+            key_pago_total = "pago_total_obligatorio_{}{}".format(solicitud['ID_Solicitud'], sufijo)
+            if es_bajo_comite:
+                st.session_state[key_pago_total] = True
             pago_total_obligatorio = st.toggle(
                 label="**Pago Total Obligatorio**",
-                value=solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) if modo_edicion else False,
-                key="pago_total_obligatorio_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                value=solicitud['Metadata_Solicitud'].get('Pago_Total_Obligatorio', False) if (modo_edicion or usar_json_como_base) else False,
+                key=key_pago_total,
                 help="Seleccione esta opción si el pago total es obligatorio para la solicitud.",
+                disabled=es_bajo_comite,
                 persist_state="page",
             )
             # Guardamos el Pago Total Obligatorio en la solicitud_respuesta
             solicitud_respuesta['Metadata_Solicitud']["Pago_Total_Obligatorio"] = pago_total_obligatorio
         with colInfo:
             st.markdown("**Pago Obligatorio**: El Pago Obligatorio significa que se debe **APLICAR EL PAGO A TODAS LAS DEUDAS**")
-    # Siguiente (Nuevo) Añadir Máximo Descuento Otorgado (Solo si es Validación)
-    if solicitud['Tipo_Solicitud'] == 'Validación':
+    elif es_bajo_comite:
+        # Con una Sola Deuda el Pago es Obligatorio por Definición
+        solicitud_respuesta['Metadata_Solicitud']["Pago_Total_Obligatorio"] = True
+    # Siguiente (Nuevo) Añadir Máximo Descuento Otorgado (Solo si es Validación o Bajo Comité)
+    if (solicitud['Tipo_Solicitud'] == 'Validación') or es_bajo_comite:
         colToggleOtorg, colInfoOtorg = st.columns([1,4], vertical_alignment="center")
         with colToggleOtorg:
+            # Para Bajo Comité el Máximo Descuento siempre es Otorgado: se fuerza a True y se deshabilita
+            key_max_descuento = "max_descuento_otorgado_{}{}".format(solicitud['ID_Solicitud'], sufijo)
+            if es_bajo_comite:
+                st.session_state[key_max_descuento] = True
             descuento_max = st.toggle(
                 label="**Máximo Descuento Otorgado**",
-                value=False,
-                key="max_descuento_otorgado_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                value=solicitud['Metadata_Solicitud'].get('Max_Descuento_Otorgado', False) if (modo_edicion or usar_json_como_base) else False,
+                key=key_max_descuento,
                 help="Activado significa que no se puede hacer contra-oferta",
+                disabled=es_bajo_comite,
                 persist_state="page",
             )
             solicitud_respuesta['Metadata_Solicitud']['Max_Descuento_Otorgado'] = descuento_max
@@ -1584,6 +1605,11 @@ def dialog_respuesta_solicitud(*, solicitud: pd.Series) -> None:
 
     # Construimos la Respuesta de la Solicitud usando los Componentes de Validación
     solicitud_respuesta = construir_respuesta_solicitud_validacion(solicitud=solicitud, modo_edicion=False)
+
+    # Siguiente: Si es Bajo Comité, se Finaliza con los Valores Otorgados (Sin importar el Tipo de Solicitud)
+    if solicitud_respuesta["Estado_Solicitud"] == "Bajo Comité":
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta,casa_cobro_old = solicitud['Casa_Cobro'])
+        st.stop()
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
@@ -1624,6 +1650,11 @@ def dialog_modificar_respuesta_solicitud(*, solicitud: pd.Series) -> None:
         modo_edicion=True,
         funcion_actualizar=redistribuir_resultado_solicitud,
     )
+
+    # Siguiente: Si es Bajo Comité, se Finaliza con los Valores Otorgados (Sin importar el Tipo de Solicitud)
+    if solicitud_respuesta["Estado_Solicitud"] == "Bajo Comité":
+        mostrar_boton_actualizar_solicitudes(solicitud=solicitud_respuesta, casa_cobro_old=solicitud['Casa_Cobro'], funcion_actualizar=redistribuir_resultado_solicitud)
+        st.stop()
 
     # Siguiente: Si es Validación, mostrar el Botón de Finalizar Solicitud
     if solicitud["Tipo_Solicitud"] == "Validación":
@@ -2673,6 +2704,76 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
             with colCuotas: # type: ignore
                 st.code(d['Num_Cuotas'], language="text")
 
+# Función Auxiliar para Mostrar los Valores Otorgados de una Solicitud en Estado 'Bajo Comité'
+def mostrar_valores_bajo_comite(*, solicitud: pd.Series) -> None:
+    """
+    Muestra los Valores Otorgados de una Solicitud en Estado 'Bajo Comité'.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+    """
+    # Paso 1: Obtenemos los Valores Otorgados (Si Aplica)
+    valores = obtener_valores_bajo_comite(solicitud=solicitud)
+    if valores is None:
+        return
+
+    # Paso 2: Mostramos el Título de los Valores Otorgados
+    st.markdown("#### **🏛️ Valores Otorgados Bajo Comité**")
+
+    # Paso 3: Creamos 4 Columnas con los Valores Principales
+    colMonto, colFechaLimite, colPagoTotal, colMaxDescuento = st.columns(4, border=True)
+
+    with colMonto:
+        st.metric(
+            label="**Monto Total:**",
+            value=formatNumber(valores['monto_total']),
+            help="La suma de los montos propuestos por deuda otorgados bajo comité",
+            delta="{:.1%} de Descuento".format(valores['descuento']) if valores['monto_actual'] > 0 else "N/A",
+        )
+
+    with colFechaLimite:
+        fecha_limite = pd.to_datetime(valores['fecha_limite_pago'], errors='coerce')
+        if pd.notnull(fecha_limite):
+            diferencia_dias = getBDDaysDiffFloat(fecha_limite, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
+            ya_paso = (fecha_limite < pd.Timestamp.now(tz='America/Bogota').tz_localize(None).normalize())
+            valor_fecha = fecha_limite.strftime("%Y-%m-%d")
+            delta_fecha = "{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if ya_paso else "para pagar")
+            delta_color = "red" if ya_paso else "green"
+            delta_arrow = "down" if ya_paso else "up"
+        else:
+            valor_fecha = "No Brindada"
+            delta_fecha = "No Brindada"
+            delta_color = "gray"
+            delta_arrow = "off"
+        st.metric(
+            label="**Fecha Límite de Pago:**",
+            value=valor_fecha,
+            help="La fecha límite de pago otorgada bajo comité",
+            delta=delta_fecha,
+            delta_color=delta_color, # type: ignore
+            delta_arrow=delta_arrow, # type: ignore
+        )
+
+    with colPagoTotal:
+        st.metric(
+            label="**Pago Total Obligatorio:**",
+            value="Sí" if valores['pago_total_obligatorio'] else "No",
+            help="Indica si el pago debe aplicarse a todas las deudas",
+            delta="Necesitas pagar todas las deudas" if valores['pago_total_obligatorio'] else "Se pueden pagar deudas de forma individual",
+        )
+
+    with colMaxDescuento:
+        st.metric(
+            label="**Máximo Descuento Otorgado:**",
+            value="Sí" if valores['max_descuento_otorgado'] else "No",
+            help="Activado significa que no se puede realizar contraoferta",
+            delta="No se puede contraofertar" if valores['max_descuento_otorgado'] else "Se puede contraofertar",
+        )
+
+    # Paso 4: Mostramos el Detalle por Deuda de los Valores Otorgados
+    with st.expander("**💰 Detalles de los Valores por Deuda**", expanded=True):
+        mostrar_detalles_respuesta_deuda(solicitud=solicitud)
+
 # Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud
 def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Literal['nego','ejecutivo'], expander_key: str, default_expand_debts: bool = True):
     # Siguiente Paso: Mostramos la Info de la Respuesta
@@ -2728,7 +2829,11 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
     
     # Si la Solicitud no es Exitosa, todo finaliza aquí
     if solicitud["Estado_Solicitud"] != "Exitosa":
-        st.success("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
+        # Si es Bajo Comité, mostramos los Valores Otorgados (Si existen)
+        if solicitud["Estado_Solicitud"] == "Bajo Comité":
+            mostrar_valores_bajo_comite(solicitud=solicitud)
+        else:
+            st.success("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
         return
     
     # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
@@ -3161,6 +3266,9 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             st.error("No se puede cambiar el Histórico de las Solicitudes",icon="❌",title="Error de Cambio de Solicitudes")
 
         mostrar_subestado_transitorio(solicitud=solicitud)
+        # Si la Solicitud está Bajo Comité y Volvió para Responder, mostramos los Valores Otorgados
+        if not solicitud_ya_gestionada:
+            mostrar_valores_bajo_comite(solicitud=solicitud)
         comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','')
         if not solicitud_ya_gestionada and comentario_ejecutivo:
             st.info(comentario_ejecutivo.replace("\n","\n\n"), title="Comentario del Ejecutivo", icon="💬")
@@ -3277,6 +3385,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             st.info("{}".format(comentario_ejecutivo.replace("\n","\n\n")), icon="💬", title="Comentario del Ejecutivo")
 
             mostrar_subestado_transitorio(solicitud=solicitud)
+            # Mostramos los Valores Otorgados Bajo Comité para que el Negociador los Conozca antes de Aprobar
+            mostrar_valores_bajo_comite(solicitud=solicitud)
             # Definimos el Tipo de AProbación
             tipo_aprobacion = obtener_tipo_aprobacion_necesaria(solicitud)
             st.info("Esta solicitud requiere aprobación de tipo: {}".format(tipo_aprobacion), icon="ℹ️")

@@ -184,6 +184,62 @@ def obtener_tipo_aprobacion_necesaria(solicitud: pd.Series) -> Optional[Literal[
     else:
         return None
 
+def obtener_valores_bajo_comite(*, solicitud: pd.Series) -> Optional[dict[str, Any]]:
+    """
+    Obtiene los Valores Otorgados de una Solicitud en Estado 'Bajo Comité'.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        Optional[dict[str, Any]]: Diccionario con los valores otorgados o None si la
+        solicitud no está en 'Bajo Comité' o no tiene valores en el JSON_Respuesta.
+            - 'deudas': Deudas con Monto_Propuesto mayor a 0.
+            - 'monto_total': Suma de los Montos Propuestos Otorgados.
+            - 'monto_actual': Suma de los Montos Actuales de las Deudas Otorgadas.
+            - 'descuento': Descuento Otorgado (1 - monto_total / monto_actual).
+            - 'pago_total_obligatorio': Si el Pago es Obligatorio para Todas las Deudas.
+            - 'max_descuento_otorgado': Si no se puede Realizar ContraOferta.
+            - 'fecha_limite_pago': Fecha Límite de Pago Otorgada.
+    """
+    # Paso 1: Verificamos que la Solicitud esté en Estado 'Bajo Comité'
+    if solicitud.get("Estado_Solicitud") != "Bajo Comité":
+        return None
+
+    # Paso 2: Obtenemos las Deudas con Valores del JSON_Respuesta
+    json_respuesta = solicitud.get("JSON_Respuesta", [])
+    if not isinstance(json_respuesta, list) or not json_respuesta:
+        return None
+    deudas = [
+        d for d in json_respuesta
+        if cleanNumber(d.get('Monto_Propuesto', 0), default_nan=0.0) > 0
+    ]
+    if not deudas:
+        return None
+
+    # Paso 3: Calculamos Monto Total, Monto Actual y Descuento Otorgado
+    ids_deudas = set(str(d['Id_Deuda']) for d in deudas)
+    monto_total = sum(cleanNumber(d.get('Monto_Propuesto', 0), default_nan=0.0) for d in deudas)
+    monto_actual = sum(
+        cleanNumber(d.get('Monto_Actual', 0), default_nan=0.0)
+        for d in solicitud.get("Datos_Solicitud", [])
+        if str(d['Id_Deuda']) in ids_deudas
+    )
+    descuento = 1 - monto_total / monto_actual if monto_actual > 0 else 0.0
+
+    # Paso 4: Obtenemos la Metadata de los Valores Otorgados
+    metadata = solicitud.get("Metadata_Solicitud", {})
+
+    return {
+        'deudas': deudas,
+        'monto_total': monto_total,
+        'monto_actual': monto_actual,
+        'descuento': descuento,
+        'pago_total_obligatorio': bool(metadata.get('Pago_Total_Obligatorio', False)),
+        'max_descuento_otorgado': bool(metadata.get('Max_Descuento_Otorgado', False)),
+        'fecha_limite_pago': solicitud.get('Fecha_Limite_Pago'),
+    }
+
 def obtener_mascara_sin_responder(solicitudes_df: pd.DataFrame) -> pd.Series:
     """
     Filtra las solicitudes que no han sido respondidas.
