@@ -2778,7 +2778,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
     # Siguiente Paso: Mostramos la Info de la Respuesta
     st.subheader("**📋 Información de la Respuesta a la Solicitud**")
 
-    comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario Adicional')
+    comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario Adicional') or 'Sin Comentario Adicional'
     
     with st.container(border=True, horizontal_alignment="distribute"):
         # Creamos Columnas para Mostrar: Fecha de Respuesta, Estado de Solicitud, Monto Respuesta (Si Hay)
@@ -3264,7 +3264,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         # Si la Solicitud está Bajo Comité y Volvió para Responder, mostramos los Valores Otorgados
         if not solicitud_ya_gestionada:
             mostrar_valores_bajo_comite(solicitud=solicitud)
-        comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','')
+        comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','') or 'Sin Comentario Adicional'
         if not solicitud_ya_gestionada and comentario_ejecutivo:
             st.info(comentario_ejecutivo.replace("\n","\n\n"), title="Comentario del Ejecutivo", icon="💬")
 
@@ -3423,7 +3423,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if es_solicitud_aprobacion_necesaria(solicitud):
 
             # Mostramos el Comentario del Ejecutivo
-            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', "Sin Comentario Adicional")
+            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', "Sin Comentario Adicional") or 'Sin Comentario Adicional'
             st.info("{}".format(comentario_ejecutivo.replace("\n","\n\n")), icon="💬", title="Comentario del Ejecutivo")
 
             mostrar_subestado_transitorio(solicitud=solicitud)
