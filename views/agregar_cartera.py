@@ -10,13 +10,14 @@ import pandas as pd
 import streamlit as st
 from pandera.errors import SchemaErrors
 # Librerías Locales
+from data.data_deleter import eliminar_base_cruce
 from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
-    aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
+    agregar_resultados_a_df_original, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
@@ -24,6 +25,38 @@ from ui.cruce_deudas_components import (
 )
 from utils.helpers_general import cleanNumber
 from utils.helpers_sheets import convert_data_to_string
+
+# Función Auxiliar para Formatear una Base del Cruce (Casa de Cobro - Alias - Archivo)
+def _formatear_nombre_base(base: tuple) -> str:
+    casa, alias, archivo = base
+    return "{} - {} - {}".format(
+        casa or 'SIN CASA DE COBRO',
+        alias or 'SIN ALIAS',
+        archivo or 'SIN ARCHIVO',
+    )
+
+# Función Auxiliar para Obtener las Bases Subidas Anteriormente desde la Metadata del Cruce
+def _obtener_bases_subidas(*, cruce_df: pd.DataFrame) -> list[tuple[str, str, str]]:
+    if cruce_df.empty or ('Metadata' not in cruce_df.columns):
+        return []
+    bases = set()
+    for mtdt in cruce_df['Metadata']:
+        bases.add((
+            str(mtdt.get('Casa_Cobro') or ''),
+            str(mtdt.get('Alias_Casa') or ''),
+            str(mtdt.get('Archivo_Origen') or ''),
+        ))
+    return sorted(bases)
+
+# Función Auxiliar para Convertir el DataFrame de Resultados al Formato de Descarga
+def _convertir_resultado_a_bytes(*, df: pd.DataFrame, ext: str) -> bytes:
+    buffer = io.BytesIO()
+    if ext == 'xlsx':
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False)
+    else:
+        df.to_csv(buffer, index=False, encoding='utf-8-sig')
+    return buffer.getvalue()
 
 # Función Auxiliar para Mostrar la Configuración del Cruce (Columnas, Modelo y Subida)
 def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str) -> None:
@@ -46,6 +79,56 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
         )
     # Clave base del cruce (relacionada con la Casa de Cobro, el Alias y el Archivo)
     base_key = "{}_{}_{}_{}".format(casa_cobro, alias or 'SIN_ALIAS', uploaded_file.name, uploaded_file.size)
+
+    # --- 2.1 Verificación de Base Subida Anteriormente ---
+    st.markdown("### 🗂️ Verificación de Base Subida")
+    # Verificación Automática: ¿Existe una Base con el Mismo Nombre (Casa - Alias - Archivo)?
+    bases_subidas = _obtener_bases_subidas(cruce_df=load_pendiente_cruce())
+    base_actual = (str(casa_cobro), str(alias or ''), str(uploaded_file.name))
+    coincide_base = base_actual in bases_subidas
+
+    key_base_anterior = "cruce_base_anterior_{}".format(base_key)
+    key_actualizar_anterior = "cruce_actualizar_anteriores_{}".format(base_key)
+
+    with st.container(border=True):
+        colBaseAnterior, colActualizar = st.columns(2)
+        with colBaseAnterior:
+            base_anterior = st.toggle(
+                label="**📂 Base Subida Anteriormente**",
+                value=coincide_base,
+                key=key_base_anterior,
+                help="Marca esta opción si la base que estás subiendo ya se encuentra en Google Sheets.",
+            )
+        with colActualizar:
+            actualizar_anteriores = st.toggle(
+                label="**♻️ Actualizar Datos Anteriores**",
+                value=coincide_base,
+                key=key_actualizar_anterior,
+                disabled=not base_anterior,
+                help="Elimina los datos de la base seleccionada antes de subir la nueva información.",
+            )
+        if coincide_base:
+            st.warning(
+                "Se detectó una base con el **mismo nombre** ya subida anteriormente. "
+                "Si no actualizas los datos anteriores, duplicarás la información.",
+                icon="⚠️",
+            )
+        if bases_subidas:
+            index_base = bases_subidas.index(base_actual) if coincide_base else 0
+            base_seleccionada = st.selectbox(
+                label="**🗂️ Base Subida Anteriormente**",
+                options=bases_subidas,
+                index=index_base,
+                format_func=_formatear_nombre_base,
+                key="cruce_base_seleccionada_{}".format(base_key),
+                disabled=not base_anterior,
+                help="Selecciona la base cuyos datos se eliminarán antes de subir la nueva información.",
+            )
+        else:
+            base_seleccionada = None
+            st.info("Aún no hay bases subidas anteriormente en Google Sheets.", icon="ℹ️")
+
+    st.divider()
 
     # --- 3. Selección de Columnas ---
     st.markdown("### 🧩 Selección de Columnas")
@@ -486,22 +569,52 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
     st.divider()
 
-    # --- 5. Subida de Datos (Drive + Limpieza + Sheets con un solo botón) ---
+    # --- 5. Subida de Datos (Eliminación + Drive + Limpieza + Sheets) ---
     st.markdown("### 🚀 Subida de Datos")
     key_sheets_subido = "cruce_sheets_subido_{}".format(base_key)
+    key_resultado_descarga = "cruce_resultado_descarga_{}".format(base_key)
     if not (key_pkg in st.session_state):
         st.info("Primero ejecuta el algoritmo de identificación para habilitar la subida de datos.", icon="ℹ️")
+        st.warning("Para descargar el resultado del cruce primero debes subir la base de datos.", icon="⬇️")
     else:
+        # Determinamos si la Base ya Existe y No se Desean Actualizar los Datos Anteriores
+        base_anterior_state = st.session_state.get(key_base_anterior, coincide_base)
+        actualizar_state = st.session_state.get(key_actualizar_anterior, coincide_base)
+        es_base_previa = coincide_base or base_anterior_state
+        actualiza_previa = base_anterior_state and actualizar_state
+        conflicto_base = es_base_previa and not actualiza_previa
+
+        if conflicto_base:
+            st.warning(
+                "No se puede subir la base porque ya existe una con el **mismo nombre**. "
+                "Activa **Actualizar Datos Anteriores** y selecciona la base a reemplazar.",
+                icon="🚫",
+            )
+
         subir_datos = st.button(
             label="🚀 Subir Datos a Google Drive y Google Sheets",
             type="primary",
             key="cruce_subir_datos",
             width="stretch",
-            disabled=st.session_state.get(key_sheets_subido, False),
+            disabled=st.session_state.get(key_sheets_subido, False) or conflicto_base,
             help="Sube la base original a Drive, la limpia, la formatea y la sube a Sheets.",
         )
         if subir_datos:
             pkg = st.session_state[key_pkg]
+
+            # 5.0 Eliminación de los Datos Anteriores de la Base Seleccionada (si aplica)
+            if actualiza_previa and (base_seleccionada is not None):
+                with st.spinner("🗑️ Eliminando los Datos Anteriores de la Base..."):
+                    exito_borrado = eliminar_base_cruce(
+                        casa_cobro=base_seleccionada[0],
+                        alias=base_seleccionada[1],
+                        nombre_archivo=base_seleccionada[2],
+                    )
+                if not exito_borrado:
+                    st.error("No se pudieron eliminar los datos anteriores de la base seleccionada.", icon="❌")
+                    st.stop()
+                load_pendiente_cruce.clear()
+                st.toast("✅ Datos Anteriores Eliminados de Google Sheets", icon="🗑️")
 
             # 5.1 Subida de la Base Original a Google Drive (solo una vez)
             key_drive = "cruce_base_drive_subida_{}".format(base_key)
@@ -554,6 +667,19 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                             exito_sheets = upload_base_cruce_info(cruce_df=df_pendiente)
                         if exito_sheets:
                             st.session_state[key_sheets_subido] = True
+                            # Refrescamos el Cache de las Bases Subidas (para la Verificación Automática)
+                            load_pendiente_cruce.clear()
+                            # Generamos el Archivo de Descarga con los Resultados del Cruce
+                            resultado_descarga = agregar_resultados_a_df_original(
+                                raw_df=raw_df,
+                                cruce_std=pkg['cruce_std'],
+                                match_result=pkg['match_result'],
+                                cartera_df=pkg['cartera'],
+                            )
+                            st.session_state[key_resultado_descarga] = _convertir_resultado_a_bytes(
+                                df=resultado_descarga,
+                                ext=ext,
+                            )
                             st.toast("✅ Base de Cruce Subida con Éxito", icon="✅")
                             st.success(
                                 "✅ Se subieron **{:,}** registros a Google Sheets. \n"
@@ -569,6 +695,21 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
         if st.session_state.get(key_sheets_subido, False):
             st.success("Esta base ya fue subida a Google Drive y Google Sheets.", icon="✅")
+            # Botón de Descarga de los Resultados del Cruce (habilitado tras subir la base)
+            st.download_button(
+                label="⬇️ Descargar Resultados del Cruce",
+                data=st.session_state.get(key_resultado_descarga, b""),
+                file_name="{} Resultado.{}".format(
+                    uploaded_file.name.rsplit('.', 1)[0],
+                    ext,
+                ),
+                mime=MIMETYPES.get(ext, 'application/octet-stream'),
+                key="cruce_descargar_resultados",
+                width="stretch",
+                help="Descarga la base original con las columnas del resultado del cruce de deudas.",
+            )
+        else:
+            st.warning("Para descargar el resultado del cruce primero debes subir la base de datos.", icon="⬇️")
 
 # --- Funciones Auxiliares para la Pestaña de Control (Subida a la Base del Mes) ---
 

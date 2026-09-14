@@ -4,6 +4,8 @@ from time import sleep
 from typing import Any
 from datetime import datetime
 import json
+from itertools import groupby
+from operator import itemgetter
 # Librerías de Terceros
 from gspread.exceptions import APIError
 from gspread_dataframe import get_as_dataframe, set_with_dataframe
@@ -522,3 +524,47 @@ def convert_data_to_string(obj: Any) -> str:
         return json.dumps(obj, ensure_ascii=False)
     except TypeError:
         return str(obj).replace('\'','"')
+
+# Función Auxiliar para Eliminar Filas
+def deleteRows(
+    worksheet: gspread.Worksheet,
+    rows_to_delete: list[int],
+)-> bool:
+    """Elimina filas de forma masiva agrupando filas adyacentes
+
+    Args:
+        worksheet (gspread.Worksheet): La Hoja de la cual se desean eliminar las Filas
+        rows_to_delete (list[int]): La Lista de índices de las filas que se desean eliminar (1-indexed)
+
+    Returns:
+        bool: True si la Actualización funciona, de lo contrario False
+    """    
+    
+    if not rows_to_delete:
+        return True
+
+    # 1. Remove duplicates and sort in descending order
+    unique_rows = sorted(list(set(rows_to_delete)), reverse=True)
+    total_rows = len(unique_rows)
+
+    # 2. Group adjacent numbers into structured batches upfront
+    batches = []
+    for _, g in groupby(enumerate(unique_rows), lambda ix: ix[0] + ix[1]):
+        group = list(map(itemgetter(1), g))
+        end_row = group[0]
+        start_row = group[-1]
+        length = end_row - start_row + 1
+        batches.append((start_row, end_row, length))
+
+    total_batches = len(batches)
+
+    # 3. Batch delete each block from bottom to top
+    for _, (start_row, end_row, length) in enumerate(batches, start=1):
+
+        try:
+            _retry(lambda: worksheet.delete_rows(start_index=start_row, end_index=end_row))
+            continue
+        except APIError:
+            return False
+
+    return True

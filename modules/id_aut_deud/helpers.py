@@ -753,3 +753,88 @@ def search_data_deudas(*,cedula: str):
     # Ejecutar la Función de Obtención de Datos y Guardarla en el Session State
     key_deudas = 'cruce_deudas_posibles_{}'.format(cedula)
     st.session_state[key_deudas] = obtener_datos_deuda_cedula(cedula = cedula)
+
+# Función Auxiliar para Agregar los Resultados del Cruce al DataFrame Original Subido
+def agregar_resultados_a_df_original(*,
+        raw_df: pd.DataFrame,
+        cruce_std: pd.DataFrame,
+        match_result: Optional[pd.DataFrame],
+        cartera_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
+    """Agrega las columnas del resultado del cruce (Etiqueta, Id_Deuda Identificado y
+    candidatos) al DataFrame original subido por el usuario, respetando sus columnas
+    y el orden de sus registros.
+    """
+    # Paso 1: Indexar el Resultado del Modelo por Id_Cruce
+    match_by_id = {}
+    if (match_result is not None) and (not match_result.empty):
+        match_by_id = {
+            str(fila['Id_Registro']): fila for _, fila in match_result.iterrows()
+        }
+
+    # Paso 2: Crear el Diccionario de Información de la Cartera (para el Detalle de Candidatos)
+    cartera_info = {}
+    if (cartera_df is not None) and (not cartera_df.empty) and (COL_ID_DEUDA in cartera_df.columns):
+        cartera_unico = cartera_df.drop_duplicates(subset=COL_ID_DEUDA, keep='first')
+        for _, fila in cartera_unico.iterrows():
+            cartera_info[str(fila[COL_ID_DEUDA])] = {
+                COL_BANCO: (str(fila[COL_BANCO]) if (COL_BANCO in fila.index) and pd.notna(fila[COL_BANCO]) else ''),
+                COL_CREDITO: (str(fila[COL_CREDITO]).replace('.0','').strip() if (COL_CREDITO in fila.index) and pd.notna(fila[COL_CREDITO]) else ''),
+                COL_MONTO_ACTUAL: (float(fila[COL_MONTO_ACTUAL]) if (COL_MONTO_ACTUAL in fila.index) and pd.notna(fila[COL_MONTO_ACTUAL]) else np.nan),
+            }
+
+    # Paso 3: Construir las Columnas de Resultado Registro a Registro
+    etiquetas = []
+    ids_identificados = []
+    ids_posibles = []
+    detalles = []
+    motivos = []
+    for _, fila in cruce_std.iterrows():
+        id_cruce = str(fila[COL_ID_CRUCE])
+        match_fila = match_by_id.get(id_cruce)
+        if match_fila is not None:
+            etiqueta = str(match_fila['Etiqueta_Registro'])
+            candidatos = [str(id_cand) for id_cand in (match_fila['Ids_Candidatos'] or [])]
+            motivo = str(match_fila['Motivos_Etiqueta'] or '')
+        else:
+            # Registro que ya traía Id_Deuda en la base (se asume identificado)
+            id_pre = ''
+            if (COL_ID_DEUDA in cruce_std.columns) and pd.notna(fila.get(COL_ID_DEUDA)):
+                id_pre = str(fila[COL_ID_DEUDA]).replace('.0','').strip()
+            etiqueta = ETIQUETA_EXACTO if id_pre else ETIQUETA_NULO
+            candidatos = [id_pre] if id_pre else []
+            motivo = 'Id_Deuda Input' if id_pre else ''
+
+        # Id_Deuda Definitivo: solo cuando el registro es un EXACTO con un único candidato
+        id_identificado = candidatos[0] if (etiqueta == ETIQUETA_EXACTO and len(candidatos) == 1) else ''
+
+        # Detalle Legible de cada Candidato (Banco, Número de Crédito y Monto)
+        detalle_candidatos = []
+        for id_cand in candidatos:
+            info = cartera_info.get(id_cand)
+            if info is None:
+                detalle_candidatos.append(id_cand)
+                continue
+            monto = info.get(COL_MONTO_ACTUAL)
+            monto_txt = "${:,.0f}".format(monto) if pd.notna(monto) else 'SIN MONTO'
+            detalle_candidatos.append("{} ({}, {}, {})".format(
+                id_cand,
+                info.get(COL_BANCO) or 'SIN BANCO',
+                info.get(COL_CREDITO) or 'SIN CREDITO',
+                monto_txt,
+            ))
+
+        etiquetas.append(etiqueta)
+        ids_identificados.append(id_identificado)
+        ids_posibles.append(' | '.join(candidatos))
+        detalles.append(' | '.join(detalle_candidatos))
+        motivos.append(motivo)
+
+    # Paso 4: Agregar las Columnas de Resultado al DF Original (mismo orden de registros)
+    resultado_df = raw_df.copy()
+    resultado_df['Id_Deuda_Identificado'] = ids_identificados
+    resultado_df['Etiqueta_Cruce'] = etiquetas
+    resultado_df['Ids_Deudas_Posibles'] = ids_posibles
+    resultado_df['Detalle_Deudas_Posibles'] = detalles
+    resultado_df['Motivos_Cruce'] = motivos
+    return resultado_df
