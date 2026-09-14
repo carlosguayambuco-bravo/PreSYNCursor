@@ -221,6 +221,14 @@ def getBDDaysDiffFloat_vectorized(start_series: pd.Series, end_series: pd.Series
 
     return pd.Series(result, index=start_series.index)
 
+# Función Auxiliar para realizar desplazamientos de días hábiles
+def move_business_days(
+        *,
+        date: pd.Timestamp, 
+        delta_days: int
+    ) -> pd.Timestamp:
+    return date + co_bday*delta_days
+
 # Función Auxiliar para limpiar las tildes de un texto
 def clean_tildes(text: str) -> str:
     replacements = {

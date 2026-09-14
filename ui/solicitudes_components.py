@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 import math
+from tkinter import ROUND
 from typing import Any, Callable, Literal, Optional
 from time import sleep
 # Librerías de Terceros
@@ -20,7 +21,7 @@ from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOL
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
-from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat
+from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
 # Función para Mostrar los Filtros Generales de una Solicitud (Versión Ejecutivo)
 def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFrame) -> pd.DataFrame:
@@ -172,23 +173,23 @@ def mostrar_filtros_generales_solicitud_ejecutivo(*, solicitudes_df: pd.DataFram
 
         with colFechaMin:
             fecha_min = st.date_input(
-                label="**📅 Fecha Mínima (Timestamp)**",
+                label="**📅 Fecha Mínima**",
                 value=None,
                 min_value=fecha_min_posible.date() if pd.notna(fecha_min_posible) else None,
                 max_value=fecha_max_posible.date() if pd.notna(fecha_max_posible) else None,
                 key="fecha_min_solicitud_gestion_input",
-                help="Filtre las solicitudes cuya Fecha de Creación (Timestamp) sea mayor o igual a esta fecha.",
+                help="Filtre las solicitudes cuya Fecha de Creación sea mayor o igual a esta fecha.",
                 disabled = usar_recomendado,
             )
 
         with colFechaMax:
             fecha_max = st.date_input(
-                label="**📅 Fecha Máxima (Timestamp)**",
+                label="**📅 Fecha Máxima**",
                 value=None,
                 min_value=fecha_min_posible.date() if pd.notna(fecha_min_posible) else None,
                 max_value=fecha_max_posible.date() if pd.notna(fecha_max_posible) else None,
                 key="fecha_max_solicitud_gestion_input",
-                help="Filtre las solicitudes cuya Fecha de Creación (Timestamp) sea menor o igual a esta fecha.",
+                help="Filtre las solicitudes cuya Fecha de Creación sea menor o igual a esta fecha.",
                 disabled = usar_recomendado,
             )
 
@@ -446,22 +447,22 @@ def mostrar_filtros_generales_solicitud_negociador(*, solicitudes_df: pd.DataFra
 
         with colFechaMin:
             fecha_min = st.date_input(
-                label="**📅 Fecha Mínima (Timestamp)**",
+                label="**📅 Fecha Mínima**",
                 value=None,
                 min_value=fecha_min_posible.date() if pd.notna(fecha_min_posible) else None,
                 max_value=fecha_max_posible.date() if pd.notna(fecha_max_posible) else None,
                 key="fecha_min_solicitud_nego_input",
-                help="Filtre las solicitudes cuya Fecha de Creación (Timestamp) sea mayor o igual a esta fecha.",
+                help="Filtre las solicitudes cuya Fecha de Creación sea mayor o igual a esta fecha.",
             )
 
         with colFechaMax:
             fecha_max = st.date_input(
-                label="**📅 Fecha Máxima (Timestamp)**",
+                label="**📅 Fecha Máxima**",
                 value=None,
                 min_value=fecha_min_posible.date() if pd.notna(fecha_min_posible) else None,
                 max_value=fecha_max_posible.date() if pd.notna(fecha_max_posible) else None,
                 key="fecha_max_solicitud_nego_input",
-                help="Filtre las solicitudes cuya Fecha de Creación (Timestamp) sea menor o igual a esta fecha.",
+                help="Filtre las solicitudes cuya Fecha de Creación sea menor o igual a esta fecha.",
             )
 
     # Siguiente: Aplicar los Filtros Seleccionados al DataFrame de Solicitudes
@@ -2677,7 +2678,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
     # Siguiente Paso: Mostramos la Info de la Respuesta
     st.subheader("**📋 Información de la Respuesta a la Solicitud**")
 
-    comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario')
+    comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario Adicional')
     
     with st.container(border=True, horizontal_alignment="distribute"):
         # Creamos Columnas para Mostrar: Fecha de Respuesta, Estado de Solicitud, Monto Respuesta (Si Hay)
@@ -2691,7 +2692,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
             dia_diff = getBDDaysDiffFloat(solicitud["Fecha_Respuesta"], pd.Timestamp.now('America/Bogota').tz_localize(None))
             st.metric(
                 label="**Fecha de Respuesta:**",
-                value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
+                value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d %X") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
                 help = "La Fecha de Respuesta de la solicitud",
                 width="stretch",
                 delta = "Hace {:.2f} días hábiles".format(dia_diff),
@@ -2702,6 +2703,8 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
             st.metric(
                 label="**Estado de Solicitud:**",
                 value=solicitud["Estado_Solicitud"],
+                delta = "Priorizar Pago" if (solicitud["Estado_Solicitud"] == "Exitosa") else "Revisar Comentario",
+                delta_color= "green" if (solicitud["Estado_Solicitud"] == "Exitosa") else "grey",
                 help = "El Estado de la solicitud",
                 width="stretch",
             )
@@ -2718,14 +2721,14 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
                     delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
                     width="stretch",
                 )
-        st.info("{}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="💬", title="Comentario del Ejecutivo")
+        st.info("{}".format(comentario_ejecutivo.replace('\n','\n\n')), icon="💬", title="Comentario del Ejecutivo")
 
     if st.session_state.get(expander_key, False):
         mostrar_mensaje_actualizado(solicitud=solicitud, origen=origen)
     
     # Si la Solicitud no es Exitosa, todo finaliza aquí
     if solicitud["Estado_Solicitud"] != "Exitosa":
-        st.info("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
+        st.success("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
         return
     
     # Siguiente: Mostrar los Detalles de la Respuesta por Deuda en un Expander
@@ -2851,6 +2854,131 @@ def mostrar_subestado_transitorio(solicitud: pd.Series) -> None:
             icon="ℹ️",
         )
 
+# Función Auxiliar para mostrar detalles de tiempos de solicitud
+def mostrar_tiempos_solicitud(*,solicitud: pd.Series) -> None:
+    # Mostramos Fecha de Solicitud y Fecha Límite de Respuesta y Fecha de Solicitado si Hay
+    if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
+        colFechaSolicitud, colFechaLim, colSolicitado = st.columns(3,border=True)
+    else:
+        colFechaSolicitud, colFechaLim = st.columns(2,border=True)
+    with colFechaSolicitud:
+        dias_delta = getBDDaysDiffFloat(
+            solicitud["Timestamp"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+        )
+        st.metric(
+            label="**Fecha de Solicitud:**",
+            value=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
+            help = "La fecha y hora en que se realizó la solicitud",
+            delta = "{:.1f} días atrás".format(dias_delta),
+            delta_color="red" if dias_delta > 7 else "green",
+            delta_arrow="down" if dias_delta > 7 else "up",
+        )
+
+    with colFechaLim:
+        # Primero tenemos que obtener la Fecha Límite del Aliado
+        if not solicitud['Casa_Cobro'] in st.session_state['aliados_dict']:
+            st.error("❌Aliado no Encontrado para Tiempos de Respuesta")
+        else:
+            curr_aliado_obj = st.session_state['aliados_dict'][solicitud['Casa_Cobro']]
+            # Obtenemos la Fecha Límite desde la Fecha de Solicitud
+            # Obtenemos el #dias de tiempos de respuesta
+            dias_tr = curr_aliado_obj.obtener_tr_dias()
+            horas_tr = curr_aliado_obj.obtener_tr_horas()
+            # Definimos cuando sería eso en un futuro
+            fecha_lim_resp = move_business_days(date=solicitud['Timestamp'], delta_days=dias_tr).replace(hour=23,minute=29,second=59)
+            # Verificamos a Hoy la Diferencia
+            diff_bd_lim = getBDDaysDiffFloat(pd.Timestamp.now('America/Bogota').tz_localize(None), fecha_lim_resp)
+
+            # Ahora Vamos a Definir los Deltas
+            # Caso 1: Solicitud Respondida
+            if not es_solicitud_sin_responder(solicitud=solicitud):
+                # Verificamos si se cumple el tiempo de respuesta
+                diff_bd_rsp = getBDDaysDiffFloat(solicitud['Timestamp'], solicitud['Fecha_Respuesta'])
+
+                # Caso 2.1: Solicitud Respondida dentro del límite
+                if (diff_bd_rsp * 24) <= horas_tr:
+                    dlt_value = "Solicitud Respondida a Tiempo ({:.1f} horas límite)".format(
+                        horas_tr
+                    )
+                    dlt_color = "green"
+                    dlt_arrow = "up"
+                # Caso 2.2: Solicitud Respondida fuera del límite
+                else:
+                    dlt_value = "Solicitud Respondida con Retraso de {:.1f} días".format(
+                        ((diff_bd_rsp * 24) - horas_tr)/24
+                    )
+                    dlt_color = "red"
+                    dlt_arrow = "down"
+            # Caso 2: Solicitud sin Responder
+            else:
+                # Caso 2.1: Aún a tiempo en terminos de tiempos de respuesta
+                if (diff_bd_lim * 24) <= horas_tr:
+                    dlt_value = "Solicitud aún a tiempo para responder ({:.1f} horas límite)".format(
+                        horas_tr
+                    )
+                    dlt_color = "green"
+                    dlt_arrow = "up"
+                # Caso 2.2: Tiempo de Respuesta pasado
+                else:
+                    dlt_value = "Solicitud tardía para responder (pasado por {:.1f} días)".format(
+                        ((diff_bd_lim * 24) - horas_tr) / 24
+                    )
+                    dlt_color= "red"
+                    dlt_arrow = "down"
+
+            # Procedemos a Mostrar la Métrica
+            st.metric(
+                label="**Límite de Tiempo de Respuesta**",
+                value = fecha_lim_resp.strftime("%Y-%m-%d %X"),
+                delta = dlt_value,
+                delta_color= dlt_color,
+                delta_arrow= dlt_arrow,
+                help="El Límite a la Respuesta de Solicitud según los tiempos de respuesta en 'Alianzas Vigentes'"
+            )
+
+    if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
+        with colSolicitado: # type: ignore
+            fecha_solicitado = pd.to_datetime(solicitud["Metadata_Solicitud"]["Fecha_Solicitado"], dayfirst=False, errors='coerce')
+            if fecha_solicitado:
+                diferencia_dias = getBDDaysDiffFloat(fecha_solicitado, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
+                st.metric(
+                    label="**Fecha de Solicitud:**", value=fecha_solicitado.strftime("%Y-%m-%d %H:%M"),
+                    help = "La Fecha en que se solicitó la solicitud",
+                    delta = "{:.1f} días hábiles atrás".format(diferencia_dias),
+                    delta_color="green" if diferencia_dias < 3 else "red",
+                    delta_arrow="down",
+                )
+            else:
+                st.error("Error de Fecha de Solicitado")
+
+# Función Auxiliar para mostrar detalles de acuerdos
+def mostrar_detalle_acuerdo(*,solicitud: pd.Series, cmt_delta: str):
+    colFechaPago, colTipoPago = st.columns(2)
+    with colFechaPago:
+        fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
+        falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+        ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
+        st.metric(
+            label="**Fecha de Pago**", 
+            value=fecha_pago,
+            help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
+            border=True,
+            delta_color = "red" if ya_paso_fecha else "green",
+            delta_arrow="down" if ya_paso_fecha else "up",
+            delta = "{} {:.1f} días hábiles".format("Faltan" if (not ya_paso_fecha) else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
+        )
+
+    with colTipoPago:
+        st.metric(
+            label="**Tipo de Pago**", 
+            value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
+            help = "El Método de Pago del Acuerdo u Oferta de Pago",
+            border=True,
+            delta=cmt_delta or "Error",
+            delta_color="gray",
+            delta_arrow="off",
+        )
+
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
@@ -2932,54 +3060,18 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 delta_arrow="off",
             )
 
+        # Mostramos detalles de tiempos de la Solicitud
+        mostrar_tiempos_solicitud(solicitud=solicitud)
+
         # Siguiente: Caso Especial: Si es Acuerdo de Pago o Oferta de Pago, Mostrar Fecha de Pago y Tipo de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
-            colFechaPago, colTipoPago = st.columns(2)
-
-            with colFechaPago:
-                fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
-                falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
-                ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
-                st.metric(
-                    label="**Fecha de Pago**", 
-                    value=fecha_pago,
-                    help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
-                    border=True,
-                    delta_color = "red" if ya_paso_fecha else "green",
-                    delta_arrow="down" if ya_paso_fecha else "up",
-                    delta = "{} {:.1f} días hábiles".format("Faltan" if (not ya_paso_fecha) else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
-                )
-
-            with colTipoPago:
-                st.metric(
-                    label="**Tipo de Pago**", 
-                    value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
-                    help = "El Método de Pago del Acuerdo u Oferta de Pago",
-                    border=True,
-                    delta="Ojala que paguen",
-                    delta_color="gray",
-                    delta_arrow="off",
-                )
+            mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Ojala que paguen")
 
         # Si hay Comentario_Negociador en la Metadata, se muestra
         if "Comentario_Negociador" in solicitud["Metadata_Solicitud"]:
             comentario_negociador = solicitud["Metadata_Solicitud"]["Comentario_Negociador"]
             if comentario_negociador:
                 st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
-
-        # Si hay Fecha_Solicitado se muestra (calculando la diferencia en días hábiles)
-        if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
-            fecha_solicitado = pd.to_datetime(solicitud["Metadata_Solicitud"]["Fecha_Solicitado"], dayfirst=False, errors='coerce')
-            if fecha_solicitado:
-                diferencia_dias = getBDDaysDiffFloat(fecha_solicitado, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
-                st.metric(
-                    label="**Fecha de Solicitud:**", value=fecha_solicitado.strftime("%Y-%m-%d %H:%M"),
-                    help = "La Fecha en que se solicitó la solicitud",
-                    delta = "{:.1f} días hábiles atrás".format(diferencia_dias),
-                    delta_color="green" if diferencia_dias < 3 else "red",
-                    delta_arrow="down",
-                    border=True,
-                )
 
         # Mostramos las Casas de Cobro
         deudas_actuales = [d['Id_Deuda'] for d in solicitud['Datos_Solicitud']]
@@ -3071,10 +3163,11 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         mostrar_subestado_transitorio(solicitud=solicitud)
         comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','')
         if not solicitud_ya_gestionada and comentario_ejecutivo:
-            st.info(comentario_ejecutivo, title="Comentario del Ejecutivo", icon="💬")
+            st.info(comentario_ejecutivo.replace("\n","\n\n"), title="Comentario del Ejecutivo", icon="💬")
 
         if solicitud_ya_gestionada:
             st.space("medium")
+            st.divider()
             mostrar_detalles_respuesta_solicitud(
                 solicitud=solicitud,
                 origen='ejecutivo',
@@ -3125,8 +3218,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
 
-        # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo, Fecha de Solicitud
-        colReferencia, colMontoTotal, colEjecutivo, colFechaSolicitud = st.columns([2, 2, 2, 2], border=True)
+        # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo
+        colReferencia, colMontoTotal, colEjecutivo = st.columns([2, 2, 2], border=True)
         with colReferencia:
             st.metric(
                 label="**Referencia:**", value=solicitud["Referencia"],
@@ -3155,18 +3248,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 delta_color="gray",
                 help = "El Ejecutivo que atiende la solicitud",
             )
-        with colFechaSolicitud:
-            dias_delta = getBDDaysDiffFloat(
-                solicitud["Timestamp"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
-            )
-            st.metric(
-                label="**Fecha de Solicitud:**",
-                value=solicitud["Timestamp"].strftime("%Y-%m-%d %H:%M"),
-                help = "La fecha y hora en que se realizó la solicitud",
-                delta = "{:.1f} días atrás".format(dias_delta),
-                delta_color="red" if dias_delta > 7 else "green",
-                delta_arrow="down" if dias_delta > 7 else "up",
-            )
+
+        # Mostramos los Detalles de los tiempos de la solicitud
+        mostrar_tiempos_solicitud(solicitud=solicitud)
 
         # Mostramos el Comentario del Negociadoor y el Ejecutivo
         comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "")
@@ -3174,49 +3258,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if comentario_negociador:
             st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
 
-        # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
+        # Siguiente: Especificaciones si es Acuerdo de Pago u Ofe   rta de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
-            # Dos Columnas: Una para Fecha de Pago y otra para Tipo de Pago
-            colFechaPago, colTipoPago = st.columns(2, vertical_alignment="center")
-
-            with colFechaPago:
-                fecha_pago = solicitud["Fecha_Esperada_Pago"].strftime("%Y-%m-%d") if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else "No Brindada"
-                falta_para_pago = getBDDaysDiffFloat(solicitud["Fecha_Esperada_Pago"], pd.Timestamp.now(tz='America/Bogota').tz_localize(None)) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
-                ya_paso_fecha = solicitud["Fecha_Esperada_Pago"] < pd.Timestamp.now(tz='America/Bogota').tz_localize(None) if pd.notnull(solicitud["Fecha_Esperada_Pago"]) else None
-                st.metric(
-                    label="**Fecha de Pago:**", value=fecha_pago,
-                    help = "La Fecha Esperada de Pago del Acuerdo u Oferta de Pago",
-                    border=True,
-                    delta_color = "red" if ya_paso_fecha else "green",
-                    delta_arrow="down" if ya_paso_fecha else "up",
-                    delta = "{} {:.1f} días hábiles".format("Faltan" if ya_paso_fecha else "Retraso de", falta_para_pago) if falta_para_pago is not None else "No Brindada",
-                )
-
-            with colTipoPago:
-                st.metric(
-                    label="**Tipo de Pago:**", value=solicitud["Tipo_Pago"] if pd.notnull(solicitud["Tipo_Pago"]) else "No Brindado",
-                    help = "El Método de Pago del Acuerdo u Oferta de Pago",
-                    border=True,
-                    width="stretch",
-                    delta="Pagar la Solicitud :D",
-                    delta_color="gray",
-                    delta_arrow="off",
-                )
-
-        # Si hay Fecha_Solicitado se muestra (calculando la diferencia en días hábiles)
-        if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
-            fecha_solicitado = pd.to_datetime(solicitud["Metadata_Solicitud"]["Fecha_Solicitado"], dayfirst=False, errors='coerce')
-            if fecha_solicitado:
-                diferencia_dias = getBDDaysDiffFloat(fecha_solicitado, pd.Timestamp.now(tz='America/Bogota').tz_localize(None))
-                st.metric(
-                    label="**Fecha de Solicitud:**", value=fecha_solicitado.strftime("%Y-%m-%d %H:%M"),
-                    help = "La Fecha en que se solicitó la solicitud",
-                    delta = "{:.1f} días hábiles atrás".format(diferencia_dias),
-                    delta_color="green" if diferencia_dias < 3 else "red",
-                    delta_arrow="down",
-                    border=True,
-                    width="stretch",
-                )
+            mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Pagar la Solicitud :D")
 
         # Añadimos un Divisor
         st.divider()
@@ -3231,8 +3275,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if es_solicitud_aprobacion_necesaria(solicitud):
 
             # Mostramos el Comentario del Ejecutivo
-            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo')
-            st.info("{}".format(comentario_ejecutivo or "Sin Comentario Adicional"), icon="💬", title="Comentario del Ejecutivo")
+            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', "Sin Comentario Adicional")
+            st.info("{}".format(comentario_ejecutivo.replace("\n","\n\n")), icon="💬", title="Comentario del Ejecutivo")
 
             mostrar_subestado_transitorio(solicitud=solicitud)
             # Definimos el Tipo de AProbación
@@ -3298,6 +3342,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         if es_solicitud_sin_responder(solicitud):
             st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
             return
+
+        st.divider()
 
         mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
 

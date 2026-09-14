@@ -166,6 +166,7 @@ COL_MAPPER_LIQ = {
 # --- Constantes de Solicitudes ---
 
 SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud para que no se repita con el ID de la Deuda
+TIEMPOS_RESPUESTA_DEFAULT = 72 # Horas
 
 DEFAULT_DISCOUNT_PL = 0.15
 LIMITE_MEC = 5 # El Día límite para Considerar el Día como mes operativo

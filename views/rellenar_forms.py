@@ -9,7 +9,7 @@ from data.data_loader import load_addendums, load_app_config, load_client_balanc
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base  # pyright: ignore[reportAttributeAccessIssue]
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
-from utils.helpers_general import cleanNumber
+from utils.helpers_general import cleanNumber, move_business_days
 
 # Carga de Información Necesaria para el Formulario
 # Se Necesita:
@@ -228,9 +228,9 @@ if not deudas_seleccionadas:
 st.divider()
 st.subheader("🫡Selección de Tipo de Solicitud y Aliado")
 
-col1, col2 = st.columns(2)
+colTipoSol, colAliado = st.columns(2)
 
-with col1:
+with colTipoSol:
     tipo_solicitud = st.radio(
         "**Tipo de Solicitud**",
         ["**Validación**","**Acuerdo de Pago**","**Oferta de Acuerdo**"],
@@ -242,7 +242,7 @@ with col1:
         index=None,
         help="Seleccione el tipo de solicitud que desea realizar",
     )
-with col2:
+with colAliado:
     aliado_seleccionado = st.selectbox(
         "**Aliado - Casa de Cobro**",
         options=list(aliadosDict.keys()),
@@ -257,22 +257,6 @@ if not tipo_solicitud or not aliado_seleccionado:
 
 # Limpiamos el Tipo de Solicitud Quitando los Asteriscos
 tipo_solicitud = tipo_solicitud.replace('*','').strip()
-
-st.divider()
-
-# Mostramos la Selección de los Montos Propuestos por Deuda
-info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
-
-# Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
-if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
-    mostrar_monto_recomendado(
-        referencia=referencia_cliente,
-        deudas=deudas_seleccionadas,
-        pricing=deudas_seleccionadas_df['Pricing'].max(),
-        deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
-    )
-
-deudas_info = {deuda: cleanNumber(st.session_state.get(f'monto_propuesto_{deuda}', 0)) for deuda in deudas_seleccionadas}
 
 # Ajuste: Cuando es Directo Base, se busca en las Deudas Masivas
 masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
@@ -330,6 +314,50 @@ if aliado_seleccionado.lower().strip() == 'directo base':
     aliado_cambiado = True
 else:
     aliado_cambiado = False
+
+# Siguiente: Mostrar Verificación de Tiempos de Respuesta
+with colAliado:
+    with st.container(border=True):
+        curr_aliado_obj = aliadosDict[aliado_seleccionado]
+
+        colFechaLim, colTextoLim = st.columns([3,1],vertical_alignment="center")
+
+        with colFechaLim:
+            # Obtenemos el #dias de tiempos de respuesta
+            dias_tr = curr_aliado_obj.obtener_tr_dias()
+            # Definimos cuando sería eso en un futuro
+            fecha_lim_resp = move_business_days(date=pd.Timestamp.now('America/Bogota').tz_localize(None), delta_days=dias_tr)
+            # Mostramos la Fecha como una Métrica
+            st.metric(
+                label="**Fecha Límite de Respuesta**",
+                value = fecha_lim_resp.strftime("%Y-%m-%d"),
+                delta="Al final del día",
+                delta_color="blue",
+                delta_arrow="off",
+            )
+
+        with colTextoLim:
+            st.write("**Tiempo de Respuesta**")
+            # Obtenemos los Días Parsed a string
+            st.markdown(":green-background[**{}**]".format(
+                curr_aliado_obj.obtener_tr_horas_parsed()
+            ))
+
+st.divider()
+
+# Mostramos la Selección de los Montos Propuestos por Deuda
+info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+
+# Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
+if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:
+    mostrar_monto_recomendado(
+        referencia=referencia_cliente,
+        deudas=deudas_seleccionadas,
+        pricing=deudas_seleccionadas_df['Pricing'].max(),
+        deudas_seleccionadas_df=deudas_seleccionadas_df, # type: ignore
+    )
+
+deudas_info = {deuda: cleanNumber(st.session_state.get(f'monto_propuesto_{deuda}', 0)) for deuda in deudas_seleccionadas}
 
 # --- Siguiente: Alertas y Verificaciones ---
 

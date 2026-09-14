@@ -1,12 +1,15 @@
 # Estándar usando Pep8
 # Librerías de Python
 import threading
+import re
 # Librerías de Terceros
 import pandas as pd
 from pandera.typing import DataFrame
 import streamlit as st
 # Librerías Locales
 from data.data_models import AliadosSchema
+from modules.constants import TIEMPOS_RESPUESTA_DEFAULT
+from utils.helpers_general import cleanText
 
 # Creamos la Clase Aliado para guardar la información de cada aliado de forma estructurada
 class Aliado:
@@ -19,7 +22,8 @@ class Aliado:
                 negociacion_bloque: bool,
                 pago_co_obligatorio: bool,
                 brinda_descuento_max: bool,
-                permiso_cuotas: bool
+                permiso_cuotas: bool,
+                tiempo_horas_respuesta: float,
                 ):
         self.nombre = nombre
         self.bancos = bancos
@@ -30,6 +34,7 @@ class Aliado:
         self.pago_co_obligatorio = pago_co_obligatorio
         self.brinda_descuento_max = brinda_descuento_max
         self.permiso_cuotas = permiso_cuotas
+        self.tiempo_horas_respuesta = tiempo_horas_respuesta
 
     def obtener_nombre(self) -> str:
         return self.nombre
@@ -58,6 +63,35 @@ class Aliado:
     def permite_cuotas(self) -> bool:
         return self.permiso_cuotas
 
+    def obtener_tr_horas(self) -> float:
+        return self.tiempo_horas_respuesta
+
+    def obtener_tr_dias(self) -> int:
+        return int(self.tiempo_horas_respuesta // 24)
+
+    def obtener_tr_horas_parsed(self) -> str:
+        return f'{round(self.tiempo_horas_respuesta / 24, 2)} días hábiles'
+
+# Función Auxiliar para realizar parsing de los tiempos de respuesta
+def parse_tiempos_respuesta(tr) -> float:
+    if pd.isna(tr) or tr == "":
+        return TIEMPOS_RESPUESTA_DEFAULT
+    try:
+        # Definimos la Extracción de Regex
+        patron = r'(?P<cantidad>\d+(?:\.\d+)?)\s*(?P<unidad>SEMANA|DIA)s?'
+        # Extraemos los Datos con Regex aplicando cleanText
+        match_search = re.search(patron, cleanText(tr))
+        # Buscamos los Resultados
+        if match_search is None:
+            return TIEMPOS_RESPUESTA_DEFAULT
+        # Realizamos el Parsing del Resultado
+        cantidad = match_search.group('cantidad')
+        unidad = match_search.group('unidad')
+        # Convertimos el Resultado a Número y lo Devolvemos
+        return float(cantidad) * (24 if unidad.lower() == 'dia' else 24*5)
+    except:
+        return TIEMPOS_RESPUESTA_DEFAULT
+
 # Función Auxiliar para Crear un Diccionario de Aliados a partir de un DataFrame
 def crear_diccionario_aliados(df: DataFrame[AliadosSchema]) -> dict:
     # Paso 1: Definir un Diccionario Vacío para Guardar los Aliados
@@ -75,6 +109,7 @@ def crear_diccionario_aliados(df: DataFrame[AliadosSchema]) -> dict:
             pago_co_obligatorio=row['Contraofertas de Pago Obligatorio'] == 'SI',
             brinda_descuento_max=row['Brindan Máx. Descuento'] == 'SI',
             permiso_cuotas=row['Pago a Cuotas'] == 'SI',
+            tiempo_horas_respuesta=parse_tiempos_respuesta(row['Tiempos de Respuesta']),
         )
         aliados_dict[current_aliado.nombre] = current_aliado
 
