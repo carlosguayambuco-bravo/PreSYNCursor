@@ -69,7 +69,7 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     return deudas_seleccionadas
 
 def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: float, deudas_seleccionadas_df: DataFrame[DeudasActivasSchema]) -> None:
-    st.subheader("💰 Monto Recomendado para el Acuerdo")
+    st.subheader("💰 Monto Recomendado para la Solicitud")
 
     # Definimos el Pago Original como la Suma de PaB_Origen de todas las Deudas Seleccionadas
     pago_original = deudas_seleccionadas_df['PaB_Origen'].sum()

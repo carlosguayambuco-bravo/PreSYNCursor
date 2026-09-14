@@ -1,7 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
 import math
-from tkinter import ROUND
 from typing import Any, Callable, Literal, Optional
 from time import sleep
 # Librerías de Terceros
