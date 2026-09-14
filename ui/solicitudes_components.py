@@ -3171,11 +3171,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
             mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Ojala que paguen")
 
-        # Si hay Comentario_Negociador en la Metadata, se muestra
-        if "Comentario_Negociador" in solicitud["Metadata_Solicitud"]:
-            comentario_negociador = solicitud["Metadata_Solicitud"]["Comentario_Negociador"]
-            if comentario_negociador:
-                st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
+        st.info("{}".format(solicitud["Metadata_Solicitud"].get('Comentario_Negociador',"Sin Comentario") or "Sin Comentario"), icon="💬", title="Comentario del Negociador")
 
         # Mostramos las Casas de Cobro
         deudas_actuales = [d['Id_Deuda'] for d in solicitud['Datos_Solicitud']]
@@ -3412,7 +3408,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
         # Mostramos el Comentario del Negociadoor y el Ejecutivo
         comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "Sin Comentario del Negociador")
-        st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
+        st.info("{}".format(comentario_negociador or "Sin Comentario"), icon="💬", title="Comentario del Negociador")
 
         # Añadimos un Divisor
         st.divider()
