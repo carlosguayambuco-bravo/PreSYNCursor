@@ -249,7 +249,7 @@ def obtener_estado_liquidacion(*, solicitud: pd.Series) -> Optional[Literal["N/A
             - "Sin Liquidar": Ningún Id_Deuda de la Respuesta está en las Liquidaciones.
             - "Liquidado Parcial": Algunos Ids de la Respuesta están en las Liquidaciones, pero no todos.
             - "Liquidado Total": Todos los Ids de la Respuesta están en las Liquidaciones.
-            - None: Si la Solicitud no es Exitosa o no es de tipo Acuerdo de Pago u Oferta de Acuerdo,
+            - "N/A": Si la Solicitud no es Exitosa o no es de tipo Acuerdo de Pago u Oferta de Acuerdo,
                 o si no tiene Ids de Deuda en la Respuesta.
     """
     # Solo Aplica para Solicitudes Exitosas
@@ -339,27 +339,45 @@ def distribuir_resultado_solicitud(
 
     # Paso 2: Actualizar Solicitudes con mismas deudas, misma Casa_Cobro y mismo Tipo_Solicitud (Sin Responder)
     solicitudes_df = load_current_month_solicitudes()
+    # Verificación: Que tenga los Mismos Ids
     idsFinal = '-'.join([d['Id_Deuda'] for d in solicitud['JSON_Respuesta']])
     maskIds = (solicitudes_df['Ids_Deuda'] == idsFinal)
-    maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro']) | (solicitudes_df['Casa_Cobro'] == casa_cobro_old)
+
+    # Verificación: Acuerdos Exitosos no importa la casa de cobro, de lo contrario sí
+    if (solicitud['Tipo_Solicitud'] in ['Oferta de Acuerdo','Acuerdo de Pago']) and (solicitud['Estado_Solicitud']== 'Exitosa'):
+        maskCasa = solicitudes_df['Ids_Deuda'].notna() # Siempre True
+    else:
+        maskCasa = (solicitudes_df['Casa_Cobro'] == solicitud['Casa_Cobro']) | (solicitudes_df['Casa_Cobro'] == casa_cobro_old)
+
+    # Verifación: Tipo de Solicitud -> Acuerdos alimentan validaciones pero no viceversa
     if solicitud['Tipo_Solicitud'] == 'Validación':
         maskTipo = (solicitudes_df['Tipo_Solicitud'] == solicitud['Tipo_Solicitud'])
     elif solicitud['Tipo_Solicitud'] in ['Oferta de Acuerdo','Acuerdo de Pago']:
         maskTipo = ((solicitud['Estado_Solicitud'] == 'Exitosa')) | (solicitudes_df['Tipo_Solicitud'].isin(['Oferta de Acuerdo','Acuerdo de Pago']))
+
+    # Verificación: Tiene que ser Solicitud sin Responder
     maskSinResponder = obtener_mascara_sin_responder(solicitudes_df)
+
+    # Verificación: Que no sea la misma porque ya cambio
     maskDiffID = (solicitudes_df['ID_Solicitud'] != solicitud['ID_Solicitud'])
+
+    # Consolidamos la Máscara Final
     maskFinal = maskIds & maskCasa & maskTipo & maskSinResponder & maskDiffID
 
+    # Cambiamos el Id_Respuesta_Autom para futuras re-propagaciones
     solicitud['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
 
     updated_ids = set() # Inicializamos el Set de IDs Actualizados
     need_update_rows = [solicitud] # Inicializamos la lista de filas que necesitan ser actualizadas con la solicitud actual
+
+    # Cambiamos todas las Solicitudes que cumplieron
     for _, solicitud_to_update in solicitudes_df[maskFinal].iterrows():
 
         # Verificamos que no sea la solicitud actual, de lo contrario se salta la actualización
         if solicitud_to_update['ID_Solicitud'] == solicitud['ID_Solicitud']:
             continue
 
+        # Aplicamos la Actualización de todas las Columnas Relevantes
         solicitud_to_update['Estado_Solicitud'] = solicitud['Estado_Solicitud']
         solicitud_to_update['Metadata_Solicitud']['Metodo_Pago'] = solicitud['Metadata_Solicitud'].get('Metodo_Pago', '')
         solicitud_to_update['Metadata_Solicitud']['Comentario_Ejecutivo'] = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', '')
@@ -368,6 +386,7 @@ def distribuir_resultado_solicitud(
         solicitud_to_update['Fecha_Limite_Pago'] = solicitud.get('Fecha_Limite_Pago', '')
         solicitud_to_update['Ejecutivo'] = solicitud['Ejecutivo']
         solicitud_to_update['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+        solicitud_to_update['Casa_Cobro'] = solicitud['Casa_Cobro']
 
         # Guardamos un trace en la Metadata
         solicitud_to_update['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
@@ -408,6 +427,7 @@ def distribuir_resultado_solicitud(
             sub_solicitud['Fecha_Limite_Pago'] = solicitud['Fecha_Limite_Pago']
             sub_solicitud['Ejecutivo'] = solicitud['Ejecutivo']
             sub_solicitud['Fecha_Respuesta'] = solicitud['Fecha_Respuesta']
+            sub_solicitud['Casa_Cobro'] = solicitud['Casa_Cobro']
 
             # Guardamos un trace en la Metadata
             sub_solicitud['Metadata_Solicitud']['Id_Respuesta_Autom'] = solicitud['ID_Solicitud']
