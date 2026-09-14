@@ -19,7 +19,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -3283,6 +3283,51 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 expander_key=expander_key
             )
 
+# Función Auxiliar para mostrar los Botones de Cancelar o Reactivar una Solicitud (Vista Negociador)
+def mostrar_botones_cancelar_reactivar_solicitud(*, solicitud: pd.Series) -> None:
+    # Solo aplica para Solicitudes No Históricas subidas por el Negociador Actual
+    es_dueno = (solicitud['Correo'] == st.session_state.get('user_email', ''))
+    if solicitud['Es_Historico'] or (not es_dueno):
+        return
+
+    # Botón para Cancelar la Solicitud (Solo si sigue 'Sin Tocar')
+    if solicitud['Estado_Solicitud'] == 'Sin Tocar':
+        cancelar_solicitud = st.button(
+            label="**Cancelar Solicitud**",
+            key="cancelar_solicitud_nego_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para cancelar la solicitud. Solo se puede cancelar si la solicitud no ha sido vista por un ejecutivo.",
+            type="primary",
+            width="stretch",
+            icon="❌",
+        )
+        if cancelar_solicitud:
+            with st.spinner("Cancelando Solicitud..."):
+                success = cancelar_o_reactivar_solicitud(solicitud=solicitud, cancelar=True)
+            if success:
+                st.toast("Solicitud {} cancelada correctamente.".format(solicitud['ID_Solicitud']), icon="✅")
+                st.rerun()
+            else:
+                st.error("Hubo un error al cancelar la solicitud {}. Por favor, intente nuevamente.".format(solicitud['ID_Solicitud']), icon="❌")
+
+    # Botón para Reactivar la Solicitud (Solo si está 'Cancelada')
+    elif solicitud['Estado_Solicitud'] == 'Cancelada':
+        reactivar_solicitud = st.button(
+            label="**Reactivar Solicitud**",
+            key="reactivar_solicitud_nego_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para reactivar la solicitud. La solicitud volverá al estado 'Sin Tocar'.",
+            type="primary",
+            width="stretch",
+            icon="🔄",
+        )
+        if reactivar_solicitud:
+            with st.spinner("Reactivando Solicitud..."):
+                success = cancelar_o_reactivar_solicitud(solicitud=solicitud, cancelar=False)
+            if success:
+                st.toast("Solicitud {} reactivada correctamente.".format(solicitud['ID_Solicitud']), icon="✅")
+                st.rerun()
+            else:
+                st.error("Hubo un error al reactivar la solicitud {}. Por favor, intente nuevamente.".format(solicitud['ID_Solicitud']), icon="❌")
+
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):
     # Definimos el Nombre del Expander
@@ -3303,6 +3348,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         expander_name = "{} | :blue-background[{}]".format(expander_name, 'Solicitado a Aliado')
     elif solicitud['Estado_Solicitud'] == 'Sin Tocar':
         expander_name = "{} | :orange-background[{}]".format(expander_name, 'Sin Gestionar')
+    elif solicitud['Estado_Solicitud'] == 'Cancelada':
+        expander_name = "{} | :red-background[{}]".format(expander_name, 'Solicitud Cancelada')
     else:
         expander_name = "{} | :red-background[{}]".format(expander_name, 'Solicitud Rechazada')
 
@@ -3449,11 +3496,17 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
         if es_solicitud_sin_responder(solicitud):
             st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
+            # Mostramos la Opción de Cancelar la Solicitud al Final de la Vista
+            mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
             return
 
         st.divider()
 
         mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
+
+        # Mostramos la Opción de Reactivar la Solicitud al Final de la Vista (Solo si fue Cancelada)
+        if solicitud['Estado_Solicitud'] == 'Cancelada':
+            mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
 
         if solicitud['Estado_Solicitud'] != 'Exitosa':
             return
@@ -4150,6 +4203,26 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
     if solicitudes.empty:
         st.info("No hay solicitudes disponibles para calcular los Tops de los Negociadores.", icon="ℹ️")
         return
+
+    # Creamos un Slider para determinar las Solicitudes
+    grp_sols = solicitudes.groupby('Correo').size().reset_index(name="Conteo")
+    rsl_slider = st.slider(
+        label="Solicitudes Mínimas para estar en el Top",
+        value = grp_sols['Conteo'].min(),
+        min_value = grp_sols['Conteo'].min(),
+        max_value = grp_sols['Conteo'].max(),
+        step=1,
+        help="Deslizar para ir filtrando los negociadores que tengan como mínimo las solicitudes indicadas en el Slider",
+        format="%d Solicitudes",
+        key="slider_top_negos",
+    )
+
+    # Vamos a Filtrar para quitar los negociadores que no pasan (excepto el usuario)
+    mask_no_pasa = (grp_sols['Conteo'] < rsl_slider) & (grp_sols['Correo'] != st.session_state.get('user_email', ''))
+    # Obtenemos esos correos
+    correos_no_pasa = grp_sols.loc[mask_no_pasa,'Correo'].tolist() # type:ignore
+    # Los quitamos de las solicitudes
+    solicitudes = solicitudes[~(solicitudes['Correo'].isin(correos_no_pasa))] # type:ignore
 
     # Paso 1: Obtener el Correo del Usuario Actual
     user_email = st.session_state.get('user_email', '')

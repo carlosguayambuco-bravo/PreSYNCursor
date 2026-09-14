@@ -24,6 +24,7 @@ ESTADOS_POSIBLES_SOLICITUD = [
     'Validada por Fuera', # Signfica que hubó una validación y/o Pago por Fuera para las Deudas
     'Sin Tocar', # Estado Transitorio: # La Solicitud no ha sido tocada por un ejecutivo
     'Solicitado', # Se escalo la solicitud al aliado.
+    'Cancelada', # La Solicitud fue Cancelada por el Negociador que la subió (Antes de ser Gestionada)
 ]
 ESTADOS_RESPONDIBLES_SOLICITUD = [
     'Exitosa',

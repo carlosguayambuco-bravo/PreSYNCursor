@@ -374,6 +374,53 @@ def actualizar_aprobacion_necesaria(*,solicitud: pd.Series, tipo_aprobacion: Opt
     # Paso 3: Actualizar la Solicitud en Google Sheets
     return update_solicitud_in_google_sheets(solicitud=solicitud)
 
+def cancelar_o_reactivar_solicitud(*, solicitud: pd.Series, cancelar: bool) -> bool:
+    """
+    Cancela o Reactiva una Solicitud del Negociador.
+
+    Solo se puede Cancelar una Solicitud que siga 'Sin Tocar' y solo se puede
+    Reactivar una Solicitud que esté 'Cancelada'. En ambos casos, la Solicitud
+    debe haber sido subida por el Negociador Actual.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+        cancelar (bool): True para Cancelar la Solicitud, False para Reactivarla.
+
+    Returns:
+        bool: True si la actualización fue exitosa, False en caso contrario.
+    """
+    # Paso 1: Verificar que la Solicitud fue subida por el Negociador Actual
+    if solicitud['Correo'] != st.session_state.get('user_email', ''):
+        st.error("No se puede {} la Solicitud porque no fue subida por ti.".format("cancelar" if cancelar else "reactivar"), icon="❌")
+        return False
+
+    # Paso 2: Verificar que el Estado Actual de la Solicitud sea el Correcto
+    if cancelar and solicitud['Estado_Solicitud'] != 'Sin Tocar':
+        st.error("Solo se pueden Cancelar Solicitudes que no hayan sido vistas (Estado 'Sin Tocar').", icon="❌")
+        return False
+    if (not cancelar) and solicitud['Estado_Solicitud'] != 'Cancelada':
+        st.error("Solo se pueden Reactivar Solicitudes que estén en Estado 'Cancelada'.", icon="❌")
+        return False
+
+    # Paso 3: Obtener la Fecha Actual en Zona Horaria America/Bogota (Sin Zona Horaria)
+    fecha_actual = pd.Timestamp.now('America/Bogota').tz_localize(None)
+
+    # Paso 4: Aplicar los Cambios según si es una Cancelación o una Reactivación
+    if cancelar:
+        # Cancelación: Fecha_Respuesta a Hoy, Estado a 'Cancelada' y Comentario del Ejecutivo
+        solicitud['Fecha_Respuesta'] = fecha_actual
+        solicitud['Estado_Solicitud'] = 'Cancelada'
+        solicitud['Metadata_Solicitud']['Comentario_Ejecutivo'] = "Solicitud cancelada por el Negociador ({})".format(fecha_actual.strftime('%Y-%m-%d'))
+    else:
+        # Reactivación: Timestamp a Hoy, Eliminar Fecha_Respuesta y Comentario_Ejecutivo, Estado a 'Sin Tocar'
+        solicitud['Timestamp'] = fecha_actual
+        solicitud['Fecha_Respuesta'] = pd.NaT
+        solicitud['Metadata_Solicitud'].pop('Comentario_Ejecutivo', None)
+        solicitud['Estado_Solicitud'] = 'Sin Tocar'
+
+    # Paso 5: Actualizar la Solicitud en Google Sheets
+    return update_solicitud_in_google_sheets(solicitud=solicitud)
+
 def distribuir_resultado_solicitud(
         *,
     solicitud: pd.Series,
