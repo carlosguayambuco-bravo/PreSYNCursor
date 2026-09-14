@@ -3252,15 +3252,13 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         # Mostramos los Detalles de los tiempos de la solicitud
         mostrar_tiempos_solicitud(solicitud=solicitud)
 
-        # Mostramos el Comentario del Negociadoor y el Ejecutivo
-        comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "")
-
-        if comentario_negociador:
-            st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
-
         # Siguiente: Especificaciones si es Acuerdo de Pago u Ofe   rta de Pago
         if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
             mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Pagar la Solicitud :D")
+
+        # Mostramos el Comentario del Negociadoor y el Ejecutivo
+        comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "Sin Comentario del Negociador")
+        st.info("{}".format(comentario_negociador), icon="💬", title="Comentario del Negociador")
 
         # Añadimos un Divisor
         st.divider()
