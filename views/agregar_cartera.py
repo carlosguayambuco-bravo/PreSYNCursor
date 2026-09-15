@@ -58,6 +58,40 @@ def _convertir_resultado_a_bytes(*, df: pd.DataFrame, ext: str) -> bytes:
         df.to_csv(buffer, index=False, encoding='utf-8-sig')
     return buffer.getvalue()
 
+# Tipos de Filtros de Datos Disponibles para la Base del Cruce
+TIPOS_FILTROS_DATOS = ['No es Nulo', '>0', 'Es igual a']
+
+# Función Auxiliar para Obtener las Columnas con >= 70% de NaNs (Filtros Recomendados)
+def _obtener_filtros_recomendados(*, df: pd.DataFrame) -> list[tuple[str, float]]:
+    recomendados = []
+    for col in df.columns:
+        serie = df[col]
+        pct_nulos = serie.isna().mean()
+        # Solo se recomienda si hay mayoría de NaNs y al menos un valor válido
+        if (pct_nulos >= 0.70) and serie.notna().any():
+            recomendados.append((str(col), float(pct_nulos)))
+    return sorted(recomendados, key=lambda item: item[1], reverse=True)
+
+# Función Auxiliar para Aplicar los Filtros Configurados a la Base del Cruce
+def _aplicar_filtros_base(*, df: pd.DataFrame, filtros: list[dict]) -> pd.DataFrame:
+    df_filtrado = df.copy()
+    for filtro in filtros:
+        columna = filtro.get('columna')
+        tipo = filtro.get('tipo')
+        if columna not in df_filtrado.columns:
+            continue
+        # Construimos la Máscara según el Tipo de Filtro
+        if tipo == 'No es Nulo':
+            mask = df_filtrado[columna].notna()
+        elif tipo == '>0':
+            mask = df_filtrado[columna].map(lambda v: cleanNumber(v, default_nan=np.nan)).gt(0)
+        elif tipo == 'Es igual a':
+            mask = df_filtrado[columna].astype(str) == str(filtro.get('valor'))
+        else:
+            continue
+        df_filtrado = df_filtrado.loc[mask]
+    return df_filtrado
+
 # Función Auxiliar para Mostrar la Configuración del Cruce (Columnas, Modelo y Subida)
 def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str) -> None:
     # --- 2. Selección del Aliado y Alias ---
@@ -194,7 +228,118 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
     st.divider()
 
-    # --- 3.1 Característica Especial: Montos a Plazos ---
+    # --- 3.1 Filtros de Datos ---
+    st.markdown("### 🧹 Filtros de Datos")
+
+    # Sugerencia de Filtros: Columnas con >= 70% de NaNs y al menos un valor válido
+    filtros_recomendados = _obtener_filtros_recomendados(df=raw_df)
+    if filtros_recomendados:
+        st.info(
+            "\n".join(
+                "- **{}**: {:.1%} valores sin información.".format(col, pct)
+                for col, pct in filtros_recomendados
+            ),
+            title="Filtros Recomendados",
+        )
+
+    # Contador de Filtros Agregados en el Session State
+    key_n_filtros = "cruce_filtros_count_{}".format(base_key)
+    if key_n_filtros not in st.session_state:
+        st.session_state[key_n_filtros] = 0
+    n_filtros = st.session_state[key_n_filtros]
+
+    with st.container(border=True):
+        st.markdown("#### **🧮 Filtros a Aplicar**")
+
+        # Configuración de cada uno de los Filtros Agregados
+        filtros_config = []
+        for i in range(1, n_filtros + 1):
+            colFiltro, colTipo, colValor = st.columns(3)
+            with colFiltro:
+                columna_filtro = st.selectbox(
+                    label="**Nombre de la Columna**",
+                    options=list(raw_df.columns),
+                    index=None,
+                    key="cruce_filtro_col_{}_{}".format(i, base_key),
+                )
+            with colTipo:
+                tipo_filtro = st.selectbox(
+                    label="**Tipo de Filtro**",
+                    options=TIPOS_FILTROS_DATOS,
+                    index=None,
+                    key="cruce_filtro_tipo_{}_{}".format(i, base_key),
+                )
+            with colValor:
+                valor_filtro = None
+                if (columna_filtro is not None) and (tipo_filtro == 'Es igual a'):
+                    # Se ofrecen los Valores Presentes en la Columna Seleccionada
+                    valores_filtro = sorted(raw_df[columna_filtro].dropna().unique().tolist(), key=str)
+                    valor_filtro = st.selectbox(
+                        label="**Valor a Filtrar**",
+                        options=valores_filtro,
+                        index=None,
+                        key="cruce_filtro_valor_{}_{}".format(i, base_key),
+                    )
+
+            # Solo se aplica el Filtro si Está Completamente Configurado
+            if (columna_filtro is not None) and (tipo_filtro is not None):
+                if (tipo_filtro != 'Es igual a') or (valor_filtro is not None):
+                    filtros_config.append({
+                        'columna': columna_filtro,
+                        'tipo': tipo_filtro,
+                        'valor': valor_filtro,
+                    })
+
+        # Botones para Agregar o Eliminar Filtros
+        colAgregarFiltro, colEliminarFiltro = st.columns(2)
+        with colAgregarFiltro:
+            st.button(
+                label="**Agregar Filtro**",
+                key="cruce_filtro_agregar_{}".format(base_key),
+                on_click=lambda: st.session_state.update({key_n_filtros: st.session_state[key_n_filtros] + 1}),
+                width="stretch",
+                type="primary",
+            )
+        with colEliminarFiltro:
+            st.button(
+                label="**Eliminar Filtro**",
+                key="cruce_filtro_eliminar_{}".format(base_key),
+                on_click=lambda: st.session_state.update({key_n_filtros: max(st.session_state[key_n_filtros] - 1, 0)}),
+                width="stretch",
+                disabled=n_filtros == 0,
+            )
+
+    # Aplicación de los Filtros a la Base (se detiene si no queda Información)
+    if filtros_config:
+        n_registros_base = len(raw_df)
+        base_filtrada = _aplicar_filtros_base(df=raw_df, filtros=filtros_config)
+        if base_filtrada.empty:
+            st.error(
+                "Los filtros aplicados se cruzan y dejan la base **sin registros** para el cruce. "
+                "Ajusta o elimina algún filtro para continuar.",
+                icon="🚫",
+            )
+            st.stop()
+        raw_df = base_filtrada.reset_index(drop=True)
+        st.caption(
+            "✅ Filtros aplicados: **{:,}** de **{:,}** registros conservados.".format(
+                len(raw_df), n_registros_base
+            )
+        )
+
+    # Si los Filtros Cambian, se Invalida el Resultado del Cruce ya Ejecutado
+    key_pkg = "cruce_pkg_{}".format(base_key)
+    key_firma_filtros = "cruce_filtros_firma_{}".format(base_key)
+    firma_filtros = tuple((f['columna'], f['tipo'], str(f['valor'])) for f in filtros_config)
+    if st.session_state.get(key_firma_filtros) != firma_filtros:
+        st.session_state[key_firma_filtros] = firma_filtros
+        st.session_state.pop(key_pkg, None)
+        st.session_state.pop("cruce_sheets_subido_{}".format(base_key), None)
+        st.session_state.pop("cruce_resultado_descarga_{}".format(base_key), None)
+
+    st.divider()
+
+    # --- 3.2 Característica Especial: Montos a Plazos ---
     st.markdown("### 💸 Montos a Plazos (Opcional)")
     
     tipo_cuotas = st.radio(
@@ -334,7 +479,7 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
     st.divider()
 
-    # --- 3.2 Características Especiales: Fecha Límite de Pago y Máximo Descuento---
+    # --- 3.3 Características Especiales: Fecha Límite de Pago y Máximo Descuento---
 
     colFechaEsperada, colMaxDisc = st.columns(2, border=True, gap="small")
 
@@ -467,7 +612,6 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
         st.caption("✅ Universo de comparación cargado: **{:,}** deudas".format(len(cartera_df)))
 
     # 4.2 Ejecución del Modelo de Identificación de Deudas
-    key_pkg = "cruce_pkg_{}".format(base_key)
     ejecutar_modelo = st.button(
         label="⚙️ Ejecutar Algoritmo de Identificación de Deudas",
         type="primary",
