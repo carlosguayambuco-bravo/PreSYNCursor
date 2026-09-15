@@ -1305,19 +1305,20 @@ def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any
         'total_clientes_unicos': len(cedulas_unicas_general),
     }
 
-# Función Auxiliar para Construir un Top (Top 5) y la Posición del Usuario Actual
-def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, user_email: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+# Función Auxiliar para Construir un Top (Top N) y la Posición del Usuario Actual
+def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, user_email: str, top_n: int = 5) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
-    Construye el Top 5 de una Métrica por Negociador junto con la Posición del Usuario Actual.
+    Construye el Top N de una Métrica por Negociador junto con la Posición del Usuario Actual.
 
     Args:
         conteo (pd.Series): Serie con el Valor de la Métrica por Correo del Negociador.
         nombres_serie (pd.Series): Serie con el Nombre Corto de cada Negociador indexada por Correo.
         user_email (str): Correo del Usuario Actual.
+        top_n (int, default 5): Cantidad de Negociadores a incluir en el Top.
 
     Returns:
         tuple[list[dict[str, Any]], dict[str, Any]]:
-            - Lista con el Top 5: [{'correo': str, 'nombre': str, 'valor': int|float}].
+            - Lista con el Top N: [{'correo': str, 'nombre': str, 'valor': int|float}].
             - Diccionario con la Posición, Nombre y Valor del Usuario Actual.
     """
     # Paso 1: Crear el DataFrame del Conteo con el Nombre Corto de cada Negociador
@@ -1328,8 +1329,8 @@ def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, us
     # Paso 2: Ordenar de Mayor a Menor (Desempate Alfabético por Nombre para Determinismo)
     top_df = top_df.sort_values(['valor', 'nombre'], ascending=[False, True]).reset_index(drop=True)
 
-    # Paso 3: Obtener el Top 5
-    top_5 = top_df.head(5).to_dict('records')
+    # Paso 3: Obtener el Top N
+    top_5 = top_df.head(top_n).to_dict('records')
 
     # Paso 4: Obtener la Posición y el Valor del Usuario Actual
     mask_usuario = (top_df['correo'] == user_email)
@@ -1351,7 +1352,7 @@ def _construir_top_negociador(*, conteo: pd.Series, nombres_serie: pd.Series, us
     return top_5, info_usuario # type: ignore
 
 # Función para Obtener los Tops de los Negociadores (Solicitudes, Liquidaciones y Efectividad)
-def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) -> dict[str, Any]:
+def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str, top_n: int = 5) -> dict[str, Any]:
     """
     Calcula los Tops de los Negociadores a partir de las Solicitudes:
     - Top de Solicitudes: Conteo de Solicitudes por Negociador (Correo).
@@ -1361,12 +1362,13 @@ def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
         user_email (str): Correo del Usuario Actual (para Resaltar su Posición).
+        top_n (int, default 5): Cantidad de Negociadores a mostrar en cada Top.
 
     Returns:
-        dict[str, Any]: Diccionario con los Tops (Top 5) y la Posición del Usuario:
-            - 'top_solicitudes': Top 5 de Solicitudes ('correo', 'nombre', 'valor').
-            - 'top_liquidaciones': Top 5 de Liquidaciones ('correo', 'nombre', 'valor').
-            - 'top_efectividad': Top 5 de Efectividad ('correo', 'nombre', 'valor' en %).
+        dict[str, Any]: Diccionario con los Tops (Top N) y la Posición del Usuario:
+            - 'top_solicitudes': Top N de Solicitudes ('correo', 'nombre', 'valor').
+            - 'top_liquidaciones': Top N de Liquidaciones ('correo', 'nombre', 'valor').
+            - 'top_efectividad': Top N de Efectividad ('correo', 'nombre', 'valor' en %).
             - 'usuario': Posición, Nombre y Valor del Usuario en cada Top.
     """
     # Paso 0: Si no hay Solicitudes devolvemos los Tops Vacíos
@@ -1404,9 +1406,9 @@ def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str) 
     efectividad = (conteo_liqs.reindex(conteo_exitosas.index, fill_value=0) / conteo_exitosas) * 100
 
     # Paso 6: Construir los Tops y la Posición del Usuario en cada Uno
-    top_solicitudes, usuario_sols = _construir_top_negociador(conteo=conteo_sols, nombres_serie=nombres_serie, user_email=user_email)
-    top_liquidaciones, usuario_liqs = _construir_top_negociador(conteo=conteo_liqs, nombres_serie=nombres_serie, user_email=user_email)
-    top_efectividad, usuario_efec = _construir_top_negociador(conteo=efectividad, nombres_serie=nombres_serie, user_email=user_email)
+    top_solicitudes, usuario_sols = _construir_top_negociador(conteo=conteo_sols, nombres_serie=nombres_serie, user_email=user_email, top_n=top_n)
+    top_liquidaciones, usuario_liqs = _construir_top_negociador(conteo=conteo_liqs, nombres_serie=nombres_serie, user_email=user_email, top_n=top_n)
+    top_efectividad, usuario_efec = _construir_top_negociador(conteo=efectividad, nombres_serie=nombres_serie, user_email=user_email, top_n=top_n)
 
     # Devolvemos los Tops y la Posición del Usuario
     return {

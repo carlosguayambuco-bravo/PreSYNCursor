@@ -4151,9 +4151,12 @@ def _obtener_estilo_entrada_top(puesto: int) -> tuple[str, str]:
     elif puesto == 3:
         # Top 3: Fondo Naranja y Emoji de Medalla sin Puesto
         return "🏅", "background: linear-gradient(135deg, #ffa726, #ef6c00); color: #ffffff;"
-    else:
+    elif puesto <= 5:
         # Top 4-5: Fondo Azul y Emoji de Saludo Militar
         return "🫡", "background: linear-gradient(135deg, #42a5f5, #1e88e5); color: #ffffff;"
+    else:
+        # Fuera del Top 5: Fondo Gris Apagado para Diferenciarlos del Top
+        return "▫️", "background: linear-gradient(135deg, #e0e0e0, #cfcfcf); color: #757575;"
 
 # Función Auxiliar para Renderizar una Columna de un Top de Negociadores
 def _renderizar_columna_top(
@@ -4173,7 +4176,7 @@ def _renderizar_columna_top(
 
     filas_html = []
 
-    # Paso 2: Construir las Entradas del Top 5 (El Usuario Actual siempre en Bold)
+    # Paso 2: Construir las Entradas del Top (El Usuario Actual siempre en Bold)
     for i, entrada in enumerate(entradas, start=1):
         emoji, estilo = _obtener_estilo_entrada_top(i)
         es_usuario = (entrada.get('correo') == user_email)
@@ -4182,7 +4185,7 @@ def _renderizar_columna_top(
             texto = "<strong>{}</strong>".format(texto)
         filas_html.append('<div style="{} padding: 8px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo, texto))
 
-    # Paso 3: Si el Usuario no está en el Top 5, Mostrar Puntos y su Posición al Final (Sin Emoji)
+    # Paso 3: Si el Usuario no está en el Top Mostrado, Mostrar Puntos y su Posición al Final (Sin Emoji)
     if info_usuario['posicion'] > len(entradas):
         filas_html.append('<div style="text-align: center; color: #9e9e9e; padding: 2px 0 4px 0;">•••</div>')
         texto_usuario = "#{} <strong>{}</strong>: {}".format(info_usuario['posicion'], info_usuario['nombre'], formato_valor(info_usuario['valor']))
@@ -4199,18 +4202,35 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
         st.info("No hay solicitudes disponibles para calcular los Tops de los Negociadores.", icon="ℹ️")
         return
 
-    # Creamos un Slider para determinar las Solicitudes
+    # Creamos 2 Columnas para los Sliders: Mínimo de Solicitudes y Muestra del Top
+    colMinSols, colMuestraTop = st.columns(2, vertical_alignment="center")
+
+    # Creamos un Slider para determinar las Solicitudes Mínimas
     grp_sols = solicitudes.groupby('Correo').size().reset_index(name="Conteo")
-    rsl_slider = st.slider(
-        label="Solicitudes Mínimas para estar en el Top",
-        value = grp_sols['Conteo'].min(),
-        min_value = grp_sols['Conteo'].min(),
-        max_value = grp_sols['Conteo'].max(),
-        step=1,
-        help="Deslizar para ir filtrando los negociadores que tengan como mínimo las solicitudes indicadas en el Slider",
-        format="%d Solicitudes",
-        key="slider_top_negos",
-    )
+    with colMinSols:
+        rsl_slider = st.slider(
+            label="Solicitudes Mínimas para estar en el Top",
+            value = grp_sols['Conteo'].min(),
+            min_value = grp_sols['Conteo'].min(),
+            max_value = grp_sols['Conteo'].max(),
+            step=1,
+            help="Deslizar para ir filtrando los negociadores que tengan como mínimo las solicitudes indicadas en el Slider",
+            format="%d Solicitudes",
+            key="slider_top_negos",
+        )
+
+    # Creamos un Slider para determinar cuántos Negociadores mostrar en el Top (de 3 a 20)
+    with colMuestraTop:
+        rsl_muestra_top = st.slider(
+            label="Muestra del Top (Negociadores a Mostrar)",
+            value=5,
+            min_value=3,
+            max_value=20,
+            step=1,
+            help="Deslizar para elegir cuántos negociadores se muestran en cada Top (mínimo 3, máximo 20)",
+            format="%d Negociadores",
+            key="slider_muestra_top_negos",
+        )
 
     # Vamos a Filtrar para quitar los negociadores que no pasan (excepto el usuario)
     mask_no_pasa = (grp_sols['Conteo'] < rsl_slider) & (grp_sols['Correo'] != st.session_state.get('user_email', ''))
@@ -4223,7 +4243,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
     user_email = st.session_state.get('user_email', '')
 
     # Paso 2: Calcular los Tops de los Negociadores
-    tops = obtener_tops_negociadores(solicitudes_df=solicitudes, user_email=user_email)
+    tops = obtener_tops_negociadores(solicitudes_df=solicitudes, user_email=user_email, top_n=rsl_muestra_top)
 
     # Paso 3: Mostrar los Tops en 3 Columnas (La de Efectividad un Poco más Grande que las Otras)
     colSols, colEfec, colLiqs = st.columns([3, 4, 3], vertical_alignment="top", gap="small")
