@@ -76,8 +76,7 @@ def show_user_info():
 
         st.sidebar.divider()
 
-    # Botón de Recarga de Solicitudes
-    if st.sidebar.button("Recargar Solicitudes", icon="🔄",width= "stretch"):
+    def _recargar_solicitudes():
         # Limpiamos el cache de la función load_current_month_solicitudes
         load_solicitudes_mec.clear()
 
@@ -88,8 +87,13 @@ def show_user_info():
         # Limpiamos los Cambios Locales
         st.session_state['local_solicitudes_changes'] = []
 
-        # Recargamos la Información
-        st.rerun()
+    # Botón de Recarga de Solicitudes
+    st.sidebar.button(
+        "Recargar Solicitudes",
+        icon="🔄",
+        width="stretch",
+        on_click=_recargar_solicitudes,
+    )
 
     # Creamos un Toggle para Cargar las Históricas
     st.sidebar.toggle(
