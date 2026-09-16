@@ -325,11 +325,15 @@ def leer_base_subida(uploaded_file: io.BytesIO) -> pd.DataFrame:
 
     # Caso 2: CSV (intentamos la lectura y si falla pedimos el separador)
     try:
-        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str)
+        df = pd.read_csv(io.BytesIO(buffer_bytes), dtype=str)
+        if len(df) >= 2 and len(df.columns) > 1:
+            return df
     except Exception:
         pass
     try:
-        return pd.read_csv(io.BytesIO(buffer_bytes), dtype=str, encoding='latin-1')
+        df = pd.read_csv(io.BytesIO(buffer_bytes), dtype=str, encoding='latin-1')
+        if len(df) >= 2 and len(df.columns) > 1:
+            return df
     except Exception:
         pass
 
@@ -604,6 +608,10 @@ def build_pendiente_cruce_df(*,
     if not filas_salida:
         return PendienteCruceSchema.empty()
     df_salida = pd.DataFrame(filas_salida)
+
+    # Cambiamos Monto_Actual a Float
+    df_salida[COL_MONTO_ACTUAL] = df_salida[COL_MONTO_ACTUAL].astype(float)
+
     df_salida = PendienteCruceSchema.validate(df_salida, lazy=True)
     return df_salida
 

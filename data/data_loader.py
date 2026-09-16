@@ -1520,7 +1520,7 @@ def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     # Paso 1: Ejecutar la Query QUERY_TOTAL_REPARADORAS
     completo_df = execute_query_cache(QUERY_TOTAL_REPARADORAS)
 
-    if completo_df.empty:
+    if completo_df.empty or not ('Referencia' in completo_df.columns):
         return InputCruceSchema.empty()
 
     # Paso 2: Limpieza de Datos

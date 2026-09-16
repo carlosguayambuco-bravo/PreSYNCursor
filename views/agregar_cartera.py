@@ -843,9 +843,11 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
             st.download_button(
                 label="⬇️ Descargar Resultados del Cruce",
                 data=st.session_state.get(key_resultado_descarga, b""),
-                file_name="{} Resultado.{}".format(
-                    uploaded_file.name.rsplit('.', 1)[0],
-                    ext,
+                file_name="{original_name}-Resultado_{casa_cobro}_{alias}.{ext}".format(
+                    original_name=uploaded_file.name.rsplit('.', 1)[0],
+                    casa_cobro = casa_cobro,
+                    alias = alias,
+                    ext=ext,
                 ),
                 mime=MIMETYPES.get(ext, 'application/octet-stream'),
                 key="cruce_descargar_resultados",
@@ -914,33 +916,38 @@ if tab_subida.open:
         st.markdown("### 📥 Introducción de Datos")
 
         # --- 1. Recepción de la Base ---
-        uploaded_file = st.file_uploader(
-            label="**📎 Sube la Base del Aliado**",
-            type=["xlsx", "csv"],
-            accept_multiple_files=False,
-            key="cruce_archivo_subida",
-            help="Solo se acepta un archivo .xlsx o .csv.",
-        )
+        with st.container(border=True):
+            st.markdown("#### 🗒️ Reconocimiento de Base")
+            uploaded_file = st.file_uploader(
+                label="**📎 Sube la Base del Aliado**",
+                type=["xlsx", "csv"],
+                accept_multiple_files=False,
+                key="cruce_archivo_subida",
+                help="Solo se acepta un archivo .xlsx o .csv.",
+            )
 
-        if uploaded_file is None:
-            st.warning("Esperando la subida de un archivo...", icon="⏳")
-        else:
-            # Detección de un archivo nuevo para reiniciar los widgets de columnas
-            id_archivo = "{}_{}".format(uploaded_file.name, uploaded_file.size)
-            if st.session_state.get('cruce_archivo_actual') != id_archivo:
-                st.session_state['cruce_archivo_actual'] = id_archivo
-                resetear_widgets_columnas(id_archivo)
+            if uploaded_file is None:
+                st.warning("Esperando la subida de un archivo...", icon="⏳")
+                st.stop()
+            else:
+                # Detección de un archivo nuevo para reiniciar los widgets de columnas
+                id_archivo = "{}_{}".format(uploaded_file.name, uploaded_file.size)
+                if st.session_state.get('cruce_archivo_actual') != id_archivo:
+                    st.session_state['cruce_archivo_actual'] = id_archivo
+                    resetear_widgets_columnas(id_archivo)
 
-            # Lectura de la Base
-            raw_df = leer_base_subida(uploaded_file)
-            if raw_df is not None:
-                ext = uploaded_file.name.split('.')[-1].lower()
-                st.caption("✅ Base leída: **{:,}** registros y **{}** columnas".format(len(raw_df), raw_df.shape[1]))
-                with st.expander("🔎 Vista Previa de la Base (Primeros 50 Registros)", expanded=False):
-                    st.dataframe(raw_df.head(50), width="stretch")
+                # Lectura de la Base
+                raw_df = leer_base_subida(uploaded_file)
+                if raw_df is not None:
+                    ext = uploaded_file.name.split('.')[-1].lower()
+                    st.caption("✅ Base leída: **{:,}** registros y **{}** columnas".format(len(raw_df), raw_df.shape[1]))
+                    with st.expander("🔎 Vista Previa de la Base (Primeros 50 Registros)", expanded=False):
+                        st.dataframe(raw_df.head(50), width="stretch")
+                else:
+                    st.stop()
 
-                # Configuración del Cruce (Columnas, Modelo y Subida de Datos)
-                _mostrar_configuracion_cruce(uploaded_file=uploaded_file, raw_df=raw_df, ext=ext)
+        # Configuración del Cruce (Columnas, Modelo y Subida de Datos)
+        _mostrar_configuracion_cruce(uploaded_file=uploaded_file, raw_df=raw_df, ext=ext)
 
 # ==============================
 # Tab 2: Escogencia Manual de Id_Deuda Definitivo

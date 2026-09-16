@@ -191,12 +191,9 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
         # Creamos el String que va a ser el Guia
         strGuia = "> **Resultado del Cruce**: '**{}**'".format(registro['Metadata']['Etiqueta'])
         strGuia += "\n\n> **Cedula**: {}".format(registro['Cedula'] if pd.notna(registro['Cedula']) and (registro['Cedula'] != "nan") else "Sin Cédula Proporcionada")
-        if pd.notna(registro['Numero_Credito']) and registro['Numero_Credito'] != "":
-            strGuia += "\n\n> **Número de Crédito**: {}".format(registro['Numero_Credito'])
-        if pd.notna(registro['Monto_Actual']) and registro['Monto_Actual'] > 0:
-            strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(registro['Monto_Actual'])
-        if 'Monto_Propuesto' in registro['Metadata']:
-            strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(registro['Metadata']['Monto_Propuesto'])
+        strGuia += "\n\n> **Número de Crédito**: {}".format(registro['Numero_Credito'])
+        strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(registro['Monto_Actual'])
+        strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(registro['Metadata']['Monto_Propuesto'])
         st.markdown(strGuia)
 
     with colDeudas:

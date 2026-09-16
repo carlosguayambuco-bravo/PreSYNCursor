@@ -209,10 +209,10 @@ class CarteraActivaSchema(pa.DataFrameModel):
     Referencia: str 
     Cedula: str = pa.Field(nullable=True) # En este caso la Cedula puede ser Nula
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
-    Nombre_Cliente: str
-    Numero_Credito: str
-    Banco: str
-    Monto_Actual: float
+    Nombre_Cliente: str = pa.Field(nullable=True)
+    Numero_Credito: str = pa.Field(nullable=True)
+    Banco: str = pa.Field(nullable=True)
+    Monto_Actual: float = pa.Field(nullable=True)
 
     class Config:
         strict = True  # Validación estricta de columnas
