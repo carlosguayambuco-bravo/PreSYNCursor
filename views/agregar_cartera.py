@@ -11,9 +11,9 @@ import streamlit as st
 from pandera.errors import SchemaErrors
 # Librerías Locales
 from data.data_deleter import eliminar_base_cruce
-from data.data_loader import load_cartera_activa, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
+from data.data_loader import load_cartera_activa, load_masivas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
-from data.data_uploader import upload_base_cruce_info
+from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
@@ -1147,6 +1147,9 @@ if tab_control.open:
                 st.stop()
 
             tipo_portafolio = tipo_portafolio.replace('*', '')
+            # Resultado de la Distribución de Portafolio (se envía a la subida de la Base del Mes)
+            df_distribucion = None
+            columnas_portafolio = []
             if tipo_portafolio == 'Distribuir Monto de Portafolio':
                 with st.container(border=True):
                     columnas_disponibles = [
@@ -1220,15 +1223,30 @@ if tab_control.open:
                         delta_arrow="off",
                     )
 
-            # --- 5. Subida de Información (Deshabilitada) ---
+            # --- 5. Subida de Información a la Base del Mes ---
             st.divider()
             st.markdown("### 🚀 Subida de Información")
-            st.button(
+            st.info(
+                "Solo se suben los registros cruzados (con Id_Definitivo y sin ADDENDUM) a la hoja "
+                "'Bases mes actual 2024'. Si un Id_Cruce ya existe, se actualizan sus columnas "
+                "'Metadata', 'Portafolio' y 'Monto Portafolio'.",
+                icon="ℹ️",
+            )
+            subir_base_mes = st.button(
                 label="🚀 Subir Información a la Base del Mes",
                 type="primary",
                 key="control_subir_base_mes",
                 width="stretch",
-                disabled=True,
-                help="Botón deshabilitado temporalmente: la subida a Google Sheets se implementará próximamente.",
+                help="Sube los registros cruzados y actualiza los portafolios ya presentes en Masivas.",
             )
-            st.caption("ℹ️ La subida de información se encuentra deshabilitada por el momento.")
+            if subir_base_mes:
+                with st.spinner("📤 Subiendo la Información a la Base del Mes..."):
+                    exito_base_mes = upload_base_mes_info(
+                        cruce_df=base_df,
+                        distribucion_df=df_distribucion,
+                        columnas_portafolio=columnas_portafolio,
+                    )
+                if exito_base_mes:
+                    # Refrescamos el Cache de las Masivas para que los Formularios vean los Nuevos Datos
+                    load_masivas.clear()
+                    st.balloons()

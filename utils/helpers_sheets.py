@@ -107,6 +107,60 @@ def _make_consecutive_blocks(rownums_sorted: list[int], values_by_rownum: dict[i
     blocks.append((start, prev, mat))
     return blocks
 
+# Función Auxiliar para Agrupar Posiciones (Filas o Columnas) Consecutivas en Bloques
+def group_consecutive_positions(positions: list[int]) -> list[tuple[int, int]]:
+    """Agrupa posiciones enteras consecutivas en bloques (inicio, fin).
+
+    Ej: [1, 2, 4, 5, 6, 9] -> [(1, 2), (4, 6), (9, 9)]
+    """
+    if not positions:
+        return []
+    ordenadas = sorted(set(positions))
+    bloques: list[tuple[int, int]] = []
+    inicio = anterior = ordenadas[0]
+    for posicion in ordenadas[1:]:
+        if posicion == anterior + 1:
+            anterior = posicion
+            continue
+        bloques.append((inicio, anterior))
+        inicio = anterior = posicion
+    bloques.append((inicio, anterior))
+    return bloques
+
+
+def build_column_batch_updates(
+        *,
+        values_by_column: dict[str, dict[int, Any]],
+        row_chunk_size: int = 3000,
+    ) -> list[list[dict]]:
+    """Construye los requests de un batch_update agrupando celdas consecutivas por columna.
+
+    Actualiza por columnas (rangos verticales) para no modificar las columnas intermedias
+    que contienen funciones calculadas. Las filas se dividen en lotes de a lo sumo
+    `row_chunk_size` filas y, dentro de cada lote, las filas consecutivas de una misma
+    columna se unen en un solo rango (ej: A1, A2 y A4 -> 'A1:A2' y 'A4').
+
+    :param values_by_column: Diccionario {letra_columna: {fila: valor}}.
+    :param row_chunk_size: Máximo de filas por cada batch enviado a la API.
+    :return: Lista de lotes; cada lote es una lista de dicts {'range', 'values'}.
+    """
+    filas_ordenadas = sorted({fila for valores in values_by_column.values() for fila in valores})
+    batches: list[list[dict]] = []
+    for i in range(0, len(filas_ordenadas), row_chunk_size):
+        filas_lote = set(filas_ordenadas[i:i + row_chunk_size])
+        datos_lote: list[dict] = []
+        for col_letter, valores_col in values_by_column.items():
+            filas_col = sorted(fila for fila in valores_col if fila in filas_lote)
+            for inicio, fin in group_consecutive_positions(filas_col):
+                datos_lote.append({
+                    'range': "{letra}{inicio}:{letra}{fin}".format(letra=col_letter, inicio=inicio, fin=fin),
+                    'values': [[convert_data_to_string(valores_col[fila])] for fila in range(inicio, fin + 1)],
+                })
+        if datos_lote:
+            batches.append(datos_lote)
+    return batches
+
+
 def letter_to_col(col_str: str) -> int:
     """Convierte una letra de columna de Sheets (ej. 'A', 'Z', 'AA') a su número de índice 1-based."""
     num = 0
