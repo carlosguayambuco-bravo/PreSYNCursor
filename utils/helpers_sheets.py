@@ -543,7 +543,7 @@ def get_column_letter(col_idx: int) -> str:
 # Función Auxiliar para Limpiar Datos antes de Volver String
 def sanitize_json(obj: Any):
     if isinstance(obj, dict):
-        return {k:sanitize_json(v) for k,v in obj.items()}
+        return {sanitize_json(k):sanitize_json(v) for k,v in obj.items()}
     elif isinstance(obj, (list,set)):
         return [sanitize_json(v) for v in list(obj)]
     elif pd.isna(obj):
@@ -572,7 +572,7 @@ def convert_data_to_string(obj: Any) -> str:
     if isinstance(obj, (int, float)):
         return str(obj)
     if isinstance(obj, (list,dict)):
-        return json.dumps(sanitize_json(obj))
+        return json.dumps(sanitize_json(obj), ensure_ascii=False)
     # For other types (like lists, dicts), we can use json.dumps for a readable format
     try:
         return json.dumps(obj, ensure_ascii=False)
