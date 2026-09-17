@@ -9,6 +9,7 @@ import streamlit as st
 # Librerías Locales
 from modules.constants import COL_CEDULA, COL_NOMBRE, ETIQUETA_EXACTO, PRIORIDAD_ETIQUETAS_CRUCE
 from modules.id_aut_deud.helpers import search_data_deudas
+from utils.helpers_general import replaceNaN
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
 OPCION_SIN_OPCIONES = 'Sin Opciones Actuales'
@@ -189,11 +190,10 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
     with colData:
         # Acá mostramos: Casa de Cobro, Alias, Cedula
         # Creamos el String que va a ser el Guia
-        strGuia = "> **Resultado del Cruce**: '**{}**'".format(registro['Metadata']['Etiqueta'])
-        strGuia += "\n\n> **Cedula**: {}".format(registro['Cedula'] if pd.notna(registro['Cedula']) and (registro['Cedula'] != "nan") else "Sin Cédula Proporcionada")
-        strGuia += "\n\n> **Número de Crédito**: {}".format(registro['Numero_Credito'])
-        strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(registro['Monto_Actual'])
-        strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(registro['Metadata']['Monto_Propuesto'])
+        strGuia = "> **Cedula**: {}".format(replaceNaN(registro['Cedula'], "Sin Cédula Proporcionada"))
+        strGuia += "\n\n> **Número de Crédito**: {}".format(replaceNaN(registro['Numero_Credito'], "Sin Num. Cred. Proporcionado"))
+        strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(replaceNaN(registro['Monto_Actual'], "Sin Monto Actual Brindado."))
+        strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(replaceNaN(registro['Metadata']['Monto_Propuesto'], "Sin Monto Propuesto"))
         st.markdown(strGuia)
 
     with colDeudas:
@@ -241,6 +241,14 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
         valor_previo = cambios.get(id_cruce, mtdt.get('Id_Definitivo'))
         es_addendum = (valor_previo == ID_DEFINITIVO_ADDENDUM)
 
+        # Vamos a Mostrar 2 cosas: Motivos del Cruce y Resultado
+        strResultado = "> **Motivos del Cruce**: {}".format(
+            ("-".join(mtdt.get('Motivos_Cruce') or []) or "Sin Cruce")
+        )
+        strResultado += "\n\n>**RESULTADO DEL CRUCE: {}**".format(
+            mtdt.get('Etiqueta') or "NO CRUZADO"
+        )
+
         marcar_addendum = st.toggle(
             label="**ℹ️ Marcar como Addendum**",
             value=es_addendum,
@@ -265,14 +273,22 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
                 if cambios.get(id_cruce) == ID_DEFINITIVO_ADDENDUM:
                     cambios.pop(id_cruce, None)
                 valor_actual = mtdt.get('Id_Definitivo')
-            deudas_posibles = mtdt.get('Deudas_Posibles', []) or []
-            opciones = [str(d.get('Id_Deuda', '') or '') for d in deudas_posibles if d.get('Id_Deuda') not in (None, '')]
-            hay_opciones = bool(opciones)
-            if not hay_opciones:
+            # De lo Contrario definimos las opciones posibles
+            # Caso A: No se han buscado las deudas de la Cédula
+            if st.session_state.get(key_deudas,None) is None:
+                deudas_posibles = mtdt.get('Deudas_Posibles') or []
+                opciones = [str(d.get('Id_Deuda', '') or '') for d in deudas_posibles if d.get('Id_Deuda') not in (None, '')]
+            # Caso B: Ya se buscaron las Deudas
+            else:
+                opciones = dfDeudas['Id_Deuda'].tolist()
+
+            if not opciones:
                 opciones = [OPCION_SIN_OPCIONES]
+
             # Aseguramos que el valor actual esté entre las opciones (por defecto)
             if (valor_actual not in (None, '')) and (valor_actual != ID_DEFINITIVO_ADDENDUM) and (str(valor_actual) not in opciones):
                 opciones = [str(valor_actual)] + opciones
+
             index_valor = opciones.index(str(valor_actual)) if ((valor_actual not in (None, '')) and (str(valor_actual) in opciones)) else None
             seleccion = st.selectbox(
                 label="**🆔 Id_Deuda Definitivo**",

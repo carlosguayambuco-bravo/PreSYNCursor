@@ -286,4 +286,4 @@ def cleanCols(df: pd.DataFrame, realCol: str, colPossibleVals: list = []) -> pd.
 
 # Función Auxiliar de Reemplazo de NaNs cuando se necesita
 def replaceNaN(value, nan_replace):
-    if pd.notna
+    return value if pd.notna(value) and value != "" and value != "nan" else nan_replace
