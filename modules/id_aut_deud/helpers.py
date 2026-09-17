@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import obtener_datos_deuda_cedula, parse_metadata_cruce
+from data.data_loader import obtener_datos_deuda_cedula, obtener_montos_deudas, parse_metadata_cruce
 from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MetadataPendienteCruce, PendienteCruceSchema
 from modules.constants import (
     COL_BANCO,
@@ -662,24 +662,73 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
     # Paso 4: Devolver el DataFrame Actualizado
     return df_actualizar
 
+# Función Auxiliar para Completar de Forma Masiva los Montos_Actual Faltantes de los Id_Definitivos
+def _completar_montos_faltantes(*, df: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
+    """Busca en la base de datos los Montos_Actual que no estén en la Metadata (Monto_Actual_Original),
+    en las Deudas_Posibles del Id_Definitivo ni en la fila del cruce, consultando los Id_Definitivos
+    en batches (evitando consultas individuales al API).
+
+    Los montos encontrados se agregan al cálculo de la distribución (`_dist_Monto_Base`) y se guardan
+    en la Metadata (Monto_Actual_Original) para que el portafolio pueda distribuirse completo.
+
+    Returns:
+        tuple: (DataFrame completado, cantidad de Ids consultados, cantidad de Ids encontrados)
+    """
+    # Paso 1: Definir los Registros con Id_Definitivo Válido y sin Monto_Actual (se descartan ADDENDUMS)
+    mask_faltante = (
+        df['_dist_Id_Definitivo'].ne('')
+        & df['_dist_Id_Definitivo'].ne(ETIQUETA_ADDENDUM)
+        & df['_dist_Monto_Base'].isna()
+    )
+    ids_faltantes = df.loc[mask_faltante, '_dist_Id_Definitivo'].drop_duplicates().tolist()
+    if not ids_faltantes:
+        return df, 0, 0
+
+    # Paso 2: Búsqueda Masiva (en Batches) de los Montos_Actual Faltantes
+    montos_faltantes = obtener_montos_deudas(deudas=ids_faltantes)
+    if not montos_faltantes:
+        return df, len(ids_faltantes), 0
+
+    # Paso 3: Completar los Montos_Actual Encontrados en el Cálculo de la Distribución
+    mask_encontrado = mask_faltante & df['_dist_Id_Definitivo'].isin(montos_faltantes.keys())
+    df.loc[mask_encontrado, '_dist_Monto_Base'] = (
+        df.loc[mask_encontrado, '_dist_Id_Definitivo'].map(montos_faltantes)
+    )
+
+    # Paso 4: Guardar el Monto Encontrado en la Metadata (Monto_Actual_Original) para no Volver a Consultarlo
+    df['Metadata'] = [ # type: ignore
+        _guardar_monto_original(mtdt=mtdt, monto=monto) if encontrado else mtdt
+        for mtdt, monto, encontrado in zip(df['Metadata'], df['_dist_Monto_Base'], mask_encontrado)
+    ]
+
+    return df, len(ids_faltantes), int(mask_encontrado.sum())
+
+# Función Auxiliar para Guardar el Monto_Actual Original en la Metadata
+def _guardar_monto_original(*, mtdt: dict, monto: float) -> MetadataPendienteCruce:
+    mtdt_actualizada = dict(mtdt)
+    mtdt_actualizada['Monto_Actual_Original'] = float(monto)
+    return parse_metadata_cruce(mtdt_actualizada)
+
 # Función Auxiliar para Distribuir los Montos de un Portafolio entre sus Deudas
-def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Distribuye los Pagos_Cuotas (incluyendo el Pago a 1 Cuota) de un portafolio entre las deudas que lo componen.
 
     El portafolio se define agrupando por las `columnas_portafolio` indicadas (mínimo Cédula y
     Monto_Actual). Dentro de cada grupo la participación de cada deuda se calcula como
     `Monto_Actual del Id_Definitivo / suma de los Montos_Actuales del grupo`. Si algún registro
     del grupo no tiene Id_Definitivo, el grupo completo se deja sin distribuir (usando
-    `transform('all')`).
+    `transform('all')`). Los Montos_Actual faltantes (que no estén en la Metadata, en las
+    Deudas_Posibles ni en la fila) se buscan de forma masiva por Id_Definitivo en la base de datos.
 
     Returns:
-        tuple: (DataFrame del cruce con los montos distribuidos, DataFrame resumen de la distribución)
+        tuple: (DataFrame del cruce con los montos distribuidos, DataFrame resumen de la distribución,
+        dict con la cantidad de Montos_Actual consultados y encontrados)
     """
     df = cruce_df.copy()
     columnas_portafolio = [c for c in columnas_portafolio if c in df.columns]
     # Si no hay Columnas o Datos, no se realiza ninguna distribución
     if (not columnas_portafolio) or df.empty:
-        return df, pd.DataFrame()
+        return df, pd.DataFrame(), {'Montos_Consultados': 0, 'Montos_Encontrados': 0}
 
     # Paso 1: Extraer la Información de la Metadata a Columnas Auxiliares
     def _id_definitivo(mtdt) -> str:
@@ -711,6 +760,9 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
     df['_dist_Pago_Minimo'] = df['Metadata'].apply(
         lambda m: (obtener_pago_minimo(m) or {}).get('Monto', np.nan)
     )
+
+    # Paso 1.1: Completar de Forma Masiva los Montos_Actual Faltantes (Exclusivo de la Distribución)
+    df, montos_consultados, montos_encontrados = _completar_montos_faltantes(df=df)
 
     # Paso 2: Validar que TODO el Portafolio tenga Id_Definitivo y Monto_Actual del Id
     df['_dist_Id_Valido'] = df['_dist_Id_Definitivo'] != ''
@@ -764,7 +816,10 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
 
     # Paso 6: Limpiar las Columnas Auxiliares de la Distribución y Devolver el Resultado
     df = df.drop(columns=[c for c in df.columns if c.startswith('_dist_')])
-    return df, resumen
+    return df, resumen, {
+        'Montos_Consultados': montos_consultados,
+        'Montos_Encontrados': montos_encontrados,
+    }
 
 # Función Auxiliar para Buscar los Datos de las Deudas
 def search_data_deudas(*,cedula: str):

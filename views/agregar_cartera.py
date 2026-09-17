@@ -1176,7 +1176,7 @@ if tab_control.open:
                     )
                 else:
                     with st.spinner("💼 Distribuyendo los montos del portafolio..."):
-                        base_df, df_distribucion = distribuir_montos_portafolio(
+                        base_df, df_distribucion, info_montos = distribuir_montos_portafolio(
                             cruce_df=base_df,
                             columnas_portafolio=columnas_portafolio,
                         )
@@ -1185,6 +1185,24 @@ if tab_control.open:
                         "✅ Se redistribuyeron los montos de **{:,}** registro(s).".format(registros_distribuidos),
                         icon="💼",
                     )
+                    # Informamos sobre los Montos_Actual faltantes consultados de Forma Masiva en Berex
+                    if info_montos['Montos_Consultados'] > 0:
+                        st.caption(
+                            "🔎 Montos_Actual faltantes consultados en la base de datos: **{:,}** "
+                            "(encontrados: **{:,}**).".format(
+                                info_montos['Montos_Consultados'],
+                                info_montos['Montos_Encontrados'],
+                            )
+                        )
+                        montos_no_encontrados = info_montos['Montos_Consultados'] - info_montos['Montos_Encontrados']
+                        if montos_no_encontrados > 0:
+                            st.warning(
+                                "**{:,}** deuda(s) no tienen Monto_Actual disponible en Berex; "
+                                "los portafolios a los que pertenezcan quedarán sin distribuir.".format(
+                                    montos_no_encontrados
+                                ),
+                                icon="⚠️",
+                            )
                     colAntes, colDespues = st.columns(2, border=True)
                     with colAntes:
                         st.metric(
