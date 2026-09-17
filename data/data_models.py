@@ -123,11 +123,11 @@ class AliadosSchema(pa.DataFrameModel):
 
 
 class MasivasMetadata(TypedDict):
-    Id_Cruce: Optional[str]
-    Es_Maximo_Descuento: Optional[bool]
-    Fecha_Limite_Uso: Optional[datetime]
+    Id_Cruce: str
+    Tipo_Contraoferta: TIPOS_CONTRAOFERTAS
+    Fecha_Limite_Uso: datetime
     Alias: Optional[str]
-    Id_Portafolio: Optional[str]
+    Id_Portafolio: str
     PaB_Portafolio: Optional[float]
 
 class MasivasSchema(pa.DataFrameModel):
