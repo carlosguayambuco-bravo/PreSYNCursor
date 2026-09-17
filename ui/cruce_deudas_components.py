@@ -158,20 +158,29 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     ]
     return df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
 
+# Función Auxiliar para estilizar el DF de las Deudas Posibles
 def estilizar_deudas(deudas_df: pd.DataFrame):
     deudas_df = deudas_df[['Banco','Numero_Credito','Monto_Actual','Id_Deuda'] + (['Es_Liquidada'] if 'Es_Liquidada' in deudas_df.columns else [])]
+    
+    # 1. Crear el objeto Styler base
+    styler = deudas_df.style
+    
+    # 2. Aplicar color de fondo por fila si existe la columna Es_Liquidada
     if 'Es_Liquidada' in deudas_df.columns:
-        return deudas_df.style.apply(
+        styler = styler.apply(
             lambda r: ['background-color: {}'.format(
                 "#ce1424" if r['Es_Liquidada'] else "#009723"
             )] * len(r), axis=1
-        ).hide(subset=['Es_Liquidada'], axis='columns').set_table_styles([
-            {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
-        ])
-    else:
-        return deudas_df.style.set_table_styles([
-            {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
-        ])
+        ).hide(subset=['Es_Liquidada'], axis='columns')
+        
+    # 3. Aplicar Negrita a la columna 'Id_Deuda' y a los encabezados (th)
+    styler = styler.map(
+        lambda v: 'font-weight: bold;', subset=['Id_Deuda']
+    ).set_table_styles([
+        {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
+    ])
+    
+    return styler
 
 # Función Auxiliar para Mostrar un Registro del Cruce (Vista de 2 Columnas)
 def mostrar_registro_cruce(*, registro: pd.Series) -> None:

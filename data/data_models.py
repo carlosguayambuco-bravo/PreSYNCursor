@@ -122,7 +122,7 @@ class AliadosSchema(pa.DataFrameModel):
         coerce = True  # Coerción automática de tipos
 
 
-class MasivasMetadata(TypedDict, total=False):
+class MasivasMetadata(TypedDict):
     Id_Cruce: Optional[str]
     Es_Maximo_Descuento: Optional[bool]
     Fecha_Limite_Uso: Optional[datetime]
@@ -141,7 +141,7 @@ class MasivasSchema(pa.DataFrameModel):
     PaB_Estructurado: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
     Plazo_Estructurado: Series[int] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
     PaB_Portafolio: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Metadata: Series[MasivasMetadata]
+    Metadata: Series[MasivasMetadata] = pa.Field(ignore_na=True, nullable=True)
 
     class Config:
         strict = True  # Validación estricta de columnas

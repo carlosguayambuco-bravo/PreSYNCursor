@@ -543,11 +543,11 @@ def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
 
 def process_masivas_metadata(mtdt: str):
     if pd.isna(mtdt) or (mtdt == '') or (mtdt == 'nan'):
-        return MasivasMetadata()
+        return pd.NA
     try:
         return MasivasMetadata(**json.loads(mtdt))
     except:
-        return MasivasMetadata()
+        return pd.NA
 
 # --> Carga de Datos de Masivas
 @st.cache_data(show_spinner="Cargando Datos de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
@@ -589,7 +589,7 @@ def load_masivas() -> DataFrame[MasivasSchema]:
 
     # Extraemos el PaB_Portafolio a Número 
     masivasDF['PaB_Portafolio'] = masivasDF['Metadata'].apply(
-        lambda mtdt: mtdt['PaB_Portafolio'] if 'PaB_Portafolio' in mtdt else np.nan
+        lambda mtdt: mtdt['PaB_Portafolio'] if pd.notna(mtdt) and ('PaB_Portafolio' in mtdt) else np.nan
     )
 
     # Aplicamos a Casa_Cobro .upper y strip
