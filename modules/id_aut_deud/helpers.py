@@ -521,7 +521,7 @@ def build_pendiente_cruce_df(*,
         cartera_info[id_deuda] = {
             COL_BANCO: (str(fila[COL_BANCO]) if (COL_BANCO in fila.index) and pd.notna(fila[COL_BANCO]) else ''),
             COL_MONTO_ACTUAL: (float(fila[COL_MONTO_ACTUAL]) if (COL_MONTO_ACTUAL in fila.index) and pd.notna(fila[COL_MONTO_ACTUAL]) else float('nan')),
-            COL_CREDITO: (str(fila[COL_CREDITO]).replace('.0','').strip() if (COL_CREDITO in fila.index) and pd.notna(fila[COL_CREDITO]) else ''),
+            COL_CREDITO: ("'" + str(fila[COL_CREDITO]).replace('.0','').strip() if (COL_CREDITO in fila.index) and pd.notna(fila[COL_CREDITO]) else ''),
             COL_ID_DEUDA: id_deuda,
             "Es_Liquidada": fila.get("Liquidada",False),
         }
@@ -572,7 +572,7 @@ def build_pendiente_cruce_df(*,
         # El Monto_Propuesto se guarda como un Pago a 1 Cuota (se elimina como campo duplicado)
         monto_propuesto = cleanNumber(fila.get(COL_MONTO_PROPUESTO), default_nan=np.nan)
         if pd.notna(monto_propuesto) and (float(monto_propuesto) > 0):
-            pagos_cuotas = [pago for pago in pagos_cuotas if _int_cuotas_pago(pago) != 1]
+            pagos_cuotas = [pago for pago in pagos_cuotas if _int_cuotas_pago(pago) != 1] # type: ignore
             pagos_cuotas.append(PagosCuotasCruce(Cuotas=1, Monto=float(monto_propuesto)))
 
         # Monto_Actual Original de la Deuda Identificada (Necesario para la Distribución de Portafolios)

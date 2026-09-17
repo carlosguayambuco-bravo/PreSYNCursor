@@ -142,8 +142,16 @@ INNER JOIN dealer_public.berex_credit_repairs AS bcr
     ON bcr.id = bcrd.credit_repair_id
     AND bcr.document_number = '{cedula}'"""
 
-QUERY_VERIFICAR_DEUDAS = """SELECT
+QUERY_VERIFICAR_DEUDAS = """
+SELECT
     bcrd.id AS Id_Deuda
+FROM dealer_public.berex_credit_repair_debts bcrd
+WHERE bcrd.id IN ({debt_ids})"""
+
+QUERY_BUSCAR_MONTO_ACTUAL = """
+SELECT
+    bcrd.id AS Id_Deuda,
+    bcrd.amount AS Monto_Actual
 FROM dealer_public.berex_credit_repair_debts bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
