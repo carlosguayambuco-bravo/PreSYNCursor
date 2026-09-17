@@ -283,18 +283,18 @@ class PagosCuotasCruce(TypedDict):
 class MetadataPendienteCruce(TypedDict):
     Id_Registro: str
     Archivo_Origen: str
+    # Los Pagos_Cuotas incluyen siempre el Pago a 1 Cuota (el antiguo Monto_Propuesto)
     Pagos_Cuotas: List[PagosCuotasCruce]
     Fecha_Identificacion: datetime
     Fecha_Limite_Pago: datetime
-    Maximo_Descuento: bool
     Etiqueta: TIPOS_ETIQUETAS
     Motivos_Cruce: list[str]
     Deudas_Posibles: List[DeudasPosiblesCruce]
     Cruce_Status: TIPOS_STATUS
     Casa_Cobro: str
     Ejecutivo_Subida: str
+    # El Tipo_Contraoferta ya define si es 'Descuento Máximo' (no se duplica con un booleano)
     Tipo_Contraoferta: TIPOS_CONTRAOFERTAS
-    Monto_Propuesto: NotRequired[float]
     Alias_Casa: NotRequired[str]
     Id_Definitivo: NotRequired[str]
     Portafolio_Ids: NotRequired[str]

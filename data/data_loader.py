@@ -1169,7 +1169,6 @@ def parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
     mtdt.setdefault('Deudas_Posibles', [])
     mtdt.setdefault('Fecha_Identificacion', pd.NaT)
     mtdt.setdefault('Fecha_Limite_Pago', pd.NaT)
-    mtdt.setdefault('Maximo_Descuento', False)
     mtdt.setdefault('Etiqueta', 'NULO')
     mtdt.setdefault('Motivos_Cruce', [])
     mtdt.setdefault('Cruce_Status', 'Sin Reconocer')

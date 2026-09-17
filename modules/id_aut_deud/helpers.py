@@ -412,7 +412,6 @@ def create_metadata_cruce(*,
         pagos_cuotas: list[PagosCuotasCruce],
         fecha_identificacion: pd.Timestamp,
         fecha_limite_pago: pd.Timestamp,
-        descuento_maximo: bool,
         etiqueta: str,
         motivos_cruce: list[str],
         deudas_posibles: list[DeudasPosiblesCruce],
@@ -425,7 +424,6 @@ def create_metadata_cruce(*,
         portafolio_ids: Optional[str] = None,
         monto_actual_original: Optional[float] = None,
         ultima_actualizacion: Optional[pd.Timestamp] = None,
-        monto_propuesto: Optional[float] = None,
     ) -> MetadataPendienteCruce:
     # Paso 1: Crear la Metadata con las Claves Obligatorias
     mtdt = MetadataPendienteCruce(
@@ -434,7 +432,6 @@ def create_metadata_cruce(*,
         Pagos_Cuotas=pagos_cuotas, # type: ignore
         Fecha_Identificacion=fecha_identificacion,
         Fecha_Limite_Pago=(fecha_limite_pago if pd.notna(fecha_limite_pago) else pd.NaT),
-        Maximo_Descuento=descuento_maximo,
         Etiqueta=etiqueta, # type: ignore
         Motivos_Cruce=motivos_cruce,
         Deudas_Posibles=deudas_posibles, # type: ignore
@@ -453,10 +450,22 @@ def create_metadata_cruce(*,
         mtdt['Portafolio_Ids'] = portafolio_ids
     if monto_actual_original is not None:
         mtdt['Monto_Actual_Original'] = monto_actual_original
-    if pd.notna(monto_propuesto) and monto_propuesto>0:
-        mtdt['Monto_Propuesto'] = monto_propuesto
     # Paso 3: Devolver la Metadata
     return mtdt
+
+# Función Auxiliar para Obtener el Número de Cuotas de un Pago de forma Segura
+def _int_cuotas_pago(pago: dict) -> int:
+    try:
+        return int(float(pago.get('Cuotas', 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+# Función Auxiliar para Obtener el Pago con el Menor Plazo de una Metadata (normalmente el de 1 Cuota)
+def obtener_pago_minimo(mtdt: dict) -> Optional[PagosCuotasCruce]:
+    pagos = mtdt.get('Pagos_Cuotas') or []
+    if not pagos:
+        return None
+    return min(pagos, key=_int_cuotas_pago)
 
 # Función Auxiliar para Limpiar la Base Estandarizada del Cruce (misma lógica de
 # limpiar_busqueda, incluyendo el cleanNumber para las Columnas de Montos a Cuotas)
@@ -496,7 +505,6 @@ def build_pendiente_cruce_df(*,
         fecha_limite_serie: pd.Series,
         casa_cobro: str,
         ejecutivo_subida: str,
-        descuento_maximo: bool,
         nombre_archivo: str,
         tipo_contraoferta: TIPOS_CONTRAOFERTAS,
         alias_casa: Optional[str] = None,
@@ -561,7 +569,11 @@ def build_pendiente_cruce_df(*,
         # Pagos a Cuotas, Fecha Límite de Pago y Portafolio
         pagos_cuotas = [PagosCuotasCruce(**info) for info in pagos_cuotas_dict.get(fila[COL_ID_CRUCE],[])]
         fecha_limite = fecha_limite_serie.iloc[i] if i < len(fecha_limite_serie) else pd.NaT # type: ignore
-        monto_propuesto = fila.get(COL_MONTO_PROPUESTO)
+        # El Monto_Propuesto se guarda como un Pago a 1 Cuota (se elimina como campo duplicado)
+        monto_propuesto = cleanNumber(fila.get(COL_MONTO_PROPUESTO), default_nan=np.nan)
+        if pd.notna(monto_propuesto) and (float(monto_propuesto) > 0):
+            pagos_cuotas = [pago for pago in pagos_cuotas if _int_cuotas_pago(pago) != 1]
+            pagos_cuotas.append(PagosCuotasCruce(Cuotas=1, Monto=float(monto_propuesto)))
 
         # Monto_Actual Original de la Deuda Identificada (Necesario para la Distribución de Portafolios)
         monto_actual_original = None
@@ -586,9 +598,7 @@ def build_pendiente_cruce_df(*,
             ejecutivo_subida=ejecutivo_subida,
             alias_casa=alias_casa,
             id_definitivo=id_definitivo,
-            descuento_maximo = descuento_maximo,
             nombre_archivo = nombre_archivo,
-            monto_propuesto=monto_propuesto,
             monto_actual_original=monto_actual_original,
             tipo_contraoferta = tipo_contraoferta,
         )
@@ -654,7 +664,7 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
 
 # Función Auxiliar para Distribuir los Montos de un Portafolio entre sus Deudas
 def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Distribuye el Monto_Propuesto y los Pagos_Cuotas de un portafolio entre las deudas que lo componen.
+    """Distribuye los Pagos_Cuotas (incluyendo el Pago a 1 Cuota) de un portafolio entre las deudas que lo componen.
 
     El portafolio se define agrupando por las `columnas_portafolio` indicadas (mínimo Cédula y
     Monto_Actual). Dentro de cada grupo la participación de cada deuda se calcula como
@@ -698,7 +708,9 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
 
     df['_dist_Id_Definitivo'] = df['Metadata'].apply(_id_definitivo)
     df['_dist_Monto_Base'] = df.apply(_monto_base, axis=1)
-    df['_dist_Monto_Propuesto'] = df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan))
+    df['_dist_Pago_Minimo'] = df['Metadata'].apply(
+        lambda m: (obtener_pago_minimo(m) or {}).get('Monto', np.nan)
+    )
 
     # Paso 2: Validar que TODO el Portafolio tenga Id_Definitivo y Monto_Actual del Id
     df['_dist_Id_Valido'] = df['_dist_Id_Definitivo'] != ''
@@ -715,16 +727,12 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
         np.nan,
     )
 
-    # Paso 4: Aplicar la Distribución (Monto_Propuesto y Pagos a Cuotas) a la Metadata
+    # Paso 4: Aplicar la Distribución de los Pagos a Cuotas (incluye el Pago a 1 Cuota)
     def _aplicar_distribucion(fila) -> MetadataPendienteCruce:
         mtdt = dict(fila['Metadata'])
         if not fila['_dist_Puede_Distribuir']:
             return parse_metadata_cruce(mtdt)
         participacion = float(fila['_dist_Participacion'])
-        # Monto Propuesto del Portafolio
-        monto_propuesto = mtdt.get('Monto_Propuesto')
-        if (monto_propuesto is not None) and pd.notna(monto_propuesto):
-            mtdt['Monto_Propuesto'] = float(monto_propuesto) * participacion
         # Pagos a Cuotas del Portafolio
         pagos_distribuidos = []
         for pago in (mtdt.get('Pagos_Cuotas') or []):
@@ -747,8 +755,10 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
         'Id_Definitivo': df['_dist_Id_Definitivo'],
         'Monto_Actual_Base': df['_dist_Monto_Base'],
         'Participacion': df['_dist_Participacion'],
-        'Monto_Propuesto_Original': df['_dist_Monto_Propuesto'],
-        'Monto_Propuesto_Distribuido': df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan)),
+        'Pago_Minimo_Original': df['_dist_Pago_Minimo'],
+        'Pago_Minimo_Distribuido': df['Metadata'].apply(
+            lambda m: (obtener_pago_minimo(m) or {}).get('Monto', np.nan)
+        ),
         'Portafolio_Distribuido': df['_dist_Puede_Distribuir'],
     })
 

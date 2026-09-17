@@ -342,18 +342,14 @@ def _int_cuotas_pago(pago: dict) -> int:
 
 # Función Auxiliar para Calcular la 'Propuesta Pago' de un Registro
 def _calcular_propuesta_pago(*, mtdt: dict, monto_actual_fila: Optional[float] = None) -> float:
-    # Paso 1: Monto a Pagar a 1 cuota (Monto_Propuesto)
-    monto_propuesto = mtdt.get('Monto_Propuesto')
-    if (monto_propuesto is not None) and pd.notna(monto_propuesto) and (float(monto_propuesto) > 0):
-        return float(monto_propuesto)
-    # Paso 2: Si no hay a 1 cuota, se usa el Pago con el Mínimo de Plazos
+    # Paso 1: Pago con el Mínimo de Plazos (el Monto_Propuesto quedó guardado como Pago a 1 Cuota)
     pagos = mtdt.get('Pagos_Cuotas') or []
     if pagos:
         pago_min = min(pagos, key=_int_cuotas_pago)
         monto_pago = pago_min.get('Monto')
         if (monto_pago is not None) and pd.notna(monto_pago):
             return float(monto_pago)
-    # Paso 3: Si tampoco hay, se usa el Monto_Actual de la Deuda Identificada
+    # Paso 2: Si tampoco hay, se usa el Monto_Actual de la Deuda Identificada
     monto_original = mtdt.get('Monto_Actual_Original')
     if (monto_original is not None) and pd.notna(monto_original):
         return float(monto_original)
@@ -363,7 +359,7 @@ def _calcular_propuesta_pago(*, mtdt: dict, monto_actual_fila: Optional[float] =
             monto_deuda = deuda.get('Monto_Actual')
             if (monto_deuda is not None) and pd.notna(monto_deuda):
                 return float(monto_deuda)
-    # Paso 4: Último caso, el Monto_Actual de la fila del cruce
+    # Paso 3: Último caso, el Monto_Actual de la fila del cruce
     if (monto_actual_fila is not None) and pd.notna(monto_actual_fila):
         return float(monto_actual_fila)
     return np.nan
@@ -381,20 +377,17 @@ def _calcular_pago_estructurado(mtdt: dict) -> tuple[float, int]:
 
 # Función Auxiliar para Construir la Metadata de Masivas (MasivasMetadata)
 def _construir_metadata_masivas(*, id_cruce: str, mtdt_cruce: dict, id_portafolio: str = '', pab_portafolio: Optional[float] = None) -> MasivasMetadata:
-    mtdt = MasivasMetadata(Id_Cruce=str(id_cruce))
-    maximo_descuento = mtdt_cruce.get('Maximo_Descuento')
-    if maximo_descuento is not None:
-        mtdt['Es_Maximo_Descuento'] = bool(maximo_descuento)
+    # Se incluyen TODAS las Claves del Esquema (las Opcionales quedan en None si no aplican)
+    # El Tipo_Contraoferta reemplaza a Es_Maximo_Descuento (ya indica si es 'Descuento Máximo')
     fecha_limite = mtdt_cruce.get('Fecha_Limite_Pago')
-    if (fecha_limite is not None) and pd.notna(fecha_limite):
-        mtdt['Fecha_Limite_Uso'] = fecha_limite
-    alias = mtdt_cruce.get('Alias_Casa')
-    if alias:
-        mtdt['Alias'] = str(alias)
-    if id_portafolio:
-        mtdt['Id_Portafolio'] = str(id_portafolio)
-    if (pab_portafolio is not None) and pd.notna(pab_portafolio):
-        mtdt['PaB_Portafolio'] = float(pab_portafolio)
+    mtdt = MasivasMetadata(
+        Id_Cruce=str(id_cruce),
+        Tipo_Contraoferta=(mtdt_cruce.get('Tipo_Contraoferta') or 'Descuento Máximo'), # type: ignore
+        Fecha_Limite_Uso=(fecha_limite if (fecha_limite is not None) and pd.notna(fecha_limite) else None), # type: ignore
+        Alias=(str(mtdt_cruce.get('Alias_Casa')) if mtdt_cruce.get('Alias_Casa') else None),
+        Id_Portafolio=str(id_portafolio or ''),
+        PaB_Portafolio=(float(pab_portafolio) if (pab_portafolio is not None) and pd.notna(pab_portafolio) else None),
+    )
     return mtdt
 
 # Función para Preparar los Datos Cruzados con las Columnas de la Base del Mes
@@ -413,6 +406,16 @@ def preparar_datos_base_mes(
     df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or '').strip())
     mask_cruzados = df['_Id_Definitivo'].ne('') & df['_Id_Definitivo'].str.upper().ne(ETIQUETA_ADDENDUM)
     df = df.loc[mask_cruzados].copy()
+    # Paso 1.1: Descartar los Registros sin Fecha Límite de Pago (la Metadata de Masivas la Exige)
+    mask_fecha = df['Metadata'].apply(lambda m: pd.notna(m.get('Fecha_Limite_Pago')))
+    if not mask_fecha.all():
+        st.warning(
+            "Se omitieron **{:,}** registro(s) sin Fecha Límite de Pago válida (no cumplen el esquema de Masivas).".format(
+                int((~mask_fecha).sum())
+            ),
+            icon="⚠️",
+        )
+        df = df.loc[mask_fecha].copy()
     if df.empty:
         return pd.DataFrame(columns=columnas_salida)
 

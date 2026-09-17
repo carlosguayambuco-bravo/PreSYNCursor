@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from modules.constants import COL_CEDULA, COL_NOMBRE, ETIQUETA_EXACTO, PRIORIDAD_ETIQUETAS_CRUCE
-from modules.id_aut_deud.helpers import search_data_deudas
+from modules.id_aut_deud.helpers import obtener_pago_minimo, search_data_deudas
 from utils.helpers_general import replaceNaN
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
@@ -202,7 +202,9 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
         strGuia = "> **Cedula**: {}".format(replaceNaN(registro['Cedula'], "Sin Cédula Proporcionada"))
         strGuia += "\n\n> **Número de Crédito**: {}".format(replaceNaN(registro['Numero_Credito'], "Sin Num. Cred. Proporcionado"))
         strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(replaceNaN(registro['Monto_Actual'], "Sin Monto Actual Brindado."))
-        strGuia += "\n\n> **Monto Propuesto**: $ {:,.0f}".format(replaceNaN(registro['Metadata']['Monto_Propuesto'], "Sin Monto Propuesto"))
+        pago_minimo = obtener_pago_minimo(mtdt)
+        monto_pago_minimo = (pago_minimo or {}).get('Monto', np.nan)
+        strGuia += "\n\n> **Pago Mínimo**: $ {:,.0f}".format(replaceNaN(monto_pago_minimo, "Sin Pago Propuesto"))
         st.markdown(strGuia)
 
     with colDeudas:

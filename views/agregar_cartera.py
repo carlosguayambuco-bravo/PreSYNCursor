@@ -17,7 +17,7 @@ from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
-    agregar_resultados_a_df_original, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, resetear_widgets_columnas,
+    agregar_resultados_a_df_original, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
@@ -631,7 +631,7 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                     if col_sel != 'Sin Columna':
                         cruce_std[col_std] = raw_df[col_sel]
 
-                # Paso 2: Pagos a Cuotas por Registro (no se guardan pagos a 1 cuota)
+                # Paso 2: Pagos a Cuotas por Registro (el Monto_Propuesto se agrega luego como Pago a 1 Cuota)
                 pagos_cuotas_lista = {}
                 for i in range(len(raw_df)):
                     pagos_fila = []
@@ -673,7 +673,6 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                     'cartera': cartera_df,
                     'pagos_cuotas_lista': pagos_cuotas_lista,
                     'fecha_limite_serie': serie_fecha,
-                    'tipo_descuento_base': tipo_descuento,
                     'nombre_archivo': uploaded_file.name or "Sin Nombre",
                     'tipo_contraoferta_base': tipo_contraoferta,
                 }
@@ -791,7 +790,6 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                             fecha_limite_serie=pkg['fecha_limite_serie'],
                             casa_cobro=str(casa_cobro),
                             ejecutivo_subida=st.session_state.get('user_email', 'Sin Correo'),
-                            descuento_maximo = pkg['tipo_descuento_base'] == 'Descuento Máximo',
                             nombre_archivo = pkg['nombre_archivo'],
                             tipo_contraoferta = pkg['tipo_contraoferta_base'],
                             alias_casa=(alias or None),
@@ -868,7 +866,7 @@ def _extraer_columnas_control(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or ''))
     df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta') or ''))
     df['_Cruce_Status'] = df['Metadata'].apply(lambda m: str(m.get('Cruce_Status') or 'Sin Reconocer'))
-    df['_Monto_Propuesto'] = df['Metadata'].apply(lambda m: m.get('Monto_Propuesto', np.nan))
+    df['_Pago_Minimo'] = df['Metadata'].apply(lambda m: (obtener_pago_minimo(m) or {}).get('Monto', np.nan))
     df['_Pagos_Cuotas'] = df['Metadata'].apply(lambda m: m.get('Pagos_Cuotas') or [])
     return df
 
@@ -897,7 +895,7 @@ def _construir_preview_control(*, base_df: pd.DataFrame) -> pd.DataFrame:
             'Etiqueta': mtdt.get('Etiqueta', ''),
             'Cruce_Status': mtdt.get('Cruce_Status', 'Sin Reconocer'),
             'Monto_Actual_Original': mtdt.get('Monto_Actual_Original', np.nan),
-            'Monto_Propuesto': mtdt.get('Monto_Propuesto', np.nan),
+            'Pago_Minimo': (obtener_pago_minimo(mtdt) or {}).get('Monto', np.nan),
             'Pagos_Cuotas': len(mtdt.get('Pagos_Cuotas') or []),
         })
     return pd.DataFrame(filas)
@@ -1084,7 +1082,7 @@ if tab_control.open:
             total_addendums = int((base_df['_Id_Definitivo'] == ETIQUETA_ADDENDUM).sum())
             total_sin_identificar = total_registros - total_identificados
             monto_actual_total = base_df[COL_MONTO_ACTUAL].sum() if COL_MONTO_ACTUAL in base_df.columns else 0.0
-            monto_propuesto_total = base_df['_Monto_Propuesto'].sum()
+            monto_pago_minimo_total = base_df['_Pago_Minimo'].sum()
             total_con_pagos = int(base_df['_Pagos_Cuotas'].apply(lambda p: len(p) > 0).sum())
 
             colRegistros, colIdentificados, colSinIdentificar, colAddendums = st.columns(4, border=True)
@@ -1109,11 +1107,11 @@ if tab_control.open:
             with colAddendums:
                 st.metric(label="**📝 Addendums**", value=total_addendums)
 
-            colMontoActual, colMontoPropuesto, colPagosCuotas = st.columns(3, border=True)
+            colMontoActual, colPagoMinimo, colPagosCuotas = st.columns(3, border=True)
             with colMontoActual:
                 st.metric(label="**💵 Monto_Actual Total**", value="${:,.0f}".format(monto_actual_total))
-            with colMontoPropuesto:
-                st.metric(label="**💸 Monto_Propuesto Total**", value="${:,.0f}".format(monto_propuesto_total))
+            with colPagoMinimo:
+                st.metric(label="**💸 Pago Mínimo Total**", value="${:,.0f}".format(monto_pago_minimo_total))
             with colPagosCuotas:
                 st.metric(label="**🧾 Registros con Pagos a Cuotas**", value=total_con_pagos)
 
@@ -1125,7 +1123,7 @@ if tab_control.open:
                     column_config={
                         COL_MONTO_ACTUAL: st.column_config.NumberColumn(COL_MONTO_ACTUAL, format="localized"),
                         "Monto_Actual_Original": st.column_config.NumberColumn("Monto_Actual_Original", format="localized"),
-                        "Monto_Propuesto": st.column_config.NumberColumn("Monto_Propuesto", format="localized"),
+                        "Pago_Minimo": st.column_config.NumberColumn("Pago_Minimo", format="localized"),
                     },
                 )
 
@@ -1190,13 +1188,13 @@ if tab_control.open:
                     colAntes, colDespues = st.columns(2, border=True)
                     with colAntes:
                         st.metric(
-                            label="**💸 Monto_Propuesto (Antes)**",
-                            value="${:,.0f}".format(df_distribucion['Monto_Propuesto_Original'].sum()),
+                            label="**💸 Pago Mínimo (Antes)**",
+                            value="${:,.0f}".format(df_distribucion['Pago_Minimo_Original'].sum()),
                         )
                     with colDespues:
                         st.metric(
-                            label="**💸 Monto_Propuesto (Distribuido)**",
-                            value="${:,.0f}".format(df_distribucion['Monto_Propuesto_Distribuido'].sum()),
+                            label="**💸 Pago Mínimo (Distribuido)**",
+                            value="${:,.0f}".format(df_distribucion['Pago_Minimo_Distribuido'].sum()),
                         )
                     with st.expander("🔎 Ver Detalle de la Distribución", expanded=False):
                         st.dataframe(
@@ -1206,8 +1204,8 @@ if tab_control.open:
                             column_config={
                                 COL_MONTO_ACTUAL: st.column_config.NumberColumn(COL_MONTO_ACTUAL, format="localized"),
                                 'Monto_Actual_Base': st.column_config.NumberColumn('Monto_Actual_Base', format="localized"),
-                                'Monto_Propuesto_Original': st.column_config.NumberColumn('Monto_Propuesto_Original', format="localized"),
-                                'Monto_Propuesto_Distribuido': st.column_config.NumberColumn('Monto_Propuesto_Distribuido', format="localized"),
+                                'Pago_Minimo_Original': st.column_config.NumberColumn('Pago_Minimo_Original', format="localized"),
+                                'Pago_Minimo_Distribuido': st.column_config.NumberColumn('Pago_Minimo_Distribuido', format="localized"),
                                 'Participacion': st.column_config.NumberColumn('Participacion', format="percent"),
                             },
                         )
@@ -1225,7 +1223,7 @@ if tab_control.open:
                     st.metric(
                         label="**{}**".format(status),
                         value=num_status,
-                        delta="{:.1%} del Total".format(num_status / total_registros) if total_registros else None,
+                        delta="{:.1%} del Total".format(num_status / total_registros),
                         delta_color="green" if status == 'Reconocido' else "gray",
                         delta_arrow="off",
                     )
