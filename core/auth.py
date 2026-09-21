@@ -658,6 +658,36 @@ def create_user_from_session():
     )
 
 
+def _clear_invalid_session() -> None:
+    """Descarta el usuario y las credenciales que ya no son válidas.
+
+    Elimina 'user_obj' del session state para que la aplicación continúe con
+    el flujo original de inicio de sesión y borra las credenciales
+    persistidas para no repetir la validación con cookies invalidadas.
+    """
+    st.session_state.pop("user_obj", None)
+    st.session_state.pop("credentials", None)
+    st.session_state.pop("creds_google", None)
+    delete_saved_credentials()
+
+
+def _safe_create_user_from_session() -> User | None:
+    """Valida las credenciales creando el usuario de la sesión.
+
+    Envuelve create_user_from_session() para capturar cualquier error de
+    validación (refresh token revocado, access token inválido, etc.). Ante un
+    error se elimina 'user_obj' del session state y se descartan las
+    credenciales, de modo que la aplicación continúe con el inicio de sesión
+    en lugar de propagar la excepción.
+    """
+    try:
+        return create_user_from_session()
+    except Exception as error:
+        print(f"Sesión invalidada ({type(error).__name__}): {error}")
+        _clear_invalid_session()
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Orquestación de la autenticación
 # ---------------------------------------------------------------------------
@@ -687,8 +717,16 @@ def _handle_oauth_callback(params) -> None:
         # Clear URL parameters to keep address bar clean
         st.query_params.clear()
 
-        # Guardamos el Usuario
-        st.session_state["user_obj"] = create_user_from_session()
+        # Guardamos el Usuario (validando las credenciales contra Google)
+        user_obj = _safe_create_user_from_session()
+        if user_obj is None:
+            # Credenciales inválidas: continuamos con el inicio de sesión.
+            st.query_params.clear()
+            st.error("Error durante la autenticación: no se pudieron validar las credenciales.", icon="🚨")
+            st.info("Por favor, intenta iniciar sesión nuevamente.", icon="ℹ️")
+            st.session_state["auth_url"] = get_auth_url()
+            return
+        st.session_state["user_obj"] = user_obj
         email = st.session_state.get("user_email", "Unknown")
 
         store = _session_store()
@@ -771,7 +809,10 @@ def authenticate_user():
                 return
 
             _set_session_credentials(refreshed)
-            st.session_state["user_obj"] = create_user_from_session()
+            user_obj = _safe_create_user_from_session()
+            if user_obj is None:
+                return  # Credenciales inválidas: se muestra el inicio de sesión.
+            st.session_state["user_obj"] = user_obj
             email = st.session_state.get("user_email")
             store["authenticated"] = True
             store["email"] = email
@@ -799,7 +840,10 @@ def authenticate_user():
         return
 
     _set_session_credentials(refreshed)
-    st.session_state["user_obj"] = create_user_from_session()
+    user_obj = _safe_create_user_from_session()
+    if user_obj is None:
+        return  # Credenciales inválidas: se muestra el inicio de sesión.
+    st.session_state["user_obj"] = user_obj
     email = st.session_state.get("user_email")
     store["authenticated"] = True
     store["email"] = email
