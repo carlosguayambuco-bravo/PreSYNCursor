@@ -1,6 +1,8 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
+from ast import arg
+
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
@@ -19,6 +21,11 @@ def on_change_tab_gest_sols():
     if st.session_state['tabs_ver_solicitudes'] == "😎 Resumen de Solicitudes":
         reiniciar_filtros_solicitudes_negociadores()
 
+# Creamos Función de Expanción Total
+def expandir_todos(*,correos: list[str]) -> None:
+    for correo in correos:
+        key_expander = f"expander_{correo}"
+        st.session_state[key_expander] = True
 
 # --- Elementos de la Interfaz de Usuario ---
 solicitudes_filtered = mostrar_filtros_generales_solicitud_negociador(solicitudes_df=solicitudes_df)
@@ -102,24 +109,21 @@ if tabResumen.open:
         # Siguiente: Mostramos el toggle para ver todos a mi cargo y para expandir o no todos los expanders
         colToggle, colExpand, colLimpiarBtt = st.columns([2, 2, 2], gap="large")
         with colToggle:
-            ver_todos_a_mi_cargo = st.toggle(
+            st.toggle(
                 "Ver Todos a mi Cargo",
-                value=st.session_state.get('ver_todos_a_mi_cargo', False),
-                key="ver_todos_a_mi_cargo_toggle",
+                value=False,
+                key="ver_todos_a_mi_cargo",
                 help="Si marcas esta opción, se mostrarán todos los negociadores a tu cargo.",
             )
-            st.session_state['ver_todos_a_mi_cargo'] = ver_todos_a_mi_cargo
         with colExpand:
-            expandir_todos = st.toggle(
+            st.toggle(
                 "Expandir Todos",
-                value=st.session_state.get('expandir_todos', False),
+                value=False,
                 key="expandir_todos_toggle",
                 help="Si marcas esta opción, se expandirán todos los resúmenes de negociadores.",
+                on_change=expandir_todos,
+                kwargs={'correos':correos_revisar}
             )
-            if expandir_todos:
-                for correo in correos_revisar:
-                    key_expander = f"expander_{correo}"
-                    st.session_state[key_expander] = True
 
         with colLimpiarBtt:
             mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_resumen")
