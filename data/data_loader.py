@@ -331,7 +331,7 @@ def load_current_month_solicitudes() -> DataFrame[SolicitudesSchema]:
     return sols_ajustadas
 
 # --> Carga de Cambios de Referencias
-@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=HOUR_WAIT)
+@st.cache_data(show_spinner="Cargando Cambios de Referencias desde Google Sheets...", ttl=DAY_WAIT)
 def load_reference_changes() -> dict[str,str]:
 
     # Primero Obtenemos la Spreadsheet de Cambios de Referencias desde Google Sheets
