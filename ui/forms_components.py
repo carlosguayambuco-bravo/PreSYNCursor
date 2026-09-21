@@ -1,14 +1,20 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 # Librerías de Terceros
 from pandera.typing import DataFrame
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from data.data_loader import load_current_month_solicitudes
 from data.data_models import DeudasActivasSchema
-from modules.forms import obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
+from modules.forms import mostrar_como_subir_solicitud_aliados_diferentes, obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat
+
+class ResultadoDirectoBase(TypedDict):
+    aliado: str
+    cambiado: bool
+    masivas_locales: pd.DataFrame
 
 def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[str]:
     st.subheader("Deudas Activas del Cliente")
@@ -67,6 +73,137 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
     deudas_seleccionadas = [deuda for deuda in deudas_activas_df['Id_Deuda'] if st.session_state.get(f"select_deuda_{deuda}", False)]
 
     return deudas_seleccionadas
+
+def obtener_candidatos_solicitudes_exitosas(*, deudas: list[str]) -> pd.DataFrame:
+    """
+    Obtiene los Candidatos de Descuento (Id_Deuda, Casa_Cobro, Monto y Origen) a partir de las
+    Solicitudes Exitosas, sin discriminar por el Tipo de Solicitud.
+
+    Args:
+        deudas (list[str]): Ids de las Deudas Seleccionadas.
+
+    Returns:
+        pd.DataFrame: Candidatos encontrados en las Solicitudes Exitosas (puede ser vacío).
+    """
+    # Paso 1: Cargamos las Solicitudes (Incluye Históricas si están Activadas)
+    solicitudes_df = load_current_month_solicitudes()
+
+    # Paso 2: Nos Quedamos con las Solicitudes Exitosas
+    solicitudes_exitosas_df = solicitudes_df[solicitudes_df['Estado_Solicitud'] == 'Exitosa']
+
+    # Paso 3: Construimos los Candidatos por cada Deuda Respondida con Monto Mayor a 0
+    candidatos = []
+    for _, solicitud in solicitudes_exitosas_df.iterrows():
+        for deuda in solicitud['JSON_Respuesta']:
+            monto = cleanNumber(deuda.get('Monto_Propuesto') or 0)
+            if (deuda['Id_Deuda'] in deudas) and (monto > 0):
+                candidatos.append({
+                    'Id_Deuda': deuda['Id_Deuda'],
+                    'Casa_Cobro': solicitud['Casa_Cobro'],
+                    'Monto': monto,
+                    'Origen': 'Solicitud Exitosa',
+                })
+
+    # Paso 4: Devolvemos el DF (Vacío con Columnas si no hay Candidatos)
+    return pd.DataFrame(candidatos, columns=['Id_Deuda', 'Casa_Cobro', 'Monto', 'Origen'])
+
+def _obtener_aliado_menor_monto(*, deudas: list[str], candidatos: pd.DataFrame, aliados_posibles: list[str]) -> str:
+    """
+    Obtiene el Aliado con la Menor Suma de Montos Propuestos entre los Aliados Posibles.
+
+    Args:
+        deudas (list[str]): Ids de las Deudas Seleccionadas.
+        candidatos (pd.DataFrame): Candidatos de Base y Solicitudes Exitosas.
+        aliados_posibles (list[str]): Aliados que cubren todas las Deudas Seleccionadas.
+
+    Returns:
+        str: Casa de Cobro con la Menor Suma de Montos Propuestos.
+    """
+    # Paso 1: Filtramos los Candidatos por las Deudas y los Aliados Posibles
+    candidatos_filtrados = candidatos[
+        candidatos['Id_Deuda'].isin(deudas) & candidatos['Casa_Cobro'].isin(aliados_posibles)
+    ]
+
+    # Paso 2: Reducimos por Deuda y Casa dejando el Registro con el Mejor Descuento (menor Monto)
+    mejores = candidatos_filtrados.loc[candidatos_filtrados.groupby(['Casa_Cobro', 'Id_Deuda'])['Monto'].idxmin()]
+
+    # Paso 3: Sumamos el Monto por Casa de Cobro y elegimos la Casa con la Menor Suma
+    return str(mejores.groupby('Casa_Cobro')['Monto'].sum().idxmin())
+
+def resolver_aliado_directo_base(*,
+        aliado_seleccionado: str,
+        deudas_seleccionadas: list[str],
+        masivas_df: pd.DataFrame,
+        aliados_dict: dict[str, Any],
+        es_admin: bool = False,
+    ) -> ResultadoDirectoBase:
+    """
+    Resuelve el Aliado cuando se selecciona 'Directo Base'.
+
+    Busca las Deudas Seleccionadas tanto en las Actualizaciones Masivas (Base) como en las
+    Solicitudes Exitosas (sin discriminar el Tipo de Solicitud) para determinar la Casa de
+    Cobro que cubre todas las Deudas, aplicando la misma lógica de coincidencia de todas las
+    deudas y de múltiples aliados.
+
+    Returns:
+        ResultadoDirectoBase: Aliado Resuelto, si fue Cambiado y las Masivas Locales.
+    """
+    # Paso 1: Candidatos Locales en la Base (Actualizaciones Masivas)
+    masivas_locales = masivas_df[masivas_df['Id_Deuda'].isin(deudas_seleccionadas)]
+
+    # Paso 2: Si no es Directo Base, devolvemos el Aliado tal cual sin cambios
+    if aliado_seleccionado.lower().strip() != 'directo base':
+        return {'aliado': aliado_seleccionado, 'cambiado': False, 'masivas_locales': masivas_locales}
+
+    # Paso 3: Obtenemos los Candidatos de las Solicitudes Exitosas
+    candidatos_exitosas = obtener_candidatos_solicitudes_exitosas(deudas=deudas_seleccionadas)
+
+    # Paso 4: Unificamos los Candidatos de la Base y de las Solicitudes Exitosas
+    candidatos_base = masivas_locales[['Id_Deuda', 'Casa_Cobro', 'PaB_Propuesta']].rename(columns={'PaB_Propuesta': 'Monto'}).copy()
+    candidatos_base['Origen'] = 'Base'
+    candidatos = pd.concat([candidatos_base, candidatos_exitosas], ignore_index=True)
+
+    # Paso 5: Verificamos que Todas las Deudas Seleccionadas tengan al Menos un Candidato
+    if not set(deudas_seleccionadas).issubset(set(candidatos['Id_Deuda'])):
+        st.warning("No todas las deudas seleccionadas tienen un descuento en base o en solicitudes exitosas.", icon="⚠️")
+        st.stop()
+
+    if es_admin:
+        st.dataframe(candidatos)
+
+    # Paso 6: Verificamos que Todas las Deudas tengan Descuento para un Mismo Aliado
+    aliados_posibles = [
+        aliado for aliado in candidatos['Casa_Cobro'].unique()
+        if set(deudas_seleccionadas).issubset(set(candidatos.loc[candidatos['Casa_Cobro'] == aliado, 'Id_Deuda']))
+    ]
+
+    if not aliados_posibles:
+        st.warning("No todas las deudas seleccionadas tienen un descuento en base o en solicitudes exitosas para un mismo aliado.", icon="⚠️")
+        # Mostramos como Subir la Solicitud dadas las diferentes deudas
+        mostrar_como_subir_solicitud_aliados_diferentes(
+            ml = candidatos,
+            es_admin = es_admin,
+        )
+        st.stop()
+
+    if es_admin:
+        st.info("Los Aliados Posibles para las Deudas Seleccionadas son: ({})".format(", ".join(aliados_posibles)), icon="ℹ️")
+
+    # Paso 7: Elegimos el Aliado (Directo si es Único, si no el de Menor Monto Total)
+    if len(aliados_posibles) == 1:
+        aliado_seleccionado = aliados_posibles[0]
+    else:
+        aliado_seleccionado = _obtener_aliado_menor_monto(deudas=deudas_seleccionadas, candidatos=candidatos, aliados_posibles=aliados_posibles)
+
+    if es_admin:
+        st.info(f"Se ha cambiado automáticamente el aliado seleccionado a **{aliado_seleccionado}** ya que todas las deudas seleccionadas tienen un descuento en base para este aliado.", icon="ℹ️")
+
+    # Paso 8: Verificación Última: Que el Aliado esté en la Lista de Aliados Posibles
+    if aliado_seleccionado not in aliados_dict:
+        st.warning("Error de Selección de Aliado Interna, manda DM sobre la Referencia y Deudas que intentaste", icon="⚠️")
+        st.stop()
+
+    return {'aliado': aliado_seleccionado, 'cambiado': True, 'masivas_locales': masivas_locales}
 
 def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: float, deudas_seleccionadas_df: DataFrame[DeudasActivasSchema]) -> None:
     st.subheader("💰 Monto Recomendado para la Solicitud")

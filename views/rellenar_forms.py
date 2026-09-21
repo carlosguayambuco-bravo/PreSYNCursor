@@ -7,8 +7,8 @@ import pandas as pd
 # Librerías Propias
 from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas, mostrar_como_subir_solicitud_aliados_diferentes, obtener_aliado_en_base  # pyright: ignore[reportAttributeAccessIssue]
-from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda
+from modules.forms import cumple_condicion_actualizacion_deudas
+from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, move_business_days
 
 # Carga de Información Necesaria para el Formulario
@@ -258,62 +258,19 @@ if not tipo_solicitud or not aliado_seleccionado:
 # Limpiamos el Tipo de Solicitud Quitando los Asteriscos
 tipo_solicitud = tipo_solicitud.replace('*','').strip()
 
-# Ajuste: Cuando es Directo Base, se busca en las Deudas Masivas
-masivas_locales = masivasDF[masivasDF['Id_Deuda'].isin(deudas_seleccionadas)]
+# Ajuste: Cuando es Directo Base, se busca en la Base y en las Solicitudes Exitosas
+resultado_directo_base = resolver_aliado_directo_base(
+    aliado_seleccionado=aliado_seleccionado,
+    deudas_seleccionadas=deudas_seleccionadas,
+    masivas_df=masivasDF,
+    aliados_dict=aliadosDict,
+    es_admin=es_admin,
+)
 
-if aliado_seleccionado.lower().strip() == 'directo base':
-    # Alerta de Modificación 1: Todas las Deudas Seleccionadas tienen un Descuento en Base
-    # (Contamos las Deudas Únicas ya que puede haber varios Registros de Descuento por Deuda)
-    if masivas_locales['Id_Deuda'].nunique() < len(deudas_seleccionadas):
-        st.warning("No todas las deudas seleccionadas tienen un descuento en base.", icon="⚠️")
-        st.stop()
-
-    if es_admin:
-        st.dataframe(masivas_locales)
-
-    # Alerta de Modificación 2: Todas las Deudas tienen Descuento en Base para un Mismo Aliado
-    if len(masivas_locales['Casa_Cobro'].unique()) > 1:
-        # Creamos una Lista de los Aliados Posibles
-        aliados_posibles = []
-
-        for aliado in masivas_locales['Casa_Cobro'].unique():
-            deudas_aliado = set(masivas_locales[masivas_locales['Casa_Cobro'] == aliado]['Id_Deuda'].tolist())
-            if all((deuda in deudas_aliado for deuda in deudas_seleccionadas)):
-                aliados_posibles.append(aliado)
-
-        if not aliados_posibles:
-            st.warning("No todas las deudas seleccionadas tienen un descuento en base para un mismo aliado.", icon="⚠️")
-            # Mostramos como Subir la Solicitud dadas las diferentes deudas
-            mostrar_como_subir_solicitud_aliados_diferentes(
-                ml = masivas_locales,
-                es_admin = es_admin,
-            )
-            st.stop()
-
-        if es_admin:
-            st.info("Los Aliados Posibles para las Deudas Seleccionadas son: ({})".format(", ".join(aliados_posibles)), icon="ℹ️")
-
-        # Ahora Cambiamos el Aliado al Nuevo
-        if len(aliados_posibles) == 1:
-            aliado_seleccionado = aliados_posibles[0]
-        else:
-            aliado_seleccionado = obtener_aliado_en_base(deudas=deudas_seleccionadas, aliados_posibles=aliados_posibles)
-
-
-    else:
-        aliado_seleccionado = masivas_locales['Casa_Cobro'].iloc[0]
-
-    if es_admin:
-        st.info(f"Se ha cambiado automáticamente el aliado seleccionado a **{aliado_seleccionado}** ya que todas las deudas seleccionadas tienen un descuento en base para este aliado.", icon="ℹ️")
-
-    # Verificación última: Que el Aliado este en la Lista de Aliados Posibles
-    if aliado_seleccionado not in aliadosDict:
-        st.warning("Error de Selección de Aliado Interna, manda DM sobre la Referencia y Deudas que intentaste", icon="⚠️")
-        st.stop()
-
-    aliado_cambiado = True
-else:
-    aliado_cambiado = False
+# Aplicamos la Resolución del Aliado (si fue cambiado o no) y las Masivas Locales
+aliado_seleccionado = resultado_directo_base['aliado']
+aliado_cambiado = resultado_directo_base['cambiado']
+masivas_locales = resultado_directo_base['masivas_locales']
 
 # Siguiente: Mostrar Verificación de Tiempos de Respuesta
 with colAliado:
