@@ -21,7 +21,8 @@ from modules.id_aut_deud.helpers import (
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
-    ID_DEFINITIVO_ADDENDUM, LLAVE_CAMBIOS_ID_DEFINITIVO, mostrar_deudas_cruce_paginadas, mostrar_filtros_cruce,
+    ID_DEFINITIVO_ADDENDUM, LLAVE_CAMBIOS_ID_DEFINITIVO, LLAVE_IDS_NO_VALIDADOS,
+    mostrar_advertencia_ids_no_validados, mostrar_deudas_cruce_paginadas, mostrar_filtros_cruce,
 )
 from utils.helpers_general import cleanNumber
 from utils.helpers_sheets import convert_data_to_string
@@ -970,6 +971,9 @@ if tab_escogencia.open:
         # Sección de Identificación (vista paginada)
         mostrar_deudas_cruce_paginadas(cruce_df=cruce_filtrado, key="cruce_pendientes")
 
+        # Advertencia del Filtro de Ids_Deuda No Validados (Post-Revisión)
+        mostrar_advertencia_ids_no_validados()
+
         st.divider()
 
         # Actualización de la Información
@@ -988,31 +992,54 @@ if tab_escogencia.open:
                 if not cambios:
                     st.warning("No hay cambios de Id_Definitivo pendientes por aplicar.", icon="⚠️")
                 else:
-                    df_actualizar = aplicar_cambios_id_definitivo(cruce_df=cruce_df, cambios=cambios)
+                    # Verificamos que las Deudas Existan (Excluyendo ADDENDUMS)
+                    deudas_cambios = sorted({
+                        str(d) for d in cambios.values() if d != ID_DEFINITIVO_ADDENDUM
+                    })
+                    with st.spinner("🔍 Validando que los Id_Deuda existan..."):
+                        resultados = verificar_existencias_deudas(deudas=deudas_cambios)
+                    # Actualizamos los Ids_Deuda No Validados (Set para Eficiencia Computacional)
+                    deudas_no_existentes = {str(d) for d, existe in resultados.items() if not existe}
+                    st.session_state[LLAVE_IDS_NO_VALIDADOS] = deudas_no_existentes
+                    # Separamos los Cambios Válidos de los No Validados
+                    cambios_validos = {
+                        id_cruce: id_definitivo
+                        for id_cruce, id_definitivo in cambios.items()
+                        if (id_definitivo == ID_DEFINITIVO_ADDENDUM) or (str(id_definitivo) not in deudas_no_existentes)
+                    }
+                    if not cambios_validos:
+                        st.warning(
+                            "Ningún Id_Deuda existe en Berex, por lo que no se actualizó ningún registro. "
+                            "Revisa los Ids no validados en la sección de filtros.",
+                            icon="⚠️",
+                        )
+                        sleep(1)
+                        st.rerun()
+                    # Actualizamos únicamente los Cambios Válidos
+                    df_actualizar = aplicar_cambios_id_definitivo(cruce_df=cruce_df, cambios=cambios_validos)
                     # Validamos el DF
                     df_actualizar = PendienteCruceSchema.validate(df_actualizar, lazy=True)
-                    # Verificamos que las Deudas Existan (Excluyendo ADDENDUMS)
-                    deudas_cambios = [d for d in cambios.values() if d != ID_DEFINITIVO_ADDENDUM]
-                    with st.spinner("🔍 Validando que los Id_Deuda existan..."):
-                        # Obtenemos los Resultados
-                        resultados = verificar_existencias_deudas(deudas=deudas_cambios)
-                        # Verificamos los Resultados
-                        deudas_no_existentes = [d for d, existe in resultados.items() if not existe]
-                        if deudas_no_existentes:
-                            st.error(
-                                "No se puede actualizar la base porque los siguientes Id_Deuda no existen en Berex: {}".format(
-                                    ", ".join(deudas_no_existentes)
-                                ),
-                                icon="❌",
-                            )
-                            st.stop()
-                        else:
-                            st.success("✅ Todos los Id_Deuda a actualizar existen en Berex.", icon="✅")
                     with st.spinner("📤 Registrando Cambios en Google Sheets..."):
                         exito_upd = upload_base_cruce_info(cruce_df=df_actualizar)
                     if exito_upd:
-                        st.session_state[LLAVE_CAMBIOS_ID_DEFINITIVO] = {}
-                        st.toast("Cambios Registrados con Éxito ({} cambios)".format(len(cambios)), icon="✅")
+                        # Conservamos los Cambios No Validados para su Post-Revisión
+                        st.session_state[LLAVE_CAMBIOS_ID_DEFINITIVO] = {
+                            id_cruce: id_definitivo
+                            for id_cruce, id_definitivo in cambios.items()
+                            if str(id_definitivo) in deudas_no_existentes
+                        }
+                        if deudas_no_existentes:
+                            st.toast(
+                                "Cambios Registrados: {:,} de {:,}. Quedaron {:,} Id_Deuda No Validados.".format(
+                                    len(cambios_validos), len(cambios), len(deudas_no_existentes)
+                                ),
+                                icon="⚠️",
+                            )
+                        else:
+                            st.toast(
+                                "Cambios Registrados con Éxito ({:,} cambios)".format(len(cambios_validos)),
+                                icon="✅",
+                            )
                         sleep(1)
                         st.rerun()
 

@@ -12,6 +12,8 @@ from modules.id_aut_deud.helpers import obtener_pago_minimo, search_data_deudas
 from utils.helpers_general import replaceNaN
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
+LLAVE_IDS_NO_VALIDADOS = 'cruce_ids_deuda_no_validados'
+LLAVE_FILTRO_NO_VALIDADOS = 'filtro_cruce_solo_no_validados_input'
 OPCION_SIN_OPCIONES = 'Sin Opciones Actuales'
 ID_DEFINITIVO_ADDENDUM = 'ADDENDUM'
 
@@ -20,6 +22,14 @@ OPCION_ORDEN_DF = 'Orden del DataFrame (Actual)'
 OPCION_ORDEN_CEDULA = 'Cédula'
 OPCION_ORDEN_NOMBRE = 'Nombre del Cliente'
 OPCION_ORDEN_ETIQUETA = 'Etiqueta'
+
+# Función Auxiliar para Obtener el Id_Definitivo Actual de un Registro (Cambio Pendiente o Metadata)
+def _id_definitivo_actual(*, fila: pd.Series, cambios: dict) -> str:
+    id_cruce = str(fila.get('Id_Cruce') or '')
+    if id_cruce in cambios:
+        return str(cambios[id_cruce])
+    mtdt = fila.get('Metadata') or {}
+    return str(mtdt.get('Id_Definitivo') or '')
 
 # Función Auxiliar para Mostrar los Filtros de las Deudas a Identificar
 def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
@@ -36,6 +46,10 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta', '') or ''))
     df['_Tiene_Id_Definitivo'] = df['Metadata'].apply(lambda m: (m.get('Id_Definitivo') not in (None, '')))
     df['_Archivo_Origen'] = df['Metadata'].apply(lambda m: str(m.get('Archivo_Origen', '') or ''))
+
+    # Ids_Deuda No Validados (Post-Revisión): Set guardado al Actualizar la Información
+    ids_no_validados = st.session_state.get(LLAVE_IDS_NO_VALIDADOS, set())
+    hay_no_validados = len(ids_no_validados) > 0
 
     # Paso 2: Mostrar los Filtros (Casa de Cobro, Alias, Ejecutivo de Subida y Etiqueta)
     colCasa, colAlias, colEjecutivo, colEtiqueta = st.columns(4)
@@ -77,6 +91,21 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
             help="Seleccione las etiquetas que desea ver.",
         )
 
+    # Filtro de Post-Revisión: Solo Ids_Deuda No Validados (solo se muestra si hay Ids Erróneos)
+    filtrar_no_validados = False
+    if hay_no_validados:
+        colNoValidados, colInfoNoValidados = st.columns([1, 3], vertical_alignment="center")
+        with colNoValidados:
+            filtrar_no_validados = st.toggle(
+                label="**🚨 Solo Ids_Deuda No Validados**",
+                key=LLAVE_FILTRO_NO_VALIDADOS,
+                help="Muestra únicamente los registros cuyo Id_Deuda no existe en Berex, para su post-revisión.",
+            )
+        with colInfoNoValidados:
+            st.caption(
+                "Filtro de Post-Revisión: **{:,}** Id_Deuda sin validar en Berex.".format(len(ids_no_validados))
+            )
+
     # Paso 3: Aplicar los Filtros Principales Seleccionados
     if casa_seleccionada:
         df = df[df['_Casa_Cobro'].isin(casa_seleccionada)]
@@ -89,6 +118,14 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
 
     if etiqueta_seleccionada:
         df = df[df['_Etiqueta'].isin(etiqueta_seleccionada)]
+
+    # Paso 3.1: Aplicar el Filtro de Post-Revisión (Solo Ids_Deuda No Validados)
+    if filtrar_no_validados and not df.empty:
+        cambios = st.session_state.get(LLAVE_CAMBIOS_ID_DEFINITIVO, {})
+        ids_definitivos = df.apply(
+            lambda fila: _id_definitivo_actual(fila=fila, cambios=cambios), axis=1
+        )
+        df = df[ids_definitivos.isin(ids_no_validados)]
 
     # Paso 4: Ayudas Auxiliares (Toggle de Id_Definitivo, Ordenamiento y Archivo de Origen)
     with st.expander("Ayudas Auxiliares", expanded=False):
@@ -136,7 +173,8 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
             )
 
     # Paso 5: Aplicar los Filtros Auxiliares Seleccionados
-    if not incluir_con_definitivo:
+    # (el Filtro de No Validados debe incluir registros con Id_Definitivo para poder Corregirlos)
+    if not incluir_con_definitivo and not filtrar_no_validados:
         df = df[~df['_Tiene_Id_Definitivo']]
 
     if archivo_seleccionado:
@@ -157,6 +195,37 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
         '_Tiene_Id_Definitivo', '_Archivo_Origen', '_Prioridad_Etiqueta',
     ]
     return df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
+
+# Función Auxiliar para Mostrar la Advertencia del Filtro de Ids_Deuda No Validados
+def mostrar_advertencia_ids_no_validados() -> None:
+    # Si no hay Ids_Deuda No Validados, no se muestra nada
+    ids_no_validados = st.session_state.get(LLAVE_IDS_NO_VALIDADOS, set())
+    if not ids_no_validados:
+        return
+
+    # Resumimos la Lista de Ids para la Advertencia
+    ids_texto = ", ".join(sorted(str(i) for i in ids_no_validados))
+    if len(ids_texto) > 300:
+        ids_texto = "{}...".format(ids_texto[:300])
+
+    if st.session_state.get(LLAVE_FILTRO_NO_VALIDADOS, False):
+        st.warning(
+            "**Filtro activo: Solo Ids_Deuda No Validados.** Se muestran únicamente los registros cuyo "
+            "Id_Deuda no existe en Berex. Corrige el Id_Deuda y vuelve a actualizar: los Ids válidos "
+            "sí se guardarán.\n\n**Ids_Deuda No Validados ({:,})**: {}".format(
+                len(ids_no_validados), ids_texto
+            ),
+            icon="🚨",
+        )
+    else:
+        st.warning(
+            "Hay **{:,}** Id_Deuda que no existen en Berex y quedaron pendientes de corrección. "
+            "Activa el filtro **Solo Ids_Deuda No Validados** en la sección de filtros para su "
+            "post-revisión.\n\n**Ids_Deuda No Validados ({:,})**: {}".format(
+                len(ids_no_validados), len(ids_no_validados), ids_texto
+            ),
+            icon="⚠️",
+        )
 
 # Función Auxiliar para estilizar el DF de las Deudas Posibles
 def estilizar_deudas(deudas_df: pd.DataFrame):
