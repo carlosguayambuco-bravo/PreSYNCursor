@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from time import sleep
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
@@ -31,5 +32,7 @@ def show_login_page():
         st.session_state["auth_url"] = auth_url
         st.session_state["auth_url_generated"] = True
         st.toast("Enlace de autenticación regenerado. Por favor, intenta iniciar sesión nuevamente.",icon="🔄")
+        sleep(1.5)
+        st.rerun()
 
     st.stop()
