@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -873,16 +873,48 @@ def construir_respuesta_solicitud_acuerdo_pago(*, solicitud: pd.Series, solicitu
                 st.warning("Debes oprimir el Botón de Generar PDF para poder generar el Acuerdo de Pago")
                 st.stop()
 
-            # Añadimos la Posibilidad de Subir Imágenes para Añadirlas al Final del PDF Generado
-            imagenes_subidas = st.file_uploader(
-                label="**Subir Imagen(es) para Añadir al Final del Acuerdo**",
-                type=["png", "jpg", "jpeg"],
+            # Añadimos la Posibilidad de Subir PDFs e Imágenes para Añadirlas al Final del PDF Generado
+            archivos_subidos = st.file_uploader(
+                label="**Subir PDF(s) e Imagen(es) para Añadir al Final del Acuerdo**",
+                type=["pdf", "png", "jpg", "jpeg"],
                 key="subir_imagenes_acuerdo_{}{}".format(solicitud['ID_Solicitud'], sufijo),
-                help="Suba imágenes (soportes de pago, comprobantes, etc.) que se añadirán al final del acuerdo de pago generado.",
+                help="Suba PDFs e imágenes (soportes de pago, comprobantes, etc.) que se añadirán al final del acuerdo de pago generado.",
                 accept_multiple_files=True,
             )
-            # Añadimos las Imágenes al Final del PDF Generado (si hay)
-            bytes_acuerdo = add_images_to_pdf(pdf_bytes=bytes_acuerdo, images=imagenes_subidas or [])
+
+            # Separamos los Archivos Subidos entre PDFs e Imágenes (Los PDFs se priorizan primero)
+            archivos_pdf = [f for f in (archivos_subidos or []) if (f.type == "application/pdf") or f.name.lower().endswith(".pdf")]
+            imagenes_subidas = [f for f in (archivos_subidos or []) if (f.type.startswith("image/")) or f.name.lower().endswith((".png", ".jpg", ".jpeg"))]
+
+            # Añadimos los PDFs y las Imágenes al Final del PDF Generado (si hay)
+            try:
+                # Obtenemos la Contraseña del PDF desde el Session State (Por Defecto la Cedula del Cliente)
+                password_pdf = st.session_state.get("pdf_password_{}{}".format(solicitud['ID_Solicitud'], sufijo), solicitud['Cedula'])
+                # Añadimos los PDFs al Final del PDF Generado
+                bytes_acuerdo = add_pdfs_to_pdf(
+                    pdf_bytes=bytes_acuerdo,
+                    archivos_pdf=archivos_pdf,
+                    contrasenia_inicial=password_pdf
+                )
+                # Añadimos las Imágenes al Final del PDF Generado (si hay)
+                bytes_acuerdo = add_images_to_pdf(pdf_bytes=bytes_acuerdo, images=imagenes_subidas)
+            except Exception as e:
+                st.info("El PDF esta protegido con contraseña. Por favor, ingresa la contraseña para continuar. ({})".format(
+                    str(e)
+                ), icon="ℹ️")
+                st.text_input(
+                    "**Contraseña del PDF**",
+                    key="pdf_password_{}{}".format(solicitud['ID_Solicitud'], sufijo),
+                    type="password",
+                    help="Ingresa la contraseña del PDF para guardarlo correctamente",
+                    persist_state="page",
+                )
+                if isinstance(e, WrongPasswordError):
+                    st.error("La contraseña ingresada es incorrecta. Por favor, intenta nuevamente.", icon="❌")
+                st.stop()
+
+            if st.session_state.get("pdf_password_{}{}".format(solicitud['ID_Solicitud'], sufijo), solicitud['Cedula']) != solicitud['Cedula']:
+                st.success("El PDF se ha guardado correctamente con la contraseña ingresada. (Por Defecto es la Cedula del Cliente)", icon="✅")
 
         # Creamos un popover para mostrar el PDF generado o subido
         with st.expander("**📄 Vista Previa del Acuerdo de Pago**", expanded=False):

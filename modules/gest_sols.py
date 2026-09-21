@@ -1847,6 +1847,40 @@ def convertir_imagenes_a_pdf(*, imagenes) -> bytes:
     )
     return pdf_buffer.getvalue()
 
+def add_pdfs_to_pdf(*, pdf_bytes: bytes, archivos_pdf, contrasenia_inicial: str | None = None) -> bytes:
+    """
+    Añade los PDFs Subidos al Final de un PDF existente como Páginas Adicionales.
+
+    Si no hay PDFs, devuelve el PDF original sin cambios.
+
+    Args:
+        pdf_bytes (bytes): Bytes del PDF base al que se añadirán los PDFs.
+        archivos_pdf: Lista de archivos PDF (provenientes de st.file_uploader) a añadir al final del PDF.
+        contrasenia_inicial (str | None): Contraseña inicial para desencriptar los PDFs.
+
+    Returns:
+        bytes: Bytes del PDF final con los PDFs añadidos al final.
+    """
+    # Paso 1: Si no hay PDFs, devolvemos el PDF Original sin cambios
+    if not archivos_pdf:
+        return pdf_bytes
+
+    # Paso 2: Unimos los PDFs Subidos en un solo PDF (Soporta PDFs Encriptados)
+    pdfs_subidos_bytes = unir_pdfs(archivos_pdf=archivos_pdf, contrasenia_inicial=contrasenia_inicial)
+    if not pdfs_subidos_bytes:
+        return pdf_bytes
+
+    # Paso 3: Unimos el PDF Base con el PDF de los Archivos al Final
+    merger = PdfWriter()
+    merger.append(PdfReader(BytesIO(pdf_bytes)))
+    merger.append(PdfReader(BytesIO(pdfs_subidos_bytes)))
+
+    pdf_buffer = BytesIO()
+    merger.write(pdf_buffer)
+    merger.close()
+
+    return pdf_buffer.getvalue()
+
 def add_images_to_pdf(*, pdf_bytes: bytes, images) -> bytes:
     """
     Añade las Imágenes al Final de un PDF existente como Páginas Adicionales.
