@@ -61,6 +61,12 @@ def initialize_services(debugging_mode: bool = False):
 # Función Auxiliar para Inicializar los Datos
 def initialize_data(debugging_mode: bool = False):
     anyChange = False
+    if not ("aliados_dict" in st.session_state):
+        anyChange = True
+        aliados_df = load_aliados_dataframe()
+        st.session_state["aliados_dict"] = crear_diccionario_aliados(aliados_df)
+        if debugging_mode:
+            st.success("Aliados Loaded")
     if not ("solicitudes_mec_df" in st.session_state):
         st.session_state["solicitudes_mec_df"] = load_current_month_solicitudes()
         anyChange = True
@@ -111,13 +117,6 @@ def initialize_data(debugging_mode: bool = False):
         st.session_state["special_user_permissions_dict"] = load_special_user_permissions()
         if debugging_mode:
             st.success("Special User Permissions Loaded")
-    if not ("aliados_dict" in st.session_state):
-        anyChange = True
-        aliados_df = load_aliados_dataframe()
-        st.session_state["aliados_dict"] = crear_diccionario_aliados(aliados_df)
-        if debugging_mode:
-            st.success("Aliados Loaded")
-
     if anyChange:
         st.toast("✅Datos Inicializados con Éxito", icon="⏳")
         st.rerun()
