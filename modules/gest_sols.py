@@ -21,7 +21,7 @@ from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador, obtener_nombres_negociadores_masivo
 from services import GoogleDriveService, GoogleMailService
-from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized
+from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
 
 METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago']
 
@@ -1303,6 +1303,149 @@ def obtener_resumen_liquidaciones(solicitudes_df: pd.DataFrame) -> dict[str, Any
         'deudas_clientes_tipo_sol': deudas_clientes_tipo_sol,
         'total_deudas_unicas': len(ids_deudas_unicos_general),
         'total_clientes_unicos': len(cedulas_unicas_general),
+    }
+
+def obtener_fecha_limite_respuesta_solicitud(*, solicitud: pd.Series, aliados_dict: dict) -> Optional[pd.Timestamp]:
+    """
+    Obtiene la Fecha Límite de Respuesta pactada de una solicitud.
+
+    Lee la llave 'Fecha_Limite_Respuesta' de la Metadata_Solicitud (Timestamp normalizado).
+    Si no existe (solicitudes antiguas), la calcula con el tiempo de respuesta del aliado
+    actual usando el Timestamp de subida de la solicitud. Si el aliado no está en el
+    diccionario o no hay Timestamp, devuelve None.
+
+    Args:
+        solicitud (pd.Series): Fila de la solicitud.
+        aliados_dict (dict): Diccionario de aliados {nombre: Aliado}.
+
+    Returns:
+        Optional[pd.Timestamp]: Fecha límite (normalizada) o None si no se puede determinar.
+    """
+    metadata = solicitud.get('Metadata_Solicitud')
+    if isinstance(metadata, dict):
+        fecha_limite = metadata.get('Fecha_Limite_Respuesta')
+        if fecha_limite is not None and pd.notna(fecha_limite):
+            return pd.Timestamp(fecha_limite).normalize()
+
+    casa_cobro = str(solicitud.get('Casa_Cobro') or '').strip()
+    aliado = aliados_dict.get(casa_cobro)
+    if aliado is None:
+        for clave, aliado_obj in aliados_dict.items():
+            if str(clave).strip().upper() == casa_cobro.upper():
+                aliado = aliado_obj
+                break
+    if aliado is None:
+        return None
+
+    timestamp = solicitud.get('Timestamp')
+    if pd.isna(timestamp):
+        return None
+    return move_business_days(date=pd.Timestamp(timestamp), delta_days=aliado.obtener_tr_dias()).normalize()
+
+def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFrame, aliados_dict: dict, top_n: int = 5, min_solicitudes: int = 1) -> dict[str, Any]:
+    """
+    Calcula las métricas de cumplimiento de tiempos de respuesta de las solicitudes por aliado.
+
+    Una solicitud se considera cumplida si fue respondida (Fecha_Respuesta no nula) y su fecha
+    normalizada es menor o igual a la Fecha Límite de Respuesta (el límite aplica hasta el final
+    del día). Solo se consideran solicitudes respondidas cuyo aliado exista en aliados_dict.
+
+    Args:
+        solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
+        aliados_dict (dict): Diccionario de aliados {nombre: Aliado}.
+        top_n (int, default 5): Cantidad de aliados a incluir en cada top.
+        min_solicitudes (int, default 1): Mínimo de solicitudes respondidas consideradas para entrar a los tops.
+
+    Returns:
+        dict[str, Any]: Diccionario con:
+            - 'total_respondidas': int, solicitudes respondidas consideradas.
+            - 'total_cumplidas': int, solicitudes cumplidas.
+            - 'cumplimiento_general': float|None, porcentaje 0-100.
+            - 'cumplimiento_por_tipo': dict[str, float], porcentaje 0-100 por Tipo_Solicitud.
+            - 'mejores_aliados': list[dict], entradas con 'casa_cobro', 'cumplimiento', 'total', 'cumplidas', 'tiempo_respuesta'.
+            - 'peores_aliados': list[dict], misma estructura.
+            - 'max_solicitudes_aliado': int, máximo de solicitudes respondidas consideradas por aliado.
+    """
+    resultado_vacio = {
+        'total_respondidas': 0,
+        'total_cumplidas': 0,
+        'cumplimiento_general': None,
+        'cumplimiento_por_tipo': {},
+        'mejores_aliados': [],
+        'peores_aliados': [],
+        'max_solicitudes_aliado': 0,
+    }
+    if solicitudes_df.empty:
+        return resultado_vacio
+
+    mask_respondidas = ~obtener_mascara_sin_responder(solicitudes_df)
+    solicitudes_respondidas = solicitudes_df[mask_respondidas]
+    if solicitudes_respondidas.empty:
+        return resultado_vacio
+
+    registros = []
+    for _, solicitud in solicitudes_respondidas.iterrows():
+        fecha_limite = obtener_fecha_limite_respuesta_solicitud(solicitud=solicitud, aliados_dict=aliados_dict)
+        if fecha_limite is None:
+            continue
+        casa_cobro = str(solicitud.get('Casa_Cobro') or '').strip()
+        aliado = aliados_dict.get(casa_cobro)
+        if aliado is None:
+            for clave, aliado_obj in aliados_dict.items():
+                if str(clave).strip().upper() == casa_cobro.upper():
+                    aliado = aliado_obj
+                    break
+        if aliado is None:
+            continue
+        fecha_respuesta = solicitud.get('Fecha_Respuesta')
+        if pd.isna(fecha_respuesta):
+            continue
+        fecha_respuesta = pd.Timestamp(fecha_respuesta)
+        cumplida = fecha_respuesta.normalize() <= fecha_limite
+        registros.append({
+            'casa_cobro': aliado.obtener_nombre(),
+            'tipo_solicitud': solicitud.get('Tipo_Solicitud'),
+            'cumplida': bool(cumplida),
+            'tiempo_respuesta': aliado.obtener_tr_horas_parsed(),
+        })
+
+    if not registros:
+        return resultado_vacio
+
+    registros_df = pd.DataFrame(registros)
+    total_respondidas = len(registros_df)
+    total_cumplidas = int(registros_df['cumplida'].sum())
+    cumplimiento_general = round(total_cumplidas / total_respondidas * 100, 2)
+
+    por_tipo = registros_df.groupby('tipo_solicitud')['cumplida'].mean() * 100
+    cumplimiento_por_tipo = {str(tipo): round(float(valor), 2) for tipo, valor in por_tipo.items()}
+
+    resumen_aliados = registros_df.groupby('casa_cobro').agg(
+        total=('cumplida', 'size'),
+        cumplidas=('cumplida', 'sum'),
+    ).reset_index()
+    resumen_aliados['cumplidas'] = resumen_aliados['cumplidas'].astype(int)
+    resumen_aliados['cumplimiento'] = (resumen_aliados['cumplidas'] / resumen_aliados['total']) * 100
+    resumen_aliados['tiempo_respuesta'] = registros_df.groupby('casa_cobro')['tiempo_respuesta'].first().values
+
+    resumen_aliados = resumen_aliados[resumen_aliados['total'] >= int(min_solicitudes)]
+
+    columnas_top = ['casa_cobro', 'cumplimiento', 'total', 'cumplidas', 'tiempo_respuesta']
+    mejores = resumen_aliados.sort_values(
+        by=['cumplimiento', 'total', 'casa_cobro'], ascending=[False, False, True]
+    ).head(top_n)
+    peores = resumen_aliados.sort_values(
+        by=['cumplimiento', 'total', 'casa_cobro'], ascending=[True, False, True]
+    ).head(top_n)
+
+    return {
+        'total_respondidas': total_respondidas,
+        'total_cumplidas': total_cumplidas,
+        'cumplimiento_general': cumplimiento_general,
+        'cumplimiento_por_tipo': cumplimiento_por_tipo,
+        'mejores_aliados': mejores[columnas_top].to_dict('records'),
+        'peores_aliados': peores[columnas_top].to_dict('records'),
+        'max_solicitudes_aliado': int(resumen_aliados['total'].max()) if not resumen_aliados.empty else 0,
     }
 
 # Función Auxiliar para Construir un Top (Top N) y la Posición del Usuario Actual

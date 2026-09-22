@@ -104,6 +104,13 @@ def normalizeMetadata(metadata: dict) -> dict:
         metadata.pop('Metodo_Pago', None)
     if 'Addendums' in metadata and metadata['Addendums']:
         metadata['Addendums'] = [normalizeDeuda(dd) for dd in metadata['Addendums']]
+    fecha_limite_respuesta = metadata.get('Fecha_Limite_Respuesta')
+    if fecha_limite_respuesta is not None and not (isinstance(fecha_limite_respuesta, str) and fecha_limite_respuesta.strip() == ''):
+        fecha_limite_respuesta = pd.to_datetime(fecha_limite_respuesta, errors='coerce')
+        if pd.notna(fecha_limite_respuesta):
+            metadata['Fecha_Limite_Respuesta'] = fecha_limite_respuesta.normalize()
+        else:
+            metadata.pop('Fecha_Limite_Respuesta', None)
     return metadata
 
 # Función Auxiliar para Añadir el Tipo de Liquidación

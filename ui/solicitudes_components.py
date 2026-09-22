@@ -18,7 +18,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_estado_liquidacion, obtener_fecha_limite_respuesta_solicitud, obtener_link_acuerdo_pago, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_metricas_cumplimiento_tiempos_respuesta, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -1104,6 +1104,32 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     solicitud_respuesta["Casa_Cobro"] = aliado_final.upper() if aliado_final else solicitud_respuesta["Casa_Cobro"]
     solicitud_respuesta["Estado_Solicitud"] = estado_final
     solicitud_respuesta["Metadata_Solicitud"]["Fue_Llamada"] = llamada_final
+
+    casa_cobro_original = str(solicitud["Casa_Cobro"]).strip()
+    casa_cobro_final = str(solicitud_respuesta["Casa_Cobro"]).strip()
+    fecha_limite_respuesta = obtener_fecha_limite_respuesta_solicitud(
+        solicitud=solicitud,
+        aliados_dict=st.session_state.get("aliados_dict", {}),
+    )
+    if (casa_cobro_final.upper() != casa_cobro_original.upper()) and pd.notna(solicitud["Timestamp"]):
+        aliado_nuevo = next(
+            (
+                aliado_obj
+                for clave, aliado_obj in st.session_state.get("aliados_dict", {}).items()
+                if str(clave).strip().upper() == casa_cobro_final.upper()
+            ),
+            None,
+        )
+        if aliado_nuevo is not None:
+            fecha_limite_nueva = move_business_days(
+                date=pd.Timestamp(solicitud["Timestamp"]),
+                delta_days=aliado_nuevo.obtener_tr_dias(),
+            ).normalize()
+            if fecha_limite_respuesta is not None:
+                fecha_limite_nueva = max(fecha_limite_nueva, pd.Timestamp(fecha_limite_respuesta))
+            fecha_limite_respuesta = fecha_limite_nueva
+    if fecha_limite_respuesta is not None:
+        solicitud_respuesta["Metadata_Solicitud"]["Fecha_Limite_Respuesta"] = pd.Timestamp(fecha_limite_respuesta)
 
     # Siguiente: Verificaciones antes de Seguir con Solicitud
     # Actualizamos Bajo Comité y Titular Ilocalizable
@@ -3011,65 +3037,51 @@ def mostrar_tiempos_solicitud(*,solicitud: pd.Series) -> None:
         )
 
     with colFechaLim:
-        # Primero tenemos que obtener la Fecha Límite del Aliado
-        if not solicitud['Casa_Cobro'] in st.session_state['aliados_dict']:
+        fecha_lim_resp = obtener_fecha_limite_respuesta_solicitud(
+            solicitud=solicitud,
+            aliados_dict=st.session_state.get('aliados_dict', {}),
+        )
+        if fecha_lim_resp is None:
             st.error("❌Aliado no Encontrado para Tiempos de Respuesta")
         else:
-            curr_aliado_obj = st.session_state['aliados_dict'][solicitud['Casa_Cobro']]
-            # Obtenemos la Fecha Límite desde la Fecha de Solicitud
-            # Obtenemos el #dias de tiempos de respuesta
-            dias_tr = curr_aliado_obj.obtener_tr_dias()
-            horas_tr = curr_aliado_obj.obtener_tr_horas()
-            # Definimos cuando sería eso en un futuro
-            fecha_lim_resp = move_business_days(date=solicitud['Timestamp'], delta_days=dias_tr).replace(hour=23,minute=29,second=59)
-            # Verificamos a Hoy la Diferencia
-            diff_bd_lim = getBDDaysDiffFloat(pd.Timestamp.now('America/Bogota').tz_localize(None), fecha_lim_resp)
-
-            # Ahora Vamos a Definir los Deltas
-            # Caso 1: Solicitud Respondida
-            if not es_solicitud_sin_responder(solicitud=solicitud):
-                # Verificamos si se cumple el tiempo de respuesta
-                diff_bd_rsp = getBDDaysDiffFloat(solicitud['Timestamp'], solicitud['Fecha_Respuesta'])
-
-                # Caso 2.1: Solicitud Respondida dentro del límite
-                if (diff_bd_rsp * 24) <= horas_tr:
-                    dlt_value = "Solicitud Respondida a Tiempo ({:.1f} horas límite)".format(
-                        horas_tr
+            fecha_lim_resp = pd.Timestamp(fecha_lim_resp).normalize()
+            fecha_lim_fin = fecha_lim_resp.replace(hour=23, minute=59, second=59)
+            if (not es_solicitud_sin_responder(solicitud=solicitud)) and pd.notna(solicitud['Fecha_Respuesta']):
+                fecha_respuesta = pd.Timestamp(solicitud['Fecha_Respuesta'])
+                if fecha_respuesta.normalize() <= fecha_lim_resp:
+                    dlt_value = "Solicitud Respondida a Tiempo (límite {})".format(
+                        fecha_lim_resp.strftime("%Y-%m-%d")
                     )
                     dlt_color = "green"
                     dlt_arrow = "up"
-                # Caso 2.2: Solicitud Respondida fuera del límite
                 else:
                     dlt_value = "Solicitud Respondida con Retraso de {:.1f} días".format(
-                        ((diff_bd_rsp * 24) - horas_tr)/24
+                        getBDDaysDiffFloat(fecha_lim_fin, fecha_respuesta)
                     )
                     dlt_color = "red"
                     dlt_arrow = "down"
-            # Caso 2: Solicitud sin Responder
             else:
-                # Caso 2.1: Aún a tiempo en terminos de tiempos de respuesta
-                if (diff_bd_lim * 24) <= horas_tr:
-                    dlt_value = "Solicitud aún a tiempo para responder ({:.1f} horas límite)".format(
-                        horas_tr
+                fecha_actual = pd.Timestamp.now('America/Bogota').tz_localize(None)
+                if fecha_actual <= fecha_lim_fin:
+                    dlt_value = "Solicitud aún a tiempo para responder (límite {})".format(
+                        fecha_lim_resp.strftime("%Y-%m-%d")
                     )
                     dlt_color = "green"
                     dlt_arrow = "up"
-                # Caso 2.2: Tiempo de Respuesta pasado
                 else:
                     dlt_value = "Solicitud tardía para responder (pasado por {:.1f} días)".format(
-                        ((diff_bd_lim * 24) - horas_tr) / 24
+                        getBDDaysDiffFloat(fecha_lim_fin, fecha_actual)
                     )
-                    dlt_color= "red"
+                    dlt_color = "red"
                     dlt_arrow = "down"
 
-            # Procedemos a Mostrar la Métrica
             st.metric(
                 label="**Límite de Tiempo de Respuesta**",
-                value = fecha_lim_resp.strftime("%Y-%m-%d %X"),
-                delta = dlt_value,
-                delta_color= dlt_color,
-                delta_arrow= dlt_arrow,
-                help="El Límite a la Respuesta de Solicitud según los tiempos de respuesta en 'Alianzas Vigentes'"
+                value=fecha_lim_resp.strftime("%Y-%m-%d"),
+                delta=dlt_value,
+                delta_color=dlt_color,
+                delta_arrow=dlt_arrow,
+                help="El Límite a la Respuesta de Solicitud pactado con el Aliado al momento de subir la solicitud."
             )
 
     if "Fecha_Solicitado" in solicitud["Metadata_Solicitud"]:
@@ -3868,6 +3880,87 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                     for tipo_sol, resumen in resumen_liquidaciones['deudas_clientes_tipo_sol'].items():
                         st.caption("**{}**: {} Clientes".format(tipo_sol, resumen['num_clientes_unicos']))
 
+        with st.expander("**⏱️ KPIs de Tiempos de Respuesta**", expanded=False, type="compact"):
+            aliados_dict = st.session_state.get("aliados_dict", {})
+
+            mask_respondidas = ~mask_sin_responder
+            casas_normalizadas = solicitudes['Casa_Cobro'].astype(str).str.strip().str.upper()
+            claves_aliados = {str(clave).strip().upper() for clave in aliados_dict.keys()}
+            conteos_aliados = casas_normalizadas[mask_respondidas & casas_normalizadas.isin(claves_aliados)].value_counts()
+            max_solicitudes_aliado = int(conteos_aliados.max()) if len(conteos_aliados) > 0 else 1
+
+            colMuestraTopAliados, colMinSolicitudesAliados = st.columns(2, vertical_alignment="center")
+
+            with colMuestraTopAliados:
+                rsl_muestra_top_aliados = st.slider(
+                    label="Muestra del Top (Aliados a Mostrar)",
+                    value=5,
+                    min_value=3,
+                    max_value=20,
+                    step=1,
+                    help="Deslizar para elegir cuántos aliados se muestran en cada Top de tiempos de respuesta (mínimo 3, máximo 20)",
+                    format="%d Aliados",
+                    key="slider_muestra_top_aliados_tiempos",
+                )
+
+            with colMinSolicitudesAliados:
+                rsl_min_solicitudes_aliados = st.slider(
+                    label="Solicitudes Mínimas para estar en el Top",
+                    value=1,
+                    min_value=1,
+                    max_value=max(2, max_solicitudes_aliado),
+                    step=1,
+                    help="Deslizar para filtrar los aliados que tengan como mínimo las solicitudes respondidas indicadas",
+                    format="%d Solicitudes",
+                    key="slider_min_solicitudes_aliados_tiempos",
+                )
+
+            metricas_tiempos = obtener_metricas_cumplimiento_tiempos_respuesta(
+                solicitudes_df=solicitudes,
+                aliados_dict=aliados_dict,
+                top_n=rsl_muestra_top_aliados,
+                min_solicitudes=rsl_min_solicitudes_aliados,
+            )
+
+            if metricas_tiempos['total_respondidas'] == 0:
+                st.info("No hay solicitudes respondidas con los filtros aplicados.", icon="ℹ️")
+            else:
+                colCumplimiento, colMejoresAliados, colPeoresAliados = st.columns(3, border=True, gap="small")
+
+                with colCumplimiento:
+                    cumplimiento_general = metricas_tiempos['cumplimiento_general']
+                    pct_cumplimiento = float(cumplimiento_general) if pd.notna(cumplimiento_general) else 0.0
+                    st.metric(
+                        label="**Cumplimiento de Tiempos de Respuesta**",
+                        value="{:.1f}%".format(pct_cumplimiento),
+                        help="Porcentaje de solicitudes respondidas dentro de la fecha límite pactada con el aliado.",
+                        delta="{} de {} Solicitudes".format(
+                            metricas_tiempos['total_cumplidas'], metricas_tiempos['total_respondidas']
+                        ),
+                        delta_color="green" if pct_cumplimiento >= 90 else "yellow" if pct_cumplimiento >= 80 else "red",
+                        delta_arrow="up" if pct_cumplimiento >= 80 else "down",
+                    )
+                    for tipo, pct_tipo in metricas_tiempos['cumplimiento_por_tipo'].items():
+                        st.caption("**{}**: {:.1f}%".format(tipo, pct_tipo))
+
+                with colMejoresAliados:
+                    _renderizar_columna_top_aliados(
+                        titulo="Mejores Aliados",
+                        emoji_titulo="🏆",
+                        caption="Aliados con mayor cumplimiento de tiempos de respuesta",
+                        entradas=metricas_tiempos['mejores_aliados'],
+                        son_peores=False,
+                    )
+
+                with colPeoresAliados:
+                    _renderizar_columna_top_aliados(
+                        titulo="Peores Aliados",
+                        emoji_titulo="🐌",
+                        caption="Aliados con menor cumplimiento de tiempos de respuesta",
+                        entradas=metricas_tiempos['peores_aliados'],
+                        son_peores=True,
+                    )
+
     # Añadimos un Divisor
     st.divider()
 
@@ -4226,6 +4319,47 @@ def _renderizar_columna_top(
 
     # Paso 4: Renderizar el HTML de la Columna
     st.markdown("".join(filas_html), unsafe_allow_html=True)
+
+# Función Auxiliar para Obtener el Estilo de una Entrada del Top de Aliados
+def _obtener_estilo_entrada_top_aliado(*, puesto: int, son_peores: bool) -> tuple[str, str]:
+    if not son_peores:
+        if puesto <= 3:
+            return _obtener_estilo_entrada_top(puesto)
+        return "🌟", "background: linear-gradient(135deg, #66bb6a, #2e7d32); color: #ffffff;"
+    if puesto <= 3:
+        return "🚨", "background: linear-gradient(135deg, #e53935, #8e0000); color: #ffffff;"
+    return "⚠️", "background: linear-gradient(135deg, #ffb74d, #ef6c00); color: #212121;"
+
+# Función Auxiliar para Renderizar una Columna del Top de Aliados con su Tiempo de Respuesta
+def _renderizar_columna_top_aliados(
+    *,
+    titulo: str,
+    emoji_titulo: str,
+    caption: str,
+    entradas: list[dict[str, Any]],
+    son_peores: bool,
+) -> None:
+    st.markdown("### {} **{}**".format(emoji_titulo, titulo))
+
+    st.caption(caption)
+
+    if not entradas:
+        st.info("No hay aliados que cumplan los filtros seleccionados.", icon="ℹ️")
+        return
+
+    for i, entrada in enumerate(entradas, start=1):
+        emoji, estilo = _obtener_estilo_entrada_top_aliado(puesto=i, son_peores=son_peores)
+        texto = "{} {}: {:.1f}% ({}/{} Solicitudes)".format(
+            emoji, entrada['casa_cobro'], entrada['cumplimiento'], entrada['cumplidas'], entrada['total']
+        )
+        if (not son_peores) and (i > 3):
+            texto = "<strong>{}</strong>".format(texto)
+        with st.container():
+            st.markdown(
+                '<div style="{} padding: 8px 12px; border-radius: 10px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo, texto),
+                unsafe_allow_html=True,
+            )
+            st.caption("Tiempo de Respuesta: {}".format(entrada['tiempo_respuesta']))
 
 # Función Auxiliar para Mostrar el Top de Solicitudes, Efectividad y Liquidaciones de los Negociadores
 def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
