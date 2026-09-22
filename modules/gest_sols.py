@@ -1362,6 +1362,7 @@ def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFr
             - 'total_cumplidas': int, solicitudes cumplidas.
             - 'cumplimiento_general': float|None, porcentaje 0-100.
             - 'cumplimiento_por_tipo': dict[str, float], porcentaje 0-100 por Tipo_Solicitud.
+            - 'totales_por_tipo': dict[str, dict], conteos 'cumplidas' y 'total' por Tipo_Solicitud.
             - 'mejores_aliados': list[dict], entradas con 'casa_cobro', 'cumplimiento', 'total', 'cumplidas', 'tiempo_respuesta'.
             - 'peores_aliados': list[dict], misma estructura.
             - 'max_solicitudes_aliado': int, máximo de solicitudes respondidas consideradas por aliado.
@@ -1371,6 +1372,7 @@ def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFr
         'total_cumplidas': 0,
         'cumplimiento_general': None,
         'cumplimiento_por_tipo': {},
+        'totales_por_tipo': {},
         'mejores_aliados': [],
         'peores_aliados': [],
         'max_solicitudes_aliado': 0,
@@ -1420,6 +1422,12 @@ def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFr
     por_tipo = registros_df.groupby('tipo_solicitud')['cumplida'].mean() * 100
     cumplimiento_por_tipo = {str(tipo): round(float(valor), 2) for tipo, valor in por_tipo.items()}
 
+    conteos_por_tipo = registros_df.groupby('tipo_solicitud')['cumplida'].agg(['sum', 'size'])
+    totales_por_tipo = {
+        str(tipo): {'cumplidas': int(fila['sum']), 'total': int(fila['size'])}
+        for tipo, fila in conteos_por_tipo.iterrows()
+    }
+
     resumen_aliados = registros_df.groupby('casa_cobro').agg(
         total=('cumplida', 'size'),
         cumplidas=('cumplida', 'sum'),
@@ -1443,6 +1451,7 @@ def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFr
         'total_cumplidas': total_cumplidas,
         'cumplimiento_general': cumplimiento_general,
         'cumplimiento_por_tipo': cumplimiento_por_tipo,
+        'totales_por_tipo': totales_por_tipo,
         'mejores_aliados': mejores[columnas_top].to_dict('records'),
         'peores_aliados': peores[columnas_top].to_dict('records'),
         'max_solicitudes_aliado': int(resumen_aliados['total'].max()) if not resumen_aliados.empty else 0,

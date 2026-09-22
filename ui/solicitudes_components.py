@@ -3941,7 +3941,18 @@ def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
                         delta_arrow="up" if pct_cumplimiento >= 80 else "down",
                     )
                     for tipo, pct_tipo in metricas_tiempos['cumplimiento_por_tipo'].items():
-                        st.caption("**{}**: {:.1f}%".format(tipo, pct_tipo))
+                        pct_tipo = float(pct_tipo)
+                        conteos_tipo = metricas_tiempos['totales_por_tipo'].get(tipo, {})
+                        st.metric(
+                            label="**Cumplimiento: {}**".format(tipo),
+                            value="{:.1f}%".format(pct_tipo),
+                            help="Porcentaje de solicitudes de tipo {} respondidas dentro de la fecha límite pactada con el aliado.".format(tipo),
+                            delta="{} de {} Solicitudes".format(
+                                conteos_tipo.get('cumplidas', 0), conteos_tipo.get('total', 0)
+                            ),
+                            delta_color="green" if pct_tipo >= 90 else "yellow" if pct_tipo >= 80 else "red",
+                            delta_arrow="up" if pct_tipo >= 80 else "down",
+                        )
 
                 with colMejoresAliados:
                     _renderizar_columna_top_aliados(
