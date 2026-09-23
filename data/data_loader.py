@@ -225,9 +225,6 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
     # Obtenemos el DF de la Hoja "Solicitudes_MEC"
     solicitudes_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, 'Solicitudes_MEC')
 
-    # Guardamos los Headers en el Session State
-    st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
-
     # Limpiamos el ID de la Solicitud desde el inicio para verificar los duplicados
     solicitudes_df['ID_Solicitud'] = solicitudes_df['ID_Solicitud'].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
 
@@ -238,6 +235,9 @@ def load_solicitudes_mec() -> DataFrame[SolicitudesSchema]:
 
     # Por último, reiniciamos los cambios locales
     st.session_state['local_solicitudes_changes'] = []
+
+    # Guardamos los Headers en el Session State
+    st.session_state["solicitudes_headers"] = list(solicitudes_df.columns)
 
     # Devolvemos el DataFrame
     return solicitudes_df # type: ignore
