@@ -23,7 +23,7 @@ from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negoci
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
 
-METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago']
+METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago','Modificaciones']
 
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """

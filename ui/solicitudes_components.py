@@ -13,6 +13,7 @@ import plotly.express as px
 from pypdf.errors import WrongPasswordError
 # Librerías Locales
 from data.data_loader import load_app_config, obtener_ultima_actualizacion_deudas
+from data.data_models import MetadataModificacion, ModificacionSolicitud
 from data.data_uploader import upload_form_response_to_google_sheets, upload_log_to_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
@@ -1026,6 +1027,52 @@ def limpiar_estado_respuesta_solicitud(*, id_solicitud: str) -> None:
         if any(key.startswith(prefix) for prefix in prefijos_con_id): # type: ignore
             del st.session_state[key]
 
+# Lista de Llaves de la Metadata de la Solicitud que se Guardan en una Modificación
+LLAVES_METADATA_MODIFICACION = [
+    'Comentario_Ejecutivo',
+    'Estado_Comite',
+    'Estado_Titular_Ilocalizable',
+    'Pago_Total_Obligatorio',
+    'Max_Descuento_Otorgado',
+    'Es_Directo_Base',
+    'Addendums',
+]
+
+# Función Auxiliar para Construir el Snapshot de una Respuesta que será Modificada
+def crear_modificacion_solicitud(*, solicitud: pd.Series) -> ModificacionSolicitud:
+    metadata_solicitud = solicitud["Metadata_Solicitud"]
+    metadata_modificacion: MetadataModificacion = {
+        llave: metadata_solicitud[llave]
+        for llave in LLAVES_METADATA_MODIFICACION
+        if llave in metadata_solicitud
+    }
+    json_respuesta = solicitud.get("JSON_Respuesta")
+    if not isinstance(json_respuesta, list):
+        json_respuesta = []
+    modificacion: ModificacionSolicitud = {
+        'Fecha_Respuesta': solicitud["Fecha_Respuesta"],
+        'Estado_Solicitud': solicitud["Estado_Solicitud"],
+        'Ejecutivo': solicitud["Ejecutivo"],
+        'JSON_Respuesta': [dict(deuda) for deuda in json_respuesta],
+        'Metadata': metadata_modificacion,
+    }
+    fecha_limite_pago = solicitud.get("Fecha_Limite_Pago")
+    if (
+        (solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"])
+        and (solicitud["Estado_Solicitud"] == "Exitosa")
+        and pd.notna(fecha_limite_pago)
+    ):
+        modificacion["Fecha_Limite_Pago"] = fecha_limite_pago
+    return modificacion
+
+# Función Auxiliar para Añadir la Respuesta Anterior al Histórico de Modificaciones
+def agregar_modificacion_a_respuesta(*, solicitud: pd.Series, solicitud_respuesta: pd.Series) -> None:
+    metadata_respuesta = dict(solicitud_respuesta["Metadata_Solicitud"])
+    modificaciones = list(solicitud["Metadata_Solicitud"].get("Modificaciones", []))
+    modificaciones.append(crear_modificacion_solicitud(solicitud=solicitud))
+    metadata_respuesta["Modificaciones"] = modificaciones
+    solicitud_respuesta["Metadata_Solicitud"] = metadata_respuesta
+
 # Función Auxiliar para Construir la Respuesta de una Solicitud
 # Mantiene la Estructura de los Componentes Relevantes para la Validación y
 # devuelve la solicitud_respuesta construida (Los componentes de otros tipos
@@ -1036,6 +1083,10 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
 
     # Creamos una Copia de la solicitud que será la respuesta
     solicitud_respuesta = solicitud.copy()
+
+    # Si es Modo Edición, Guardamos la Respuesta Anterior en el Histórico de Modificaciones
+    if modo_edicion:
+        agregar_modificacion_a_respuesta(solicitud=solicitud, solicitud_respuesta=solicitud_respuesta)
 
     # A la Solicitud Respuesta le cambiamos la Fecha_Esperada_Pago a "" si es NaN
     if pd.isna(solicitud_respuesta["Fecha_Esperada_Pago"]):
@@ -2831,6 +2882,182 @@ def mostrar_valores_bajo_comite(*, solicitud: pd.Series) -> None:
     with st.expander("**💰 Detalles de los Valores por Deuda**", expanded=True):
         mostrar_detalles_respuesta_deuda(solicitud=solicitud)
 
+# Función Auxiliar para Construir una Solicitud a partir de una Modificación
+def construir_solicitud_desde_modificacion(*, solicitud: pd.Series, modificacion: ModificacionSolicitud) -> pd.Series:
+    solicitud_modificacion = solicitud.copy()
+    metadata_modificacion = dict(solicitud["Metadata_Solicitud"])
+    metadata_modificacion.update(modificacion.get("Metadata", {}))
+    solicitud_modificacion["Metadata_Solicitud"] = metadata_modificacion
+    json_respuesta = modificacion.get("JSON_Respuesta")
+    solicitud_modificacion["JSON_Respuesta"] = json_respuesta if isinstance(json_respuesta, list) else []
+    solicitud_modificacion["Estado_Solicitud"] = modificacion.get("Estado_Solicitud", solicitud["Estado_Solicitud"])
+    solicitud_modificacion["Fecha_Respuesta"] = modificacion.get("Fecha_Respuesta", solicitud["Fecha_Respuesta"])
+    solicitud_modificacion["Ejecutivo"] = modificacion.get("Ejecutivo", solicitud["Ejecutivo"])
+    if pd.notna(modificacion.get("Fecha_Limite_Pago")):
+        solicitud_modificacion["Fecha_Limite_Pago"] = modificacion["Fecha_Limite_Pago"] # type: ignore
+    return solicitud_modificacion
+
+# Función Auxiliar para Mostrar una Modificación de una Solicitud
+def mostrar_modificacion_solicitud(*, solicitud: pd.Series, modificacion: ModificacionSolicitud, indice: int) -> None:
+    metadata_modificacion = modificacion.get("Metadata", {})
+    estado_modificacion = modificacion.get("Estado_Solicitud", "Sin Información")
+    solicitud_modificacion = construir_solicitud_desde_modificacion(solicitud=solicitud, modificacion=modificacion)
+
+    with st.container(border=True):
+        st.markdown("#### **🕓 Modificación #{}**".format(indice))
+
+        # Creamos 3 Columnas: Fecha de Respuesta, Estado de Solicitud y Ejecutivo a Cargo
+        colFechaRespuesta, colEstadoSolicitud, colEjecutivo = st.columns([2, 2, 2], vertical_alignment="center")
+
+        with colFechaRespuesta:
+            fecha_respuesta = pd.to_datetime(modificacion.get("Fecha_Respuesta"), errors="coerce")
+            if pd.notnull(fecha_respuesta):
+                dias_habiles = getBDDaysDiffFloat(pd.Timestamp(solicitud["Timestamp"]), fecha_respuesta)
+                st.metric(
+                    label="**Fecha de Respuesta:**",
+                    value=fecha_respuesta.strftime("%Y-%m-%d %X"),
+                    help="La Fecha de Respuesta de esta versión de la solicitud",
+                    delta="En {:.1f} días hábiles desde la Solicitud".format(dias_habiles),
+                    delta_color="green" if dias_habiles <= 5 else "red",
+                    delta_arrow="up" if dias_habiles <= 5 else "down",
+                )
+            else:
+                st.metric(
+                    label="**Fecha de Respuesta:**",
+                    value="No Brindada",
+                    help="La Fecha de Respuesta de esta versión de la solicitud",
+                )
+
+        with colEstadoSolicitud:
+            st.metric(
+                label="**Estado de Solicitud:**",
+                value=estado_modificacion or "Sin Información",
+                help="El Estado que tenía la solicitud en esta versión de la respuesta",
+                delta="Priorizar Pago" if estado_modificacion == "Exitosa" else "Revisar Comentario",
+                delta_color="green" if estado_modificacion == "Exitosa" else "grey",
+            )
+
+        with colEjecutivo:
+            st.metric(
+                label="**Ejecutivo a Cargo:**",
+                value=modificacion.get("Ejecutivo") or "Sin Asignar",
+                help="El Ejecutivo que atendió esta versión de la respuesta",
+            )
+
+        # Mostramos el Comentario del Ejecutivo de la Modificación
+        comentario_ejecutivo = metadata_modificacion.get("Comentario_Ejecutivo", "") or "Sin Comentario Adicional"
+
+        if estado_modificacion in ["Bajo Comité", "Titular Ilocalizable"]:
+            st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
+            mostrar_subestado_transitorio(solicitud=solicitud_modificacion)
+            mostrar_valores_bajo_comite(solicitud=solicitud_modificacion)
+
+        elif estado_modificacion != "Exitosa":
+            st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
+
+        else:
+            # Calculamos los Montos de la Respuesta de la Modificación
+            addendums = metadata_modificacion.get("Addendums")
+            if not isinstance(addendums, list):
+                addendums = []
+            deudas_respuesta = solicitud_modificacion["JSON_Respuesta"] + addendums
+            ids_respuesta = [str(deuda["Id_Deuda"]) for deuda in deudas_respuesta]
+            monto_total_respuesta = sum(cleanNumber(deuda["Monto_Propuesto"]) for deuda in deudas_respuesta)
+            monto_actual_respuesta = sum(
+                cleanNumber(deuda["Monto_Actual"]) for deuda in solicitud["Datos_Solicitud"] if str(deuda["Id_Deuda"]) in ids_respuesta
+            )
+            es_acuerdo = solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]
+            tiene_max_descuento = "Max_Descuento_Otorgado" in metadata_modificacion
+            fecha_limite_pago = pd.to_datetime(modificacion.get("Fecha_Limite_Pago"), errors="coerce")
+
+            # Creamos 2 a 4 Columnas: Monto Total, Pago Total, (Descuento Máximo) y (Fecha Límite si es Acuerdo)
+            num_columnas = 2 + int(tiene_max_descuento) + int(es_acuerdo and pd.notnull(fecha_limite_pago))
+            columnas = st.columns(num_columnas)
+
+            with columnas[0]:
+                st.metric(
+                    label="**Monto Total de Respuesta:**",
+                    value=formatNumber(monto_total_respuesta),
+                    help="La suma de los montos propuestos de esta versión de la respuesta",
+                    delta="{:.1%} de Descuento".format(1 - monto_total_respuesta / monto_actual_respuesta) if monto_actual_respuesta > 0 else "N/A",
+                )
+
+            with columnas[1]:
+                aplica_pago_total = bool(metadata_modificacion.get("Pago_Total_Obligatorio", False))
+                st.metric(
+                    label="**Pago Total Obligatorio:**",
+                    value="Sí" if aplica_pago_total else "No",
+                    help="Indica si esta versión de la respuesta obligaba a pagar todas las deudas",
+                    delta="Se debían pagar todas las deudas" if aplica_pago_total else "Se podían pagar deudas individualmente",
+                )
+
+            posicion_columna = 2
+            if tiene_max_descuento:
+                with columnas[posicion_columna]:
+                    st.toggle(
+                        label="**Máximo Descuento Otorgado**",
+                        value=bool(metadata_modificacion.get("Max_Descuento_Otorgado", False)),
+                        help="Activado significa que no se podía realizar una contraoferta sobre esta versión de la respuesta",
+                        disabled=True,
+                    )
+                posicion_columna += 1
+
+            if es_acuerdo and pd.notnull(fecha_limite_pago):
+                with columnas[posicion_columna]:
+                    ahora = pd.Timestamp.now(tz="America/Bogota").tz_localize(None)
+                    diferencia_dias = getBDDaysDiffFloat(fecha_limite_pago, ahora)
+                    ya_paso = fecha_limite_pago < ahora.normalize()
+                    st.metric(
+                        label="**Fecha Límite de Pago:**",
+                        value=fecha_limite_pago.strftime("%Y-%m-%d"),
+                        help="La Fecha Límite de Pago que tenía esta versión de la respuesta",
+                        delta="{:.1f} días hábiles {}".format(abs(diferencia_dias), "de retraso" if ya_paso else "para pagar"),
+                        delta_color="red" if ya_paso else "green",
+                        delta_arrow="down" if ya_paso else "up",
+                    )
+
+            # Mostramos el Detalle por Deuda de la Respuesta de la Modificación
+            with st.expander("**💰 Detalles de la Respuesta por Deuda**", expanded=False):
+                mostrar_detalles_respuesta_deuda(solicitud=solicitud_modificacion)
+
+            st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
+
+# Función para Abrir el Diálogo con el Histórico de Modificaciones de una Solicitud
+@st.dialog("🕓 Historial de Modificaciones", dismissible=True, width="large", on_dismiss="rerun")
+def dialog_historial_modificaciones(*, solicitud: pd.Series) -> None:
+    modificaciones = solicitud["Metadata_Solicitud"].get("Modificaciones", [])
+    if not modificaciones:
+        st.info("La Solicitud `{}` no tiene Modificaciones Registradas.".format(solicitud["ID_Solicitud"]), icon="ℹ️")
+        st.stop()
+
+    st.warning(
+        "Las siguientes Modificaciones corresponden a Respuestas Anteriores de la Solicitud `{}`. "
+        "Sus valores NO deben tomarse como válidos: contacte al Ejecutivo para entender la razón de ser de cada modificación.".format(
+            solicitud["ID_Solicitud"]
+        ),
+        icon="⚠️",
+    )
+
+    for indice, modificacion in enumerate(modificaciones, start=1):
+        mostrar_modificacion_solicitud(solicitud=solicitud, modificacion=modificacion, indice=indice)
+
+# Función Auxiliar para Mostrar el Botón de Ver Modificaciones de una Solicitud
+def mostrar_boton_modificaciones(*, solicitud: pd.Series) -> None:
+    modificaciones = solicitud["Metadata_Solicitud"].get("Modificaciones", [])
+    if not modificaciones:
+        return
+
+    st.space("medium")
+    if st.button(
+        label="**Ver Historial de Modificaciones ({})**".format(len(modificaciones)),
+        key="ver_modificaciones_{}".format(solicitud["ID_Solicitud"]),
+        help="Haga clic para ver todas las modificaciones que ha tenido la respuesta de esta solicitud.",
+        type="secondary",
+        icon="🕓",
+        width="stretch",
+    ):
+        dialog_historial_modificaciones(solicitud=solicitud)
+
 # Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud
 def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Literal['nego','ejecutivo'], expander_key: str, default_expand_debts: bool = True):
     # Siguiente Paso: Mostramos la Info de la Respuesta
@@ -3322,6 +3549,8 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 expander_key=expander_key
             )
 
+        mostrar_boton_modificaciones(solicitud=solicitud)
+
 # Función Auxiliar para mostrar los Botones de Cancelar o Reactivar una Solicitud (Vista Negociador)
 def mostrar_botones_cancelar_reactivar_solicitud(*, solicitud: pd.Series) -> None:
     # Solo aplica para Solicitudes No Históricas subidas por el Negociador Actual
@@ -3524,12 +3753,14 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             if solicitud_historica:
                 st.error("No se puede modificar una solicitud Histórica",icon="❌",title="Sin Posibilidad de Modificar")
             # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
+            mostrar_boton_modificaciones(solicitud=solicitud)
             return 
 
         mostrar_subestado_transitorio(solicitud=solicitud)
 
         if subestado is not None:
             mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
+            mostrar_boton_modificaciones(solicitud=solicitud)
             return
 
         # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
@@ -3537,6 +3768,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
             # Mostramos la Opción de Cancelar la Solicitud al Final de la Vista
             mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
+            mostrar_boton_modificaciones(solicitud=solicitud)
             return
 
         st.divider()
@@ -3548,6 +3780,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
 
         if solicitud['Estado_Solicitud'] != 'Exitosa':
+            mostrar_boton_modificaciones(solicitud=solicitud)
             return
 
         # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
@@ -3632,6 +3865,8 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             with colBotonCopiar:
                 txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
+
+        mostrar_boton_modificaciones(solicitud=solicitud)
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:

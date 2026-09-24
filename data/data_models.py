@@ -18,6 +18,23 @@ class DeudasSolicitud(TypedDict):
     Monto_Actual: NotRequired[float]
     Monto_Propuesto: NotRequired[float]
 
+class MetadataModificacion(TypedDict):
+    Comentario_Ejecutivo: NotRequired[str]
+    Estado_Comite: NotRequired[int]
+    Estado_Titular_Ilocalizable: NotRequired[int]
+    Pago_Total_Obligatorio: NotRequired[bool]
+    Max_Descuento_Otorgado: NotRequired[bool]
+    Es_Directo_Base: NotRequired[bool]
+    Addendums: NotRequired[List[DeudasSolicitud]]
+
+class ModificacionSolicitud(TypedDict):
+    Fecha_Respuesta: datetime
+    Estado_Solicitud: str
+    Ejecutivo: str
+    JSON_Respuesta: List[DeudasSolicitud]
+    Fecha_Limite_Pago: NotRequired[datetime]
+    Metadata: MetadataModificacion
+
 class MetadataSolicitud(TypedDict):
     Comentario_Negociador: str
     Nombre_Cliente: str
@@ -36,6 +53,7 @@ class MetadataSolicitud(TypedDict):
     Es_Directo_Base: NotRequired[bool]
     Fecha_Limite_Respuesta: NotRequired[datetime]
     Addendums: NotRequired[List[DeudasSolicitud]]
+    Modificaciones: NotRequired[List[ModificacionSolicitud]]
 
 class SolicitudesSchema(pa.DataFrameModel):
     """

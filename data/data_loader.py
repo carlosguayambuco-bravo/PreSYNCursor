@@ -94,6 +94,31 @@ def normalizeDeuda(deuda: dict) -> dict:
         deuda['Numero_Credito'] = str(numero_credito).strip()
     return deuda
 
+# Función Auxiliar para Normalizar una Modificación al tipo ModificacionSolicitud
+def normalizeModificacion(modificacion: dict) -> dict:
+    modificacion = dict(modificacion)
+    for col in ['Fecha_Respuesta', 'Fecha_Limite_Pago']:
+        if col not in modificacion:
+            continue
+        fecha = pd.to_datetime(modificacion.get(col), errors='coerce')
+        if pd.notna(fecha):
+            modificacion[col] = fecha
+        else:
+            modificacion.pop(col, None)
+    json_respuesta = modificacion.get('JSON_Respuesta')
+    if isinstance(json_respuesta, list):
+        modificacion['JSON_Respuesta'] = [normalizeDeuda(dd) for dd in json_respuesta if isinstance(dd, dict)]
+    metadata = modificacion.get('Metadata')
+    if isinstance(metadata, dict):
+        metadata = dict(metadata)
+        comentario = metadata.get('Comentario_Ejecutivo')
+        if comentario is not None and not isinstance(comentario, str):
+            metadata['Comentario_Ejecutivo'] = str(comentario)
+        if metadata.get('Addendums'):
+            metadata['Addendums'] = [normalizeDeuda(dd) for dd in metadata['Addendums']]
+        modificacion['Metadata'] = metadata
+    return modificacion
+
 # Función Auxiliar para Normalizar la Metadata al tipo MetadataSolicitud
 def normalizeMetadata(metadata: dict) -> dict:
     metadata = dict(metadata)
@@ -104,6 +129,8 @@ def normalizeMetadata(metadata: dict) -> dict:
         metadata.pop('Metodo_Pago', None)
     if 'Addendums' in metadata and metadata['Addendums']:
         metadata['Addendums'] = [normalizeDeuda(dd) for dd in metadata['Addendums']]
+    if metadata.get('Modificaciones'):
+        metadata['Modificaciones'] = [normalizeModificacion(md) for md in metadata['Modificaciones']]
     fecha_limite_respuesta = metadata.get('Fecha_Limite_Respuesta')
     if fecha_limite_respuesta is not None and not (isinstance(fecha_limite_respuesta, str) and fecha_limite_respuesta.strip() == ''):
         fecha_limite_respuesta = pd.to_datetime(fecha_limite_respuesta, errors='coerce')
