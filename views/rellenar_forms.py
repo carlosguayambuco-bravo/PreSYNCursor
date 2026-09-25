@@ -358,7 +358,7 @@ for deuda_info in info_completa_deudas:
 
 # Alerta 6: Verificar que los Montos Propuestos no excedan la Contrapropuesta Máxima Relativa del Aliado
 # Esto solo Aplica para ofertas de acuerdo y validaciones cuyas deudas tengan un descuento en base
-if tipo_solicitud in ['Validación', 'Oferta de Acuerdo'] and aliado_cambiado: # Que se haya cambiado el aliado implica que es directo base y no tiene restricciones de contrapropuesta
+if tipo_solicitud in ['Validación', 'Oferta de Acuerdo'] and aliado_cambiado and not masivas_locales.empty: # Que se haya cambiado el aliado implica que es directo base y no tiene restricciones de contrapropuesta
     contraprop_max_relativa = aliadosDict[aliado_seleccionado].obtener_contraprop_max_relativa()
     monto_en_base = masivas_locales[masivas_locales['Casa_Cobro'] == aliado_seleccionado].groupby('Id_Deuda')['PaB_Propuesta'].min().sum()
     monto_solicitado = sum(deuda_info['Monto_Propuesto'] for deuda_info in info_completa_deudas)
