@@ -7,7 +7,7 @@ import pandas as pd
 # Librerías Propias
 from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
-from modules.forms import cumple_condicion_actualizacion_deudas
+from modules.forms import cumple_condicion_actualizacion_deudas, alertar_excedencia_contraprop_max_relativa
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, move_business_days
 
@@ -355,6 +355,24 @@ for deuda_info in info_completa_deudas:
     if deuda_info['Monto_Propuesto'] <= 0:
         st.error(f"El monto propuesto para la deuda {deuda_info['Id_Deuda']} es menor o igual a 0, lo cual no es válido. Por favor, ingrese un monto válido para continuar.")
         st.stop()
+
+# Alerta 6: Verificar que los Montos Propuestos no excedan la Contrapropuesta Máxima Relativa del Aliado
+# Esto solo Aplica para ofertas de acuerdo y validaciones cuyas deudas tengan un descuento en base
+if tipo_solicitud in ['Validación', 'Oferta de Acuerdo'] and aliado_cambiado: # Que se haya cambiado el aliado implica que es directo base y no tiene restricciones de contrapropuesta
+    contraprop_max_relativa = aliadosDict[aliado_seleccionado].obtener_contraprop_max_relativa()
+    monto_en_base = masivas_locales[masivas_locales['Casa_Cobro'] == aliado_seleccionado].groupby('Id_Deuda')['PaB_Propuesta'].min().sum()
+    monto_solicitado = sum(deuda_info['Monto_Propuesto'] for deuda_info in info_completa_deudas)
+    alertar, comentario_alerta = alertar_excedencia_contraprop_max_relativa(
+        contraprop_max_relativa=contraprop_max_relativa,
+        descuento_propuesto= 1 - (monto_solicitado/monto_en_base)
+    )
+    if alertar:
+        st.error(comentario_alerta, icon="❌", title="Error por Contrapropuesta Excedente para descuento en base")
+        # Ahora Mostramos el Límite Permitido
+        limite_propuesta = monto_en_base * (1 - contraprop_max_relativa)
+        st.info(f"El monto máximo sugerido para la solicitud es: {limite_propuesta:,.0f} (equivalente a un descuento máximo de {contraprop_max_relativa:.2%} sobre la contrapropuesta en base de {monto_en_base:,.0f})\n\nMontos mayores **SUELEN SER SIEMPRE RECHAZADOS** con este aliado", icon="ℹ️")
+    else:
+        st.success(comentario_alerta, icon="✅", title="Verificación de Contrapropuesta")
 
 # --- Siguiente: Si es Acuerdo o Oferta de Pago dar Especificaciones
 if tipo_solicitud in ['Acuerdo de Pago', 'Oferta de Acuerdo']:

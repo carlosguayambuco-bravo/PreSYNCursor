@@ -24,6 +24,7 @@ class Aliado:
                 brinda_descuento_max: bool,
                 permiso_cuotas: bool,
                 tiempo_horas_respuesta: float,
+                contraprop_max_relativa: float = 0.0,
                 ):
         self.nombre = nombre
         self.bancos = bancos
@@ -35,6 +36,7 @@ class Aliado:
         self.brinda_descuento_max = brinda_descuento_max
         self.permiso_cuotas = permiso_cuotas
         self.tiempo_horas_respuesta = tiempo_horas_respuesta
+        self.contraprop_max_relativa = contraprop_max_relativa
 
     def obtener_nombre(self) -> str:
         return self.nombre
@@ -71,6 +73,9 @@ class Aliado:
 
     def obtener_tr_horas_parsed(self) -> str:
         return f'{round(self.tiempo_horas_respuesta / 24, 2)} días hábiles'
+
+    def obtener_contraprop_max_relativa(self) -> float:
+        return self.contraprop_max_relativa
 
 # Función Auxiliar para realizar parsing de los tiempos de respuesta
 def parse_tiempos_respuesta(tr) -> float:
@@ -110,6 +115,7 @@ def crear_diccionario_aliados(df: DataFrame[AliadosSchema]) -> dict:
             brinda_descuento_max=row['Brindan Máx. Descuento'] == 'SI',
             permiso_cuotas=row['Pago a Cuotas'] == 'SI',
             tiempo_horas_respuesta=parse_tiempos_respuesta(row['Tiempos de Respuesta']),
+            contraprop_max_relativa=row['Contrapropuesta_Maxima_Relativa'],
         )
         aliados_dict[current_aliado.nombre] = current_aliado
 

@@ -131,6 +131,7 @@ class AliadosSchema(pa.DataFrameModel):
     Permite_Contacto: bool = pa.Field(alias="Permite Contacto")
     Cruza_Base: bool = pa.Field(alias="Cruza Base")
     Sync: bool = pa.Field(alias="SYNC")
+    Contrapropuesta_Maxima_Relativa: float = pa.Field(nullable=True)
     Negociacion_en_Bloque: bool = pa.Field(alias="Negociación en Bloque")
     Contraofertas_de_Pago_Obligatorio: bool = pa.Field(alias="Contraofertas de Pago Obligatorio")
     Brindan_max_Descuento: bool = pa.Field(alias="Brindan Máx. Descuento")

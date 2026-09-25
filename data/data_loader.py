@@ -556,15 +556,22 @@ def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
     # Obtenemos el DF de la Hoja "AlianzasVigentes"
     aliados_df = google_sheets_service.get_sheet_as_dataframe(ALIADOS_SHEET_ID, 'AlianzasVigentes')
 
-    # Dejamos solo las Columnas Necesarias según el esquema
-    aliados_df = aliados_df[AliadosSchema.__fields__.keys()]
-
     # Convertimos las Columnas de 'SI|NO' a Booleano
     boolean_columns = ['Permite Contacto', 'Cruza Base', 'SYNC', 'Negociación en Bloque', 'Contraofertas de Pago Obligatorio', 'Brindan Máx. Descuento', 'Pago a Cuotas']
 
     for col in boolean_columns:
         aliados_df[col] = aliados_df[col].astype(str)  # Aseguramos que sean strings
         aliados_df[col] = aliados_df[col].str.contains('SI', case=False, na=False)
+
+    # Realizamos un renombramiento para las Contrapropuestas Relativas
+    aliados_df = aliados_df.rename(columns={
+        'Contrapropuesta Máxima sobre valor en Base': 'Contrapropuesta_Maxima_Relativa',
+    })
+    # Hacemos Parsing de esta Columna a Número usando cleanNumber
+    aliados_df['Contrapropuesta_Maxima_Relativa'] = aliados_df['Contrapropuesta_Maxima_Relativa'].apply(cleanNumber, default_nan = 0)
+
+    # Dejamos solo las Columnas Necesarias según el esquema
+    aliados_df = aliados_df[AliadosSchema.__fields__.keys()]
 
     # Validamos el DF con el esquema (Si no esta vacío)
     if not aliados_df.empty:
