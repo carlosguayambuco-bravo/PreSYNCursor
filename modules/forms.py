@@ -255,5 +255,5 @@ def alertar_excedencia_contraprop_max_relativa(*, contraprop_max_relativa: float
     if contraprop_max_relativa is None or pd.isna(contraprop_max_relativa) or contraprop_max_relativa <= 0:
         return False, "No hay restricción de contrapropuesta máxima relativa."
     if descuento_propuesto > contraprop_max_relativa:
-        return True, "El descuento propuesto de {:.2%} excede la contrapropuesta máxima relativa de {:.2%}.".format(descuento_propuesto, contraprop_max_relativa)
-    return False, "El descuento propuesto cumple con la restricción de contrapropuesta máxima relativa ({:.2%}).".format(contraprop_max_relativa)
+        return True, "El incremento propuesto de {:.2%} excede la incremento máximo de {:.2%}.".format(descuento_propuesto, contraprop_max_relativa)
+    return False, "El incremento propuesto cumple con la restricción de incremento máximo ({:.2%}).".format(contraprop_max_relativa)

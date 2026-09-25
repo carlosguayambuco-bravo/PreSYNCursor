@@ -370,7 +370,10 @@ if tipo_solicitud in ['Validación', 'Oferta de Acuerdo'] and aliado_cambiado an
         st.error(comentario_alerta, icon="❌", title="Error por Contrapropuesta Excedente para descuento en base")
         # Ahora Mostramos el Límite Permitido
         limite_propuesta = monto_en_base * (1 - contraprop_max_relativa)
-        st.info(f"El monto máximo sugerido para la solicitud es: {limite_propuesta:,.0f} (equivalente a un descuento máximo de {contraprop_max_relativa:.2%} sobre la contrapropuesta en base de {monto_en_base:,.0f})\n\nMontos mayores **SUELEN SER SIEMPRE RECHAZADOS** con este aliado", icon="ℹ️")
+        st.info(f"El monto máximo sugerido para la solicitud es: {limite_propuesta:,.0f} (equivalente a un descuento máximo de {contraprop_max_relativa:.2%} sobre la contrapropuesta en base de {monto_en_base:,.0f})", 
+            icon="ℹ️",
+            title="Montos mayores **SUELEN SER SIEMPRE RECHAZADOS** con este aliado",
+        )
     else:
         st.success(comentario_alerta, icon="✅", title="Verificación de Contrapropuesta")
 
