@@ -219,7 +219,8 @@ DEFAULT_CCS = [
 
 CCS_CREDITO = [
     "laura.guasca@gobravo.com.co",
-    "nmcaro@gobravo.com.co"
+    "nmcaro@gobravo.com.co",
+    "sebastian.vallejo@gobravo.com.co"
 ]
 
 CORREOS_NO_RELEVANTES = ['humbertoch@gobravo.io','nmcaro@gobravo.io']

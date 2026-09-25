@@ -3828,7 +3828,7 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
             max_discount = solicitud['Metadata_Solicitud'].get('Max_Descuento_Otorgado',False)
             if max_discount:
                 st.error(
-                    "El Ejecutivo ha catalogado la Solicitud como Máximo Descuento, por ende no se puede subir una contraoferta",
+                    "El Ejecutivo ha catalogado la Solicitud como Máximo Descuento, si se requiere subir una contraoferta que sea de carácter exclusivo cuando se consiguieron mejores descuentos por fuera",
                     title="Imposibilidad de Contraoferta",
                     icon="🔴"
                 )
@@ -3852,13 +3852,12 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
 
             with colGenCO:
                 if st.button(
-                    label="**Generar ContraOferta**",
+                    label="**Generar ContraOferta**" if not max_discount else "**ContraOferta por Mejor Descuento por Fuera**",
                     width="stretch",
                     type="secondary",
                     key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
                     help = "Botón para ajustar la oferta de pago de la solicitud",
                     icon="🔄",
-                    disabled = max_discount
                 ):
                     ajustar_contraoferta_solicitud(solicitud=solicitud)
 
