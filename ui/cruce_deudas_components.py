@@ -1,15 +1,13 @@
 # Estándar usando Pep8
 # Librerías de Python
 # Librerías de Terceros
-import re
-
 import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
 from modules.constants import COL_CEDULA, COL_NOMBRE, ETIQUETA_EXACTO, PRIORIDAD_ETIQUETAS_CRUCE
 from modules.id_aut_deud.helpers import obtener_pago_minimo, search_data_deudas
-from utils.helpers_general import replaceNaN
+from utils.helpers_general import formatNaN, replaceNaN
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
 LLAVE_IDS_NO_VALIDADOS = 'cruce_ids_deuda_no_validados'
@@ -268,15 +266,22 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
     with colData:
         # Acá mostramos: Casa de Cobro, Alias, Cedula
         # Creamos el String que va a ser el Guia
-        strGuia = "> **Cedula**: {}".format(replaceNaN(registro['Cedula'], "Sin Cédula Proporcionada"))
-        strGuia += "\n\n> **Número de Crédito**: {}".format(replaceNaN(registro['Numero_Credito'], "Sin Num. Cred. Proporcionado"))
-        strGuia += "\n\n> **Monto Actual**: $ {:,.0f}".format(replaceNaN(registro['Monto_Actual'], "Sin Monto Actual Brindado."))
+        strGuia = "> **Cedula**: {}".format(replaceNaN(value=registro['Cedula'], nan_replace="Sin Cédula Proporcionada"))
+        strGuia += "\n\n> **Número de Crédito**: {}".format(replaceNaN(value=registro['Numero_Credito'], nan_replace="Sin Num. Cred. Proporcionado"))
+        strGuia += "\n\n> **Monto Actual**: $ {}".format(formatNaN(value=registro['Monto_Actual'], nan_replace="Sin Monto Actual Brindado.", format_str="{:,.0f}"))
         pago_minimo = obtener_pago_minimo(mtdt)
         monto_pago_minimo = (pago_minimo or {}).get('Monto', np.nan)
-        strGuia += "\n\n> **Pago Mínimo**: $ {:,.0f}".format(replaceNaN(monto_pago_minimo, "Sin Pago Propuesto"))
+        strGuia += "\n\n> **Pago Mínimo**: $ {}".format(formatNaN(value=monto_pago_minimo, nan_replace="Sin Pago Propuesto", format_str="{:,.0f}"))
         st.markdown(strGuia)
 
     with colDeudas:
+        # Mostramos la Etiqueta y el Id_Definitivo Actual (si existe) del Registro
+        strInfo = "**Etiqueta**: {} | **ID_Actual**: {}".format(
+            replaceNaN(value=mtdt.get('Etiqueta'), nan_replace="Sin Etiqueta Proporcionada"),
+            replaceNaN(value=mtdt.get('Id_Definitivo'), nan_replace="Sin ID Definitivo Proporcionado")
+        )
+        st.caption(strInfo, text_alignment="center")
+
         key_deudas = 'cruce_deudas_posibles_{}'.format(registro['Cedula'])
         if not st.session_state.get(key_deudas, pd.DataFrame()).empty:
             dfDeudas = st.session_state[key_deudas]
