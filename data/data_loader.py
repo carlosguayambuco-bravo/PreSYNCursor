@@ -3,7 +3,7 @@
 # Librerías de Python
 from collections import defaultdict
 import json
-from typing import Callable, Literal
+from typing import Callable, Literal, Optional
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
 from pandera.typing import DataFrame
@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
 from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
@@ -1496,60 +1496,58 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadora
     return deudas_df
 
 # Función Auxiliar para Obtener la Última Actualización desde el Backup de Google Sheets
-def obtener_ultima_actualizacion_deudas_backup(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
-    # Definimos la Fecha por Defecto (100 Días Atrás) por si no se Encuentran Actualizaciones
-    fecha_porDefecto = pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100)
+def obtener_ultima_actualizacion_deudas_backup(*,debt_ids: list[str], user_email: str) -> Optional[pd.Timestamp]:
     try:
         # Cargamos el Backup de Actualizaciones desde Google Sheets
         acts_backup_df = load_actualizacines_negos()
 
-        # Filtramos por las Deudas y el Correo del Usuario
+        # Definimos la Fecha Límite del Último Mes
+        fecha_limite = pd.Timestamp.now('America/Bogota').normalize().tz_localize(None) - pd.DateOffset(months=1)
+
+        # Filtramos por las Deudas, el Correo del Usuario y el Último Mes
         acts_backup_df = acts_backup_df[
             (acts_backup_df['Id_Deuda'].isin(debt_ids)) &
-            (acts_backup_df['Correo'] == user_email)
+            (acts_backup_df['Correo'] == user_email) &
+            (acts_backup_df['Fecha_Act'] >= fecha_limite)
         ]
 
-        # Si No Hay Registros, Devolvemos la Fecha por Defecto
+        # Si No Hay Registros, Devolvemos None (No Existe Actualización en el Último Mes)
         if acts_backup_df.empty:
-            return fecha_porDefecto
+            return None
 
         # Devolvemos la Última Actualización Encontrada en el Backup
         return acts_backup_df['Fecha_Act'].max()
     except:
-        return fecha_porDefecto
+        return None
 
 # Función Auxiliar para Obtener la Última Actualización entre todas las deudas dadas
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Última Actualización de esas Deudas", max_entries = 500,)
-def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> pd.Timestamp:
-
-    # Definimos la Fecha por Defecto (100 Días Atrás) por si no se Encuentran Actualizaciones
-    fecha_porDefecto = pd.Timestamp.now('America/Bogota').normalize() - pd.Timedelta(days=100)
+def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) -> Optional[pd.Timestamp]:
 
     # Paso 1: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
     try:
         query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
 
-        # Paso 2: Obtener las Últimas Actualizaciones desde Metabase
+        # Paso 2: Obtener la Última Actualización desde Metabase
         ultima_actualizacion_df = execute_query_cache(query, dbId=12)
 
         # Si Metabase Falló (DataFrame sin Filas ni Columnas), Buscamos en el Backup de Google Sheets
         if ultima_actualizacion_df.empty and ultima_actualizacion_df.columns.empty:
             return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)
 
+        # Si No Hay Registros, No Existe Actualización en el Último Mes
         if ultima_actualizacion_df.empty:
-            return fecha_porDefecto # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+            return None
 
         # Paso 3: -- Limpieza de Datos --
-        # Volvemos la Columna Id_Deuda a String y Eliminamos los Valores Nulos
-        ultima_actualizacion_df.dropna(subset=['Id_Deuda'], inplace=True)
-        ultima_actualizacion_df['Id_Deuda'] = ultima_actualizacion_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)
-        ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True ).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+        ultima_actualizacion_df['Ultima_Actualizacion'] = pd.to_datetime(ultima_actualizacion_df['Ultima_Actualizacion'], errors='coerce', utc=True).dt.tz_convert('America/Bogota').dt.tz_localize(None)
+        # Validamos la Respuesta de la Query con el Esquema
+        ultima_actualizacion_df = UltimaActualizacionSchema.validate(ultima_actualizacion_df, lazy=True)
 
-        # Paso 4: Devolver la Última Actualización como el Máximo de la Columna Ultima_Actualizacion
-        if not ultima_actualizacion_df.empty:
-            return ultima_actualizacion_df['Ultima_Actualizacion'].max()
-        return fecha_porDefecto # Devolvemos una Fecha de 100 Días Atrás si No Hay Actualizaciones
+        # Paso 4: Devolver la Última Actualización (None si No Existe en el Último Mes)
+        ultima_actualizacion = ultima_actualizacion_df['Ultima_Actualizacion'].max()
+        return None if pd.isna(ultima_actualizacion) else ultima_actualizacion
     except:
         # Si la Consulta a Metabase Falla, Buscamos en el Backup de Google Sheets
         return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)

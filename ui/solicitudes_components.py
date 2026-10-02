@@ -936,17 +936,30 @@ def mostrar_mensaje_actualizado(*, solicitud: pd.Series, origen: Literal["ejecut
         st.warning("Desabilitado Temporalmente la Actualización del Negociador",icon="🫡")
         return 
 
-    # Paso 1: Obtener la última Actualización
+    # Paso 1: Obtener la última Actualización (None si no existe en el último mes)
     ultima_upd = obtener_ultima_actualizacion_deudas(
         debt_ids = solicitud["Ids_Deuda"].split("-"),
         user_email = solicitud["Correo"],
     )
-    # Paso 2: Calcular la Diferencia en Días entre la Última Actualización y la Fecha de Subida
-    diff_dias = getBDDaysDiffFloat(ultima_upd.tz_localize(None), solicitud["Timestamp"].tz_localize(None))
-    fue_antes = ultima_upd.tz_localize(None) < solicitud["Timestamp"].tz_localize(None)
     # Cargamos la Configuración del App
     app_config = load_app_config()
-    # Paso 3: Mostrar el Mensaje de Advertencia o Éxito según corresponda
+    # Paso 2: Si No Existe Actualización en el Último Mes, Mostramos la Advertencia Correspondiente
+    if ultima_upd is None:
+        if origen == "ejecutivo":
+            st.warning(
+                "El Negociador no actualizó al cliente en el último mes, por lo que no hay una actualización reciente que considerar.",
+                icon="⚠️"
+            )
+        elif origen == "nego":
+            st.warning(
+                "No has actualizado al cliente en el último mes, por lo que no hay una actualización reciente que considerar.",
+                icon="⚠️"
+            )
+        return
+    # Paso 3: Calcular la Diferencia en Días entre la Última Actualización y la Fecha de Subida
+    diff_dias = getBDDaysDiffFloat(ultima_upd.tz_localize(None), solicitud["Timestamp"].tz_localize(None))
+    fue_antes = ultima_upd.tz_localize(None) < solicitud["Timestamp"].tz_localize(None)
+    # Paso 4: Mostrar el Mensaje de Advertencia o Éxito según corresponda
     if fue_antes and (diff_dias > float(app_config['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE'])):
         if origen == "ejecutivo":
             st.warning(

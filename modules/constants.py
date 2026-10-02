@@ -128,13 +128,12 @@ LEFT JOIN personal_information AS pi
 # Query de dbId = 12
 QUERY_LAST_UPDATE = """
 SELECT
-    MAX(bda.updated_at) AS Ultima_Actualizacion,
-    bda.debt_id AS Id_Deuda
+    MAX(bda.updated_at) AS Ultima_Actualizacion
 FROM credit_repair_debt_activities AS bda
 WHERE 
     bda.debt_id IN ({debt_ids}) AND
-    bda.end = '{email}'
-GROUP BY bda.debt_id;"""
+    bda.end = '{email}' AND
+    bda.updated_at >= CURRENT_TIMESTAMP - INTERVAL '1 month';"""
 
 # Query de dbId = 12
 QUERY_DEUDAS_CEDULA = """SELECT

@@ -357,6 +357,17 @@ class ActualizacionesSchema(pa.DataFrameModel):
     Fecha_Act: pa.dtypes.Timestamp
     Nombre: str
 
+class UltimaActualizacionSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de la respuesta de la última actualización.
+    El valor es nulo cuando no existe una actualización en el último mes.
+    """
+    Ultima_Actualizacion: pa.dtypes.Timestamp = pa.Field(nullable=True)
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
+
 class LiquidationsSchema(pa.DataFrameModel):
     Id_Deuda: str = pa.Field(unique=True)
     PaB_Liq: float

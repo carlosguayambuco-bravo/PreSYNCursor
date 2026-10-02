@@ -53,7 +53,10 @@ def obtener_descuento_optimo(*,referencia: str, deudas: list[str], pricing: floa
     return min(descuento_trad, descuento_cred), "Tradicional" if descuento_trad <= descuento_cred else "Crédito - PaB Ideal"
 
 # Función para Definir si ya cumple la Condición de Actualización de Deudas
-def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: pd.Timestamp) -> tuple[bool, float]:
+def cumple_condicion_actualizacion_deudas(*,ultima_actualizacion: Optional[pd.Timestamp]) -> tuple[bool, float]:
+    # Si No Existe Actualización (None o NaT), No Se Cumple la Condición y No Hay Diferencia de Días
+    if ultima_actualizacion is None or pd.isna(ultima_actualizacion):
+        return False, np.nan
     # Obtenemos la Fecha Actual Normalizada a Hoy (Sin Hora)
     fecha_actual = pd.Timestamp.now('America/Bogota').normalize().tz_localize(None)
     # Obtenemos la Diferencia en Días Hábiles entre Hoy y la Última Actualización

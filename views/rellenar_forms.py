@@ -119,23 +119,38 @@ if deudas_activas_df.empty:
 st.session_state['id_rep_needed'] = False
 
 
-# Verificamos que exista una Última Actualización para las Deudas Activas
+# Verificamos que exista una Última Actualización para las Deudas Activas en el Último Mes
 ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))
 # Veriticamos que satisface la Condición de Mínimo de Días Hábiles para Actualización
 cumple_condicion, dias_habiles_diff = cumple_condicion_actualizacion_deudas(ultima_actualizacion=ultima_actualizacion)
 user = st.session_state['user_obj']
 es_admin = (user.role == 'admin') and (not st.session_state.get('simulate_negotiator', True))
+# Definimos si el Usuario Puede Continuar sin Cumplir la Condición de Actualización
+puede_continuar_sin_actualizacion = es_admin or bool(st.secrets.get('LET_WITHOUT_UPDATE', False))
 
 
-st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} días hábiles)'.format(
-    ultima_actualizacion.strftime('%Y-%m-%d') if ultima_actualizacion else 'No Disponible',
-    dias_habiles_diff,
-))
-if ((not cumple_condicion) and (not es_admin)) and not (st.secrets.get('LET_WITHOUT_UPDATE', False)):
-    st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
-        dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+# Mostramos el Estado de la Última Actualización
+if ultima_actualizacion is None:
+    # Si No Existe Actualización en el Último Mes Mostramos el Error Correspondiente
+    st.error(
+        "No se encontró una actualización de las deudas activas en el último mes. Debes actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.",
+        icon="❌",
+    )
+else:
+    st.info('ℹ️Última Actualización de las Deudas Activas: {} (Hace {:.2f} días hábiles)'.format(
+        ultima_actualizacion.strftime('%Y-%m-%d'),
+        dias_habiles_diff,
     ))
-    st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
+
+# Verificamos si se debe Prevenir la Continuación del Formulario
+bloqueado_por_actualizacion = (ultima_actualizacion is None or not cumple_condicion) and (not puede_continuar_sin_actualizacion)
+if bloqueado_por_actualizacion:
+    # Si Existe Actualización pero No Cumple la Condición, Mostramos la Advertencia Correspondiente
+    if ultima_actualizacion is not None:
+        st.warning("La última actualización de las deudas activas fue hace {:.2f} días hábiles, lo cual es menor al mínimo necesario de {} días hábiles para poder continuar con el llenado del formulario.".format(
+            dias_habiles_diff, appConfig['MIN_NECESSARY_DAYS_FOR_DEBT_UPDATE']
+        ))
+        st.info('Debes Actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.')
     # Añadimos un Botón de Reintentar
     if st.button("**Reintentar**",
             key="reintentar_actualizacion_deudas",
