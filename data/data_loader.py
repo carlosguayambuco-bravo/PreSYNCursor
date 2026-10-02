@@ -1330,6 +1330,13 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
 
 # --- Queries a MetaBase ---
 
+# Función Auxiliar para Ejecutar la Query de Deudas Activas
+@st.cache_data(ttl=HOUR_WAIT, max_entries=200, show_spinner=False)
+def execute_query_cache(query: str, dbId: int = None):
+    # Paso 1: Obtener El Servicio de Metabase
+    metabase_service: MetabaseService = st.session_state["metabase_service"]
+    return metabase_service.execute_query(query, dbId=dbId)
+
 # Función Auxiliar para obtener la referencia dada una deuda
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Referencia de esa Deuda", max_entries = 100,)
 def obtener_referencia_por_deuda(*,deuda: str) -> str:
@@ -1338,7 +1345,7 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
     # Paso 2: Obtener los Datos de la Consulta SQL para Obtener la Referencia
     query = QUERY_DEBT_TO_REFERENCE.format(debt_id=deuda)
     # Paso 3: Obtener la Referencia desde Metabase
-    referencia_df = metabase_service.execute_query(query)
+    referencia_df = execute_query_cache(query, dbId=50)
     # Paso 4: Devolver la Referencia si Existe, de lo Contrario Devolver None
     if not referencia_df.empty:
         return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
@@ -1394,13 +1401,6 @@ def parsear_plan_items(planes: pd.DataFrame) -> pd.DataFrame:
                 continue
     return pd.DataFrame(items)
 
-# Función Auxiliar para Ejecutar la Query de Deudas Activas
-@st.cache_data(ttl=HOUR_WAIT, max_entries=200, show_spinner=False)
-def execute_query_cache(query: str):
-    # Paso 1: Obtener El Servicio de Metabase
-    metabase_service: MetabaseService = st.session_state["metabase_service"]
-    return metabase_service.execute_query(query)
-
 # Función Auxiliar para Obtener las Deudas Activas de una Referencia (Usando Progreso)
 def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadoras: bool) -> DataFrame[DeudasActivasSchema]:
 
@@ -1414,7 +1414,7 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadora
     progreso_busqueda = st.progress(1/5,"Buscando Deudas para la Referencia")
 
     # 2.1 Ejecutamos la Query de las Deudas
-    deudas_df = execute_query_cache(query_deudas)
+    deudas_df = execute_query_cache(query_deudas, dbId=50)
 
     # 2.2 Obtenemos el lead_id
     lead_id = deudas_df['Lead_Id'].iloc[0]
@@ -1423,7 +1423,7 @@ def obtener_deudas_activas(*,referencia: str, usar_todas: bool, todas_reparadora
         # Creamos la Query
         query_plan_liq = QUERY_PLANES.format(lead_id=str(lead_id).replace('.0','').strip())
         # Ejecutamos la Query
-        pl_df = execute_query_cache(query_plan_liq)
+        pl_df = execute_query_cache(query_plan_liq, dbId=50)
         # Limpiamos los Datos
         pl_df = parsear_plan_items(pl_df)
     else:
@@ -1530,7 +1530,7 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
         query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
 
         # Paso 2: Obtener las Últimas Actualizaciones desde Metabase
-        ultima_actualizacion_df = execute_query_cache(query)
+        ultima_actualizacion_df = execute_query_cache(query, dbId=12)
 
         # Si Metabase Falló (DataFrame sin Filas ni Columnas), Buscamos en el Backup de Google Sheets
         if ultima_actualizacion_df.empty and ultima_actualizacion_df.columns.empty:
@@ -1558,7 +1558,7 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
 @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
 def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     # Paso 1: Ejecutar la Query QUERY_TOTAL_REPARADORAS
-    completo_df = execute_query_cache(QUERY_TOTAL_REPARADORAS)
+    completo_df = execute_query_cache(QUERY_TOTAL_REPARADORAS, dbId=12)
 
     if completo_df.empty or not ('Referencia' in completo_df.columns):
         return InputCruceSchema.empty()
@@ -1603,7 +1603,7 @@ def obtener_datos_deuda_cedula(*,cedula: str) -> DataFrame[InputCruceSchema]:
     # Paso 1: Definir la Query de Ejecución
     query_cedula = QUERY_DEUDAS_CEDULA.format(cedula=cedula)
     # Paso 2: Ejecutar la Query
-    cedula_df = execute_query_cache(query_cedula)
+    cedula_df = execute_query_cache(query_cedula, dbId=12)
 
     # Paso 3: Verificar si está vacía o no
     if cedula_df.empty:
@@ -1652,7 +1652,7 @@ def obtener_montos_deudas(*, deudas: list[str], batch_size: int = 50) -> dict[st
         batch = deudas[i:i + batch_size]
         # Paso 3: Ejecutar la Query para el Batch
         query = QUERY_BUSCAR_MONTO_ACTUAL.format(debt_ids=','.join(batch))
-        result_df = execute_query_cache(query)
+        result_df = execute_query_cache(query, dbId=12)
         # Paso 4: Limpiamos el Id_Deuda del Resultado
         result_df['Id_Deuda'] = result_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Paso 5: Limpiamos el Monto_Actual a Número
@@ -1680,7 +1680,7 @@ def verificar_existencias_deudas(*,deudas: list[str], batch_size: int = 20) -> d
         batch = deudas[i:i + batch_size]
         # Paso 3: Ejecutar la Query para el Batch
         query = QUERY_VERIFICAR_DEUDAS.format(debt_ids=','.join(batch))
-        result_df = execute_query_cache(query)
+        result_df = execute_query_cache(query, dbId=12)
         # Paso 4: Limpiamos el Id_Deuda del Resultado
         result_df['Id_Deuda'] = result_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Paso 5: Actualizamos el Diccionario de Resultados

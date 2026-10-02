@@ -53,7 +53,7 @@ class MetabaseService:
         return self.session_id
 
     # Método para ejecutar una consulta en Metabase y obtener los resultados
-    def execute_query(self, query: str) -> pd.DataFrame:
+    def execute_query(self, query: str, dbId: int = None) -> pd.DataFrame:
         # Obtenemos el Session ID actual
         current_session_id = self.get_session_id()
         # Definimos el Endpoint de la API para ejecutar la consulta
@@ -61,7 +61,7 @@ class MetabaseService:
 
         # Definimos los contenidos de la Request
         payload = {
-            'database': self.mainDB_id,
+            'database': dbId if (dbId is not None) else self.mainDB_id,
             'type': 'native',
             'native': {'query': query},
         }

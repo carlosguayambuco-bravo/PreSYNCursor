@@ -59,6 +59,7 @@ ESTADOS_POSIBLES_LIQUIDACION = [
 ]
 
 # --- Queries a Metabase ---
+# Query de dbId = 50
 QUERY_DEBT_TO_REFERENCE = """
 SELECT
     bcrd.bank_reference AS Referencia
@@ -68,23 +69,7 @@ WHERE
     bcrd.id = {debt_id}
 """
 
-QUERY_TOTAL_REPARADORAS = """
-SELECT
-    bcrd.id AS Id_Deuda,
-    bcr.document_number AS Cedula,
-    bcr.full_name AS Nombre_Cliente,
-    bcrd.financial_entity_name AS Banco,
-    bcrd.credit_number AS Numero_Credito,
-    bcrd.amount AS Monto_Actual,
-    bcrd.state as Estado_Deuda,
-    bcrd.sub_state as Sub_Estado_Deuda
-
-FROM dealer_public.berex_credit_repair_debts bcrd
-
-LEFT JOIN dealer_public.berex_credit_repairs AS bcr
-    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit')
-"""
-
+# Query de dbId = 50
 QUERY_DEUDAS = """
 SELECT
     bcrd.id AS Id_Deuda,
@@ -106,6 +91,7 @@ WHERE
     bcr.status {status_cond}
 """
 
+# Query de dbId = 50
 QUERY_PLANES = """
 SELECT
     vsp.success_commission_percentage AS pricing,
@@ -117,42 +103,74 @@ QUALIFY
     ROW_NUMBER() OVER (PARTITION BY vsp.lead_id ORDER BY vsp.updated_at DESC) = 1
 """
 
+# Query de dbId = 12
+QUERY_TOTAL_REPARADORAS = """
+SELECT
+    bcrd.id AS Id_Deuda,
+    pi.document_number AS Cedula,
+    pi.full_name AS Nombre_Cliente,
+    cfe.name AS Banco,
+    bcrd.credit_number AS Numero_Credito,
+    CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS Monto_Actual,
+    bcrd.state as Estado_Deuda,
+    bcrd.sub_state as Sub_Estado_Deuda
+
+FROM credit_repair_debts AS bcrd
+
+INNER JOIN credit_repairs AS bcr
+    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit')
+LEFT JOIN catalog_financial_entities AS cfe
+    ON cfe.id = bcrd.financial_entity_id
+LEFT JOIN personal_information AS pi
+    ON pi.credit_repair_id = bcr.id
+"""
+
+# Query de dbId = 12
 QUERY_LAST_UPDATE = """
 SELECT
     MAX(bda.updated_at) AS Ultima_Actualizacion,
     bda.debt_id AS Id_Deuda
-FROM dealer_public.berex_debt_activities AS bda
+FROM credit_repair_debt_activities AS bda
 WHERE 
     bda.debt_id IN ({debt_ids}) AND
     bda.end = '{email}'
 GROUP BY bda.debt_id;"""
 
+# Query de dbId = 12
 QUERY_DEUDAS_CEDULA = """SELECT
     bcrd.id AS Id_Deuda,
-    bcrd.bank_reference AS Referencia,
-    bcrd.financial_entity_name AS Banco,
+    bcr.bank_reference AS Referencia,
+    cfe.financial_entity_name AS Banco,
     bcrd.credit_number AS Numero_Credito,
-    bcrd.amount AS Monto_Actual,
+    CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS Monto_Actual,
     bcrd.state as Estado_Deuda,
     bcrd.sub_state as Sub_Estado_Deuda
 
-FROM dealer_public.berex_credit_repair_debts bcrd
+FROM credit_repair_debts AS bcrd
 
-INNER JOIN dealer_public.berex_credit_repairs AS bcr
+INNER JOIN credit_repairs AS bcr
     ON bcr.id = bcrd.credit_repair_id
-    AND bcr.document_number = '{cedula}'"""
+    
+INNER JOIN personal_information AS pi
+    ON pi.credit_repair_id = bcr.id
+    AND pi.document_number = '{cedula}'
+LEFT JOIN catalog_financial_entities AS cfe
+    ON cfe.id = bcrd.financial_entity_id
+"""
 
+# Query de dbId = 12
 QUERY_VERIFICAR_DEUDAS = """
 SELECT
     bcrd.id AS Id_Deuda
-FROM dealer_public.berex_credit_repair_debts bcrd
+FROM credit_repair_debts AS bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
+# Query de dbId = 12
 QUERY_BUSCAR_MONTO_ACTUAL = """
 SELECT
     bcrd.id AS Id_Deuda,
-    bcrd.amount AS Monto_Actual
-FROM dealer_public.berex_credit_repair_debts bcrd
+    CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS Monto_Actual
+FROM credit_repair_debts AS bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
 ESTADOS_LIQUIDACION = ['liquidation_structured_payment','paid_outside_of_program','liquidation','liquidation_portfolio_payment','client_settled_outside']
@@ -231,7 +249,7 @@ SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
 REFCHANGES_SHEET_ID = '1FN1u5b6N5mzcrzYzLKpBjwSkhddgYPOrgyZgbKChc68'
 PABIDEAL_SHEET_ID = '1Obm0O5hfIIzCMy5RvdX5b1JBf3pmzIrYdYa1vPOB83M'
 ALIADOS_SHEET_ID = '1px7MX8zMKPe-PeCTvpNkX4kFMp1XL5IuBUrP1oGftiw'
-MASIVAS_SHEET_ID = '1sOIk9BAa2VE-P-wnMPDJh8_hYLGgO5WaJL7m9LIM2is'
+MASIVAS_SHEET_ID = '1BhSfXYz1V7Hhhk48T8lRWL5QLGj74s_1KA2WBstKxXA'
 LIQUIDACIONES_SHEET_ID = '1H3sYEtkeu47POnu8xZMaMtID1Vj53YIcWblWeZ8d0rc'
 HCNEGO_SHEET_ID = '1KO4ImvhNZB_jtgpvs9DU-6_0FskFmxC9Xo4Rz5Yt6dM'
 CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
