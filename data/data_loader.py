@@ -1557,6 +1557,8 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
 def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
     # Paso 1: Ejecutar la Query QUERY_TOTAL_REPARADORAS
     completo_df = execute_query_cache(QUERY_TOTAL_REPARADORAS, dbId=12)
+    # Como el dbId es 12, aplicamos .title() a las Columnas
+    completo_df.columns = [col.title() for col in completo_df.columns]
 
     if completo_df.empty or not ('Referencia' in completo_df.columns):
         return InputCruceSchema.empty()
@@ -1602,6 +1604,8 @@ def obtener_datos_deuda_cedula(*,cedula: str) -> DataFrame[InputCruceSchema]:
     query_cedula = QUERY_DEUDAS_CEDULA.format(cedula=cedula)
     # Paso 2: Ejecutar la Query
     cedula_df = execute_query_cache(query_cedula, dbId=12)
+    # Paso 2.1: Estandarizamos los Nombres de las Columnas
+    cedula_df.columns = [col.title() for col in cedula_df.columns]
 
     # Paso 3: Verificar si está vacía o no
     if cedula_df.empty:
@@ -1651,6 +1655,8 @@ def obtener_montos_deudas(*, deudas: list[str], batch_size: int = 50) -> dict[st
         # Paso 3: Ejecutar la Query para el Batch
         query = QUERY_BUSCAR_MONTO_ACTUAL.format(debt_ids=','.join(batch))
         result_df = execute_query_cache(query, dbId=12)
+        # Paso 2.1: Estandarizamos los Nombres de las Columnas
+        result_df.columns = [col.title() for col in result_df.columns]
         # Paso 4: Limpiamos el Id_Deuda del Resultado
         result_df['Id_Deuda'] = result_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Paso 5: Limpiamos el Monto_Actual a Número
@@ -1679,6 +1685,8 @@ def verificar_existencias_deudas(*,deudas: list[str], batch_size: int = 20) -> d
         # Paso 3: Ejecutar la Query para el Batch
         query = QUERY_VERIFICAR_DEUDAS.format(debt_ids=','.join(batch))
         result_df = execute_query_cache(query, dbId=12)
+        # Paso 2.1: Estandarizamos los Nombres de las Columnas
+        result_df.columns = [col.title() for col in result_df.columns]
         # Paso 4: Limpiamos el Id_Deuda del Resultado
         result_df['Id_Deuda'] = result_df['Id_Deuda'].apply(lambda x: str(x).replace(".0", "").strip())
         # Paso 5: Actualizamos el Diccionario de Resultados
