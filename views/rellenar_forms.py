@@ -464,7 +464,7 @@ st.subheader("✅ Envío del Formulario")
 fecha_limite_respuesta = move_business_days(
     date=pd.Timestamp.now('America/Bogota').tz_localize(None),
     delta_days=aliadosDict[aliado_seleccionado].obtener_tr_dias(),
-).strftime('%Y-%m-%d')
+)
 
 # Vamos a Construir la Respuesta como un Diccionario
 response_info = {
@@ -481,7 +481,7 @@ response_info = {
         'Nombre_Cliente': deudas_activas_df['Nombre_Cliente'].iloc[0].title(),
         'Comentario_Negociador': comentario_adicional,
         'Es_Directo_Base': aliado_cambiado,
-        'Fecha_Limite_Respuesta': fecha_limite_respuesta,
+        'Fecha_Limite_Respuesta': fecha_limite_respuesta.strftime('%Y-%m-%d'),
     }, ensure_ascii=False),
     'Estado_Solicitud': 'Sin Tocar',
 }
