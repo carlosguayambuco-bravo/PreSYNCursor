@@ -1846,6 +1846,18 @@ def update_solicitudes_to_solicitado(*, solicitudes: pd.DataFrame) -> bool:
     # Paso 4: Subir las Solicitudes Actualizadas a Google Sheets
     return update_massive_solicitudes_in_google_sheets(solicitudes_df=solicitudes)
 
+# Función Auxiliar para actualizar una Solicitud a 'Solicitado'
+def update_solicitud_to_solicitado(*, solicitud: pd.Series) -> bool:
+    # Paso 1: Actualizar el Estado de la Solicitud a 'Solicitado'
+    solicitud['Estado_Solicitud'] = 'Solicitado'
+    # Paso 2: Agregar Fecha_Solicitado a Metadata_Solicitud
+    fechaActual = pd.Timestamp.now('America/Bogota').strftime('%Y-%m-%d %H:%M:%S')
+    solicitud['Metadata_Solicitud'].update({'Fecha_Solicitado': fechaActual})
+    # Paso 3: Actualizamos el Ejecutivo
+    solicitud['Ejecutivo'] = st.session_state.get('user_name', st.session_state.get('user_email', 'Desconocido'))
+    # Paso 4: Subir la Solicitud Actualizada a Google Sheets
+    return update_solicitud_in_google_sheets(solicitud=solicitud)
+
 # Función Auxiliar para actualizar las Solicitudes a 'Vencida' (Cierre de Mes)
 def update_solicitudes_to_vencida(*, solicitudes: pd.DataFrame) -> bool:
     # Paso 1: Actualizar el Estado de las Solicitudes a 'Vencida'
