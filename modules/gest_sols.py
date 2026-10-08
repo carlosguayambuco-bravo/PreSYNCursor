@@ -1509,7 +1509,7 @@ def obtener_tops_negociadores(*, solicitudes_df: pd.DataFrame, user_email: str, 
     Calcula los Tops de los Negociadores a partir de las Solicitudes:
     - Top de Solicitudes: Conteo de Solicitudes por Negociador (Correo).
     - Top de Liquidaciones: Conteo de Solicitudes con al menos una Deuda Liquidada.
-    - Top de Efectividad: Porcentaje de Efectividad (Liquidado / Solicitado) por Negociador.
+    - Top de Efectividad: Porcentaje de Efectividad (Liquidado / Exitoso) por Negociador.
 
     Args:
         solicitudes_df (pd.DataFrame): DataFrame con las solicitudes.
