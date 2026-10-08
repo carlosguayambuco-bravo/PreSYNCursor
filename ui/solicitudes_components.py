@@ -4571,6 +4571,7 @@ def _renderizar_columna_top(
     info_usuario: dict[str, Any],
     user_email: str,
     formato_valor: Callable[[Any], str],
+    formato_fraccion: Optional[Callable[[dict[str, Any]], str]] = None,
 ) -> None:
     # Paso 1: Mostrar el Título de la Columna
     st.markdown("### {} **{}**".format(emoji_titulo, titulo))
@@ -4584,6 +4585,8 @@ def _renderizar_columna_top(
         emoji, estilo = _obtener_estilo_entrada_top(i)
         es_usuario = (entrada.get('correo') == user_email)
         texto = "{} {}: {}".format(emoji, entrada['nombre'], formato_valor(entrada['valor']))
+        if formato_fraccion is not None:
+            texto = "{} {}".format(texto, formato_fraccion(entrada))
         if es_usuario:
             texto = "<strong>{}</strong>".format(texto)
         filas_html.append('<div style="{} padding: 8px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo, texto))
@@ -4592,6 +4595,8 @@ def _renderizar_columna_top(
     if info_usuario['posicion'] > len(entradas):
         filas_html.append('<div style="text-align: center; color: #9e9e9e; padding: 2px 0 4px 0;">•••</div>')
         texto_usuario = "#{} <strong>{}</strong>: {}".format(info_usuario['posicion'], info_usuario['nombre'], formato_valor(info_usuario['valor']))
+        if formato_fraccion is not None:
+            texto_usuario = "{} {}".format(texto_usuario, formato_fraccion(info_usuario))
         estilo_usuario = "background: linear-gradient(135deg, #455a64, #37474f); color: #ffffff;"
         filas_html.append('<div style="{} padding: 8px 12px; border-radius: 10px; margin-bottom: 6px; font-size: 0.95rem; line-height: 1.3;">{}</div>'.format(estilo_usuario, texto_usuario))
 
@@ -4712,6 +4717,7 @@ def mostrar_tops_negociadores(*, solicitudes: pd.DataFrame) -> None:
             info_usuario=tops['usuario']['efectividad'],
             user_email=user_email,
             formato_valor=lambda v: "{:.1f}% de Efectividad".format(v),
+            formato_fraccion=lambda entrada: "({} Liq./{} Exitosas)".format(entrada.get('liquidadas', 0), entrada.get('exitosas', 0)),
         )
 
     with colLiqs:
