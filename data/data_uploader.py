@@ -13,7 +13,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import get_solicitud_row_in_google_sheets, normalizeMetadata
 from data.data_models import MasivasMetadata, MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
-from modules.constants import COL_CREDITO, COL_ID_CRUCE, COL_MONTO_ACTUAL, ETIQUETA_ADDENDUM, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from modules.constants import COL_CREDITO, COL_ID_CRUCE, COL_MONTO_ACTUAL, ETIQUETA_ADDENDUM, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, build_column_batch_updates, col_to_letter, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
 
@@ -313,25 +313,6 @@ def upload_base_cruce_info(*,cruce_df: DataFrame[PendienteCruceSchema]) -> bool:
 # =====================================================================
 # Subida a la Base del Mes (Hoja 'Bases mes actual 2024' de Masivas)
 # =====================================================================
-
-# Configuraciones de la Subida a la Base del Mes
-MASIVAS_BASE_MES_SHEET = 'Bases mes actual 2024'
-MASIVAS_BASE_MES_COLUMNS = [
-    'Metadata',
-    'Fecha',
-    'Hora',
-    'ID',
-    'Casa',
-    'Número de producto',
-    'Propuesta Pago',
-    'Monto Pago Estructurado',
-    'Plazo Estructurado',
-    'Portafolio',
-    'Monto Portafolio',
-]
-MASIVAS_PORTFOLIO_COLUMNS = ['Portafolio', 'Monto Portafolio']
-MASIVAS_EXISTENTES_COLUMNS = ['Metadata'] + MASIVAS_PORTFOLIO_COLUMNS
-MASIVAS_MAX_ROWS_PER_BATCH = 3000
 
 # Función Auxiliar para Obtener el Número de Cuotas de un Pago
 def _int_cuotas_pago(pago: dict) -> int:

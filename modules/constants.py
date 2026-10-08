@@ -314,3 +314,23 @@ COLUMNAS_MAPEABLES = [
 TIPOS_ETIQUETAS = Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
 TIPOS_STATUS = Literal['Sin Reconocer','Reconocido','Subido Alianzas']
 TIPOS_CONTRAOFERTAS = Literal['ContraOferta sin Compromiso','ContraOferta de Pago Obligatorio','Descuento Máximo']
+
+# Configuraciones de Subida de Datos de Masivas
+# Configuraciones de la Subida a la Base del Mes
+MASIVAS_BASE_MES_SHEET = 'Bases mes actual 2024'
+MASIVAS_BASE_MES_COLUMNS = [
+    'Metadata',
+    'Fecha',
+    'Hora',
+    'ID',
+    'Casa',
+    'Número de producto',
+    'Propuesta Pago',
+    'Monto Pago Estructurado',
+    'Plazo Estructurado',
+    'Portafolio',
+    'Monto Portafolio',
+]
+MASIVAS_PORTFOLIO_COLUMNS = ['Portafolio', 'Monto Portafolio']
+MASIVAS_EXISTENTES_COLUMNS = ['Metadata'] + MASIVAS_PORTFOLIO_COLUMNS
+MASIVAS_MAX_ROWS_PER_BATCH = 3000
