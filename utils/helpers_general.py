@@ -91,6 +91,42 @@ def getMesOperativo() -> pd.Timestamp:
 
     return mes_operativo.replace(day=1)  # Retornamos el primer día del mes operativo
 
+# Función Auxiliar para Obtener el Número de Meses de una Hoja con Formato '{Mes Completo}-{Año%100}'
+def getSheetMonthNumber(sheet_name: str) -> int:
+    """
+    Calcula el número de meses de una hoja a partir de su nombre, el cual debe
+    tener el formato '{Mes completo}-{Año % 100}' (Ej: 'Enero-25').
+
+    Args:
+        sheet_name (str): Nombre de la hoja de cálculo.
+
+    Returns:
+        int: Número de meses calculado como (mes + año * 12) o -1 si el nombre no cumple el formato.
+    """
+    # Validamos que el Nombre sea un String
+    if not isinstance(sheet_name, str):
+        return -1
+
+    # Separamos el Nombre en Mes y Año
+    partes = sheet_name.strip().split('-')
+    if len(partes) != 2:
+        return -1
+
+    mes_texto = partes[0].strip().lower()
+    anio_texto = partes[1].strip()
+
+    # Validamos que el Año tenga 1 o 2 dígitos (Año % 100)
+    if not anio_texto.isdigit() or not 1 <= len(anio_texto) <= 2:
+        return -1
+
+    # Buscamos el Mes por Nombre (sin importar mayúsculas/minúsculas)
+    mes = next((num for num, nombre in mesesDict.items() if nombre.lower() == mes_texto), None)
+    if mes is None:
+        return -1
+
+    # Calculamos el Número de Meses de la Hoja
+    return mes + int(anio_texto) * 12
+
 # Función Auxiliar para convertir un Color a RGBA con Transparencia
 def color_a_rgba(color: str, alpha: float) -> str:
     """

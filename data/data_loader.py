@@ -18,7 +18,7 @@ from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectoriz
 from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
-from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, mesesDict, parsePercentage
+from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage
 from utils.helpers_sheets import _retry
 
 # Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
@@ -504,9 +504,22 @@ def load_pab_ideal() -> dict:
 
     # Primero Obtenemos la Spreadsheet de PaB Ideal desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
-    # Definimos el Nombre de la Hoja según el mes operativo
-    fecha_operativa = getMesOperativo()
-    nombre_hoja = f'{mesesDict[fecha_operativa.month].title()}-{fecha_operativa.year%100}'
+
+    # Obtenemos Todas las Hojas de la Spreadsheet de PaB Ideal
+    worksheets = google_sheets_service.get_all_worksheets(PABIDEAL_SHEET_ID)
+
+    # Calculamos el Número de Meses de Cada Hoja (las que no cumplen el formato quedan en -1)
+    hojas_con_meses = [(getSheetMonthNumber(worksheet.title), worksheet.title) for worksheet in worksheets]
+
+    # Filtramos las Hojas que Cumplen el Formato '{Mes Completo}-{Año%100}'
+    hojas_validas = [(meses, nombre) for meses, nombre in hojas_con_meses if meses != -1]
+
+    # Si Ninguna Hoja Cumple el Formato, Devolvemos un Diccionario Vacío
+    if not hojas_validas:
+        return {}
+
+    # Obtenemos la Última Hoja (la de Mayor Número de Meses)
+    nombre_hoja = max(hojas_validas, key=lambda hoja: hoja[0])[1]
 
     pab_ideal_df = google_sheets_service.get_sheet_as_dataframe(PABIDEAL_SHEET_ID, nombre_hoja)
 

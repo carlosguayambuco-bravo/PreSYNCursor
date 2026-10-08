@@ -33,6 +33,17 @@ class GoogleSheetsService:
         except APIError as e:
             raise RuntimeError(f"API error occurred: {e}")
 
+    # Método para Obtener Todas las Hojas de una Spreadsheet como objetos de gspread
+    def get_all_worksheets(self, spreadsheet_id: str) -> list[gspread.Worksheet]:
+        try:
+            spreadsheet = _retry(lambda: self.client.open_by_key(spreadsheet_id))
+            worksheets = _retry(lambda: spreadsheet.get_worksheets())
+            return worksheets
+        except SpreadsheetNotFound:
+            raise ValueError(f"Spreadsheet with ID '{spreadsheet_id}' not found.")
+        except APIError as e:
+            raise RuntimeError(f"API error occurred: {e}")
+
     # Método para Obtener una Worksheet como un objeto de gspread
     def get_worksheet(self, spreadsheet_id: str, worksheet_name: str) -> gspread.Worksheet:
         try:
