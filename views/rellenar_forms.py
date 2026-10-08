@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 import json
+from time import sleep
 # Librerías de Terceros
 import streamlit as st
 import pandas as pd
@@ -534,6 +535,7 @@ with colMensaje:
 
         if success_response:
             st.toast(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}", icon="✅")
+            sleep(1)
             # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
             st.rerun()
         else:
