@@ -139,7 +139,7 @@ WHERE
 QUERY_DEUDAS_CEDULA = """SELECT
     bcrd.id AS Id_Deuda,
     bcr.bank_reference AS Referencia,
-    cfe.financial_entity_name AS Banco,
+    cfe.name AS Banco,
     bcrd.credit_number AS Numero_Credito,
     CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS Monto_Actual,
     bcrd.state as Estado_Deuda,

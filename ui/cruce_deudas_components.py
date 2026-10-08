@@ -268,6 +268,7 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
         # Creamos el String que va a ser el Guia
         strGuia = "> **Cedula**: {}".format(replaceNaN(value=registro['Cedula'], nan_replace="Sin Cédula Proporcionada"))
         strGuia += "\n\n> **Número de Crédito**: {}".format(replaceNaN(value=registro['Numero_Credito'], nan_replace="Sin Num. Cred. Proporcionado"))
+        strGuia += "\n\n> **Banco**: {}".format(replaceNaN(value=registro['Banco'], nan_replace="Sin Banco Proporcionado"))
         strGuia += "\n\n> **Monto Actual**: $ {}".format(formatNaN(value=registro['Monto_Actual'], nan_replace="Sin Monto Actual Brindado.", format_str="{:,.0f}"))
         pago_minimo = obtener_pago_minimo(mtdt)
         monto_pago_minimo = (pago_minimo or {}).get('Monto', np.nan)
