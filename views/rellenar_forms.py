@@ -10,7 +10,7 @@ from data.data_loader import load_addendums, load_app_config, load_client_balanc
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, alertar_excedencia_contraprop_max_relativa
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
-from utils.helpers_general import cleanNumber, move_business_days
+from utils.helpers_general import cleanNumber, getBDDaysDiffFloat, move_business_days
 
 # Carga de Información Necesaria para el Formulario
 # Se Necesita:
@@ -534,9 +534,15 @@ with colMensaje:
             success_response, new_id = upload_form_response_to_google_sheets(response_info=response_info)
 
         if success_response:
+            # 3. Guardamos la Información de la Solicitud Subida para Mostrarla tras el Rerun
+            st.session_state['info_solicitud_subida'] = {
+                'referencia_enviada': ref_enviar_completa,
+                'ejecutivo': response_info['Ejecutivo'],
+                'fecha_limite_respuesta': fecha_limite_respuesta,
+            }
             st.toast(f"Formulario enviado correctamente!, ℹ️ID de Solicitud: {new_id}", icon="✅")
             sleep(1)
-            # 3. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
+            # 4. Recargamos la app para aplicar instantáneamente el estado 'disabled' al botón
             st.rerun()
         else:
             # Si hubo error, liberamos el candado para que el usuario pueda reintentar
@@ -547,3 +553,64 @@ with colMensaje:
         st.info("Esta referencia ya fue enviada previamente con esas deudas.")
     else:
         st.info("Presione el botón para enviar el formulario (Solo se envía una vez)")
+
+# --- Siguiente: Mostrar la Información de la Solicitud Subida (Ejecutivo y Fecha Límite de Respuesta) ---
+info_solicitud_subida = st.session_state.get('info_solicitud_subida')
+solicitud_subida_exitosa = (
+    ya_enviado
+    and isinstance(info_solicitud_subida, dict)
+    and (info_solicitud_subida.get('referencia_enviada') == ref_enviar_completa)
+)
+
+if solicitud_subida_exitosa:
+    st.divider()
+
+    # Obtenemos el Ejecutivo que Gestionará la Solicitud y Separamos Nombres y Apellidos
+    partes_ejecutivo = str(info_solicitud_subida.get('ejecutivo') or '').split()
+    nombres_ejecutivo = ' '.join(partes_ejecutivo[:2]) or 'Sin Asignar'
+    apellidos_ejecutivo = ' '.join(partes_ejecutivo[2:]) or None
+
+    # Obtenemos la Fecha Límite de Respuesta y los Días Hábiles Faltantes hasta el Final del Día
+    fecha_limite_respuesta = pd.Timestamp(info_solicitud_subida['fecha_limite_respuesta'])
+    fecha_limite_fin_dia = fecha_limite_respuesta.replace(hour=23, minute=59, second=59)
+    dias_habiles_faltantes = getBDDaysDiffFloat(
+        pd.Timestamp.now('America/Bogota').tz_localize(None),
+        fecha_limite_fin_dia,
+        change_order=False,
+    )
+
+    # Mostramos el Ejecutivo y la Fecha Límite en 2 Columnas
+    colEjecutivo, colFechaLimite = st.columns(2)
+
+    with colEjecutivo:
+        st.metric(
+            label="**👤 Ejecutivo que Gestionará la Solicitud**",
+            value=nombres_ejecutivo,
+            delta=apellidos_ejecutivo,
+            delta_color="green",
+            border=True,
+            help="El Ejecutivo que realizará la gestión de la solicitud subida",
+        )
+
+    with colFechaLimite:
+        st.metric(
+            label="**⏳ Fecha Límite de Respuesta**",
+            value=fecha_limite_respuesta.strftime('%Y-%m-%d'),
+            delta="Faltan {:.2f} días hábiles".format(dias_habiles_faltantes),
+            delta_color="green",
+            border=True,
+            help="Días hábiles faltantes hasta el final del día de la Fecha Límite de Respuesta",
+        )
+
+    # Mostramos la Fecha a Partir de la Cual se Puede Realizar la Gestión por Fuera (1 Día Hábil después del Límite)
+    fecha_validacion_por_fuera = move_business_days(
+        date=fecha_limite_respuesta.normalize(),
+        delta_days=1,
+    )
+    st.info(
+        "A partir de {} a las 7AM se puede realizar la gestión por fuera de acuerdo con los tiempos de respuesta pactados para el aliado a escalar la solicitud".format(
+            fecha_validacion_por_fuera.strftime('%Y-%m-%d')
+        ),
+        title="😁 Cuando puedes validar por fuera",
+        icon="ℹ️",
+    )
