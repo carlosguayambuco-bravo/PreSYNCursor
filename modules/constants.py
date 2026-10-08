@@ -108,6 +108,7 @@ QUERY_TOTAL_REPARADORAS = """
 SELECT
     bcrd.id AS Id_Deuda,
     pi.document_number AS Cedula,
+    bcr.bank_reference AS Referencia,
     pi.full_name AS Nombre_Cliente,
     cfe.name AS Banco,
     bcrd.credit_number AS Numero_Credito,
