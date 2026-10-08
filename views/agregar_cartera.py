@@ -1279,7 +1279,8 @@ if tab_control.open:
             st.info(
                 "Solo se suben los registros cruzados (con Id_Definitivo y sin ADDENDUM) a la hoja "
                 "'Bases mes actual 2024'. Si un Id_Cruce ya existe, se actualizan sus columnas "
-                "'Metadata', 'Portafolio' y 'Monto Portafolio'.",
+                "'Metadata', 'Portafolio' y 'Monto Portafolio'. Los datos nuevos se agregan siempre "
+                "al final de la hoja y los registros subidos se marcan como **'Subido Alianzas'**.",
                 icon="ℹ️",
             )
             subir_base_mes = st.button(
@@ -1300,3 +1301,6 @@ if tab_control.open:
                     # Refrescamos el Cache de las Masivas para que los Formularios vean los Nuevos Datos
                     load_masivas.clear()
                     st.balloons()
+                    # Recargamos la Página para Reflejar los Cambios Locales (Etiqueta 'Subido Alianzas')
+                    sleep(1)
+                    st.rerun()

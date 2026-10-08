@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import get_solicitud_row_in_google_sheets, normalizeMetadata
+from data.data_loader import get_solicitud_row_in_google_sheets, normalizeMetadata, parse_metadata_cruce
 from data.data_models import MasivasMetadata, MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
 from modules.constants import COL_CREDITO, COL_ID_CRUCE, COL_MONTO_ACTUAL, ETIQUETA_ADDENDUM, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, build_column_batch_updates, col_to_letter, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
@@ -478,14 +478,39 @@ def get_masivas_rows_by_id_cruce(*, ws: gspread.Worksheet, headers: list[str]) -
     """Obtiene el mapeo Id_Cruce -> fila de Sheets de la hoja de la Base del Mes.
 
     No se debe cachear: dos subidas seguidas necesitan leer el estado real de la hoja.
-    Devuelve el mapeo y la última fila con datos de la hoja (según la columna Metadata).
+    Devuelve el mapeo y la última fila con datos de la hoja, calculada como el máximo
+    entre TODAS las columnas que se actualizan (no solo Metadata), ya que puede haber
+    registros agregados manualmente sin la Metadata.
     """
     if 'Metadata' not in headers:
         return {}, 0
-    metadata_col = headers.index('Metadata') + 1
-    valores = _retry(lambda: ws.col_values(metadata_col), label="Get Base Mes Metadata Column")
+    # Paso 1: Armar los Rangos a Revisar (Metadata + Todas las Columnas que se Actualizan)
+    columnas_revisar = ['Metadata'] + [
+        columna for columna in MASIVAS_BASE_MES_COLUMNS
+        if (columna != 'Metadata') and (columna in headers)
+    ]
+    rangos = [
+        "{letra}:{letra}".format(letra=col_to_letter(headers.index(columna) + 1))
+        for columna in columnas_revisar
+    ]
+    # Paso 2: Traer los Valores de Todos los Rangos en Una Sola Llamada
+    valores_rangos = _retry(lambda: ws.batch_get(rangos), label="Get Base Mes Columns")
+    valores_por_columna = dict(zip(columnas_revisar, valores_rangos))
+
+    # Paso 3: Calcular la Última Fila con Datos (el Máximo entre las Columnas Revisadas)
+    ultima_fila = 1
+    for columna in columnas_revisar:
+        valores = valores_por_columna.get(columna) or []
+        for idx in range(len(valores) - 1, -1, -1):
+            celda = valores[idx][0] if valores[idx] else None
+            if (celda is not None) and (str(celda).strip() != ''):
+                ultima_fila = max(ultima_fila, idx + 1)
+                break
+
+    # Paso 4: Construir el Mapeo Id_Cruce -> Fila con la Columna Metadata
     filas_id_cruce: dict[str, int] = {}
-    for fila_sheets, valor in enumerate(valores[1:], start=2):
+    for fila_sheets, fila in enumerate((valores_por_columna.get('Metadata') or [])[1:], start=2):
+        valor = fila[0] if fila else None
         if (valor is None) or (valor == ''):
             continue
         try:
@@ -499,7 +524,7 @@ def get_masivas_rows_by_id_cruce(*, ws: gspread.Worksheet, headers: list[str]) -
             continue
         # En Caso de Duplicados nos Quedamos con la Última Fila (la Más Reciente)
         filas_id_cruce[str(id_cruce)] = fila_sheets
-    return filas_id_cruce, len(valores)
+    return filas_id_cruce, ultima_fila
 
 # Función Auxiliar para Enviar los Datos Agrupados por Columnas usando batch_update
 def _enviar_batches_base_mes(*, ws: gspread.Worksheet, values_by_column: dict[str, dict[int, Any]], label: str) -> bool:
@@ -543,6 +568,31 @@ def _agregar_registros_base_mes(*, ws: gspread.Worksheet, headers: list[str], df
             for offset, (_, fila) in enumerate(df_nuevos.iterrows())
         }
     return _enviar_batches_base_mes(ws=ws, values_by_column=values_by_column, label="Append Base Mes")
+
+# Función Auxiliar para Marcar como 'Subido Alianzas' los Registros Subidos a la Base del Mes
+def _marcar_cruce_subido_alianzas(*, cruce_df: pd.DataFrame, ids_subidos: set[str]) -> bool:
+    # Paso 1: Filtrar únicamente los Registros que se Subieron a la Base del Mes
+    ids_subidos = {str(id_cruce) for id_cruce in ids_subidos}
+    mask_subidos = cruce_df[COL_ID_CRUCE].astype(str).isin(ids_subidos)
+    df_actualizar = cruce_df.loc[mask_subidos].copy()
+    if df_actualizar.empty:
+        return True
+
+    # Paso 2: Actualizar la Metadata (Etiqueta de Estado del Cruce y Última Actualización)
+    ahora = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+
+    def actualizar_mtdt(mtdt: dict) -> dict:
+        mtdt = dict(mtdt)
+        mtdt['Cruce_Status'] = 'Subido Alianzas'
+        mtdt['Ultima_Actualizacion'] = ahora
+        return parse_metadata_cruce(mtdt)
+
+    df_actualizar['Metadata'] = df_actualizar['Metadata'].apply(actualizar_mtdt)
+
+    # Paso 3: Dejar únicamente las Columnas del Esquema y Actualizar Sheets (Guardando los Cambios Locales)
+    cols_esquema = [col for col in PendienteCruceSchema.__fields__.keys() if col in df_actualizar.columns]
+    df_actualizar = df_actualizar[cols_esquema]
+    return update_base_cruce_info(cruce_df=df_actualizar)
 
 # Función para Subir/Actualizar los Datos Cruzados en la Base del Mes (Masivas)
 def upload_base_mes_info(
@@ -596,7 +646,29 @@ def upload_base_mes_info(
     if exito and not df_nuevos.empty:
         exito = _agregar_registros_base_mes(ws=base_mes_ws, headers=headers, df_nuevos=df_nuevos, start_row=ultima_fila + 1)
 
-    # Paso 7: Mostrar el Resumen de la Subida
+    # Paso 7: Marcar los Registros Subidos con la Etiqueta de Estado 'Subido Alianzas' (Trazabilidad)
+    if exito:
+        try:
+            exito = _marcar_cruce_subido_alianzas(
+                cruce_df=cruce_df,
+                ids_subidos=set(df_subida[COL_ID_CRUCE].astype(str)),
+            )
+        except Exception as e:
+            st.error(
+                "La Base del Mes se actualizó, pero no se pudo guardar la Etiqueta de Estado "
+                "'Subido Alianzas' en los registros del cruce: ```{}```. Vuelve a intentar la subida.".format(e),
+                title="Error de Trazabilidad",
+            )
+            exito = False
+        else:
+            if not exito:
+                st.error(
+                    "La Base del Mes se actualizó, pero no se pudo guardar la Etiqueta de Estado "
+                    "'Subido Alianzas' en los registros del cruce. Vuelve a intentar la subida.",
+                    title="Error de Trazabilidad",
+                )
+
+    # Paso 8: Mostrar el Resumen de la Subida
     if exito:
         st.toast(
             "✅ Base del Mes actualizada: {} nuevo(s) / {} existente(s)".format(len(df_nuevos), len(df_existentes)),
@@ -604,6 +676,7 @@ def upload_base_mes_info(
         )
         st.success(
             "✅ **Base del Mes actualizada**: **{:,}** registro(s) nuevo(s) y **{:,}** registro(s) existente(s) "
-            "con Metadata y Portafolio actualizados.".format(len(df_nuevos), len(df_existentes)),
+            "con Metadata y Portafolio actualizados. Los registros subidos quedaron marcados como "
+            "**'Subido Alianzas'**.".format(len(df_nuevos), len(df_existentes)),
         )
     return exito
