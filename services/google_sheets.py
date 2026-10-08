@@ -37,7 +37,7 @@ class GoogleSheetsService:
     def get_all_worksheets(self, spreadsheet_id: str) -> list[gspread.Worksheet]:
         try:
             spreadsheet = _retry(lambda: self.client.open_by_key(spreadsheet_id))
-            worksheets = _retry(lambda: spreadsheet.get_worksheets())
+            worksheets = _retry(lambda: spreadsheet.worksheets())
             return worksheets
         except SpreadsheetNotFound:
             raise ValueError(f"Spreadsheet with ID '{spreadsheet_id}' not found.")

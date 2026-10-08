@@ -3519,7 +3519,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
                 type="primary",
                 width="stretch",
                 icon="📤",
-                help="Haga clic para marcar la solicitud como 'Solicitado' sin tener que abrir el diálogo de respuesta. Solo disponible para Solicitudes 'Sin Tocar'.",
+                help="Haga clic para marcar la solicitud como 'Solicitado' sin tener que abrir el diálogo de respuesta.",
             ):
                 with st.spinner("Marcando Solicitud como Solicitado..."):
                     success = update_solicitud_to_solicitado(solicitud=solicitud)
