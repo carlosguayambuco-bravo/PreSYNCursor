@@ -14,7 +14,7 @@ from pypdf.generic import NameObject, TextStringObject
 from pypdf.errors import FileNotDecryptedError, WrongPasswordError
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas
+from data.data_loader import load_current_month_solicitudes, load_headcount_negociacion, load_liquidaciones, load_masivas, load_pab_ideal
 from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_filtered_plantilla, upload_addendum_debt
 from data.data_models import MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
@@ -116,6 +116,14 @@ def get_descuento_en_base(*, debt: str, original_amount: float, show_casa: bool)
         descuentos_formateados.append(descuento_formateado)
 
     return descuentos_formateados
+
+def obtener_descuentos_pab_ideal(*,debt: str, original_amount: float) -> list[str]:
+    # Paso 1: Cargar los datos de pab ideal
+    pabIdealDict = load_pab_ideal()
+    # Paso 2: Obtener el descuento ideal para la deuda específica
+    descuento_ideal = pabIdealDict.get(debt, 0.0)
+    # Paso 3: Devolver el descuento en el formato deseado
+    return [f"(*{debt}*) **PAB Ideal**: {descuento_ideal:,.0f} ({1 - descuento_ideal / original_amount:.1%} Desc.)"] if original_amount != 0 else []
 
 def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     """

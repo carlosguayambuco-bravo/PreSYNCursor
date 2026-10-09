@@ -3404,6 +3404,35 @@ def mostrar_tiempos_solicitud(*,solicitud: pd.Series) -> None:
             else:
                 st.error("Error de Fecha de Solicitado")
 
+# Función Auxiliar para mostrar la comparación de los Descuentos
+def mostrar_comparacion_descuentos(*,solicitud: pd.Series, origen: str) -> None:
+    # Mostramos las Casas de Cobro
+    deudas_actuales = [d['Id_Deuda'] for d in solicitud['Datos_Solicitud']]
+    casas_en_base = obtener_casas_cobro_base(deudas = deudas_actuales)
+    # Añadimos markdown
+    casas_en_base = ["**{}**".format(casa.title().strip()) for casa in casas_en_base]
+    # Traemos los Descuentos en Base
+    descuentos_en_base = [
+        get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'], show_casa = (origen == 'ejecutivo'))
+        for d in solicitud['Datos_Solicitud']
+    ]
+    # Volvemos los Descuentos Uniendolos por '|'
+    descuentos_en_base = [
+        ' | '.join(desc) for desc in descuentos_en_base
+        if len(desc)>0
+    ]
+
+    with st.container(border=True, vertical_alignment="center", horizontal_alignment="center"):
+        st.markdown("### 💼 Casas que Registran en Base")
+        mensaje_casas = ' | '.join(
+            np.unique(casas_en_base)
+        )
+        st.markdown("## -> "+mensaje_casas)
+        for desc in descuentos_en_base:
+            st.markdown("- "+desc)
+
+    st.warning("No Registran Descuentos en Base", icon="❌")
+
 # Función Auxiliar para mostrar detalles de acuerdos
 def mostrar_detalle_acuerdo(*,solicitud: pd.Series, cmt_delta: str):
     colFechaPago, colTipoPago = st.columns(2)
@@ -3522,34 +3551,7 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
 
         st.info("{}".format(solicitud["Metadata_Solicitud"].get('Comentario_Negociador',"Sin Comentario") or "Sin Comentario"), icon="💬", title="Comentario del Negociador")
 
-        # Mostramos las Casas de Cobro
-        deudas_actuales = [d['Id_Deuda'] for d in solicitud['Datos_Solicitud']]
-        casas_en_base = obtener_casas_cobro_base(deudas = deudas_actuales)
-        # Añadimos markdown
-        casas_en_base = ["**{}**".format(casa.title().strip()) for casa in casas_en_base]
-        # Traemos los Descuentos en Base
-        descuentos_en_base = [
-            get_descuento_en_base(debt=d['Id_Deuda'], original_amount=d['Monto_Actual'], show_casa=True)
-            for d in solicitud['Datos_Solicitud']
-        ]
-        # Volvemos los Descuentos Uniendolos por '|'
-        descuentos_en_base = [
-            ' | '.join(desc) for desc in descuentos_en_base
-            if len(desc)>0
-        ]
-
-        if casas_en_base:
-            with st.container(border=True, vertical_alignment="center", horizontal_alignment="center"):
-                st.markdown("### 💼 Casas que Registran en Base")
-                mensaje_casas = ' | '.join(
-                    np.unique(casas_en_base)
-                )
-                st.markdown("## -> "+mensaje_casas)
-                for desc in descuentos_en_base:
-                    st.markdown("- "+desc)
-        else:
-            st.warning("No Registran Descuentos en Base", icon="❌")
-            
+        mostrar_comparacion_descuentos(solicitud=solicitud, origen="ejecutivo")    
 
         # Paso Siguiente: Mostrar las Caracteristicas por Deuda de la Solicitud
         st.divider()

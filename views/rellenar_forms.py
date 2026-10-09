@@ -6,7 +6,7 @@ from time import sleep
 import streamlit as st
 import pandas as pd
 # Librerías Propias
-from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
+from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, load_prospectos_credito, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, alertar_excedencia_contraprop_max_relativa
 from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
@@ -26,6 +26,8 @@ debtsLiq = load_liquidaciones()
 masivasDF = load_masivas()
 # Configuración del App
 appConfig = load_app_config()
+# Prospectos de Crédito
+prospDict = load_prospectos_credito()
 
 
 # Inicializamos las Deudas Seleccionadas en el Session State si no Existe
@@ -119,6 +121,8 @@ if deudas_activas_df.empty:
 # Volvemos a dejar el Id_Deuda como intocable para que el usuario no lo cambie
 st.session_state['id_rep_needed'] = False
 
+# Mostramos el prospecto del cliente
+st.caption("ℹ️ **Prospecto del Cliente**: {}".format(prospDict[referencia_cliente]))
 
 # Verificamos que exista una Última Actualización para las Deudas Activas en el Último Mes
 ultima_actualizacion = obtener_ultima_actualizacion_deudas(debt_ids=deudas_activas_df['Id_Deuda'].tolist(), user_email=st.session_state.get('user_email', ''))

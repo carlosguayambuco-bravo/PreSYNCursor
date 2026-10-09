@@ -115,6 +115,17 @@ class PaBIdealSchema(pa.DataFrameModel):
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
 
+class ProspectosCreditoSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de prospectos de crédito.
+    """
+    Referencia: str = pa.Field(nullable=False)
+    Prospecto: str = pa.Field(nullable=False)
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
+
 class AliadosSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de aliados.

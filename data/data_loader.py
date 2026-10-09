@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage
@@ -500,7 +500,7 @@ def load_client_balances() -> dict[str, dict[str, float]]:
 
 # --> Carga de PaB Ideal de Crédito
 @st.cache_data(show_spinner="Cargando PaB Ideal de Crédito desde Google Sheets...", ttl=HOUR_WAIT)
-def load_pab_ideal() -> dict:
+def load_pab_ideal() -> dict[str,float]:
 
     # Primero Obtenemos la Spreadsheet de PaB Ideal desde Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -516,7 +516,7 @@ def load_pab_ideal() -> dict:
 
     # Si Ninguna Hoja Cumple el Formato, Devolvemos un Diccionario Vacío
     if not hojas_validas:
-        return {}
+        return defaultdict(float)
 
     # Obtenemos la Última Hoja (la de Mayor Número de Meses)
     nombre_hoja = max(hojas_validas, key=lambda hoja: hoja[0])[1]
@@ -554,10 +554,71 @@ def load_pab_ideal() -> dict:
     # Creamos el Diccionario de Búsqueda para Id_Deuda -> PaB_Ideal_Credito
     pabIdealDict = pab_ideal_df.set_index('Id_Deuda')['PaB_Ideal_Credito'].to_dict()
     # Volvemos el Diccionario a defaultdict con valor por defecto 0
-    pabIdealDict = defaultdict(int, pabIdealDict)
+    pabIdealDict = defaultdict(float, pabIdealDict)
 
     # Devolvemos el Diccionario de PaB Ideal de Crédito
     return pabIdealDict
+
+def defaultProspecto() -> str:
+    return "Tradicional"
+
+@st.cache_data(show_spinner="Cargando Prospectos de Crédito desde Google Sheets...", ttl=DAY_WAIT)
+def load_prospectos_credito() -> dict[str,str]:
+
+    # Primero Obtenemos la Spreadsheet de Prospectos de Crédito desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos Todas las Hojas de la Spreadsheet de Prospectos de Crédito
+    worksheets = google_sheets_service.get_all_worksheets(PROSPECTOS_CREDITO_SHEET_ID)
+
+    # Calculamos el Número de Meses de Cada Hoja (las que no cumplen el formato quedan en -1)
+    hojas_con_meses = [(getSheetMonthNumber(worksheet.title), worksheet.title) for worksheet in worksheets]
+
+    # Filtramos las Hojas que Cumplen el Formato '{Mes Completo}-{Año%100}'
+    hojas_validas = [(meses, nombre) for meses, nombre in hojas_con_meses if meses != -1]
+
+    # Si Ninguna Hoja Cumple el Formato, Devolvemos un Diccionario Vacío
+    if not hojas_validas:
+        return defaultdict(defaultProspecto)  # Valor por defecto "Tradicional"
+
+    # Obtenemos la Última Hoja (la de Mayor Número de Meses)
+    nombre_hoja = max(hojas_validas, key=lambda hoja: hoja[0])[1]
+
+    prosp_cred_df = google_sheets_service.get_sheet_as_dataframe(PROSPECTOS_CREDITO_SHEET_ID, nombre_hoja)
+
+    # Renombramos Columna PB Ideal a PaB_Ideal_Credito
+    prosp_cred_df = prosp_cred_df.rename(columns={'Referencia':'Referencia','Origen':'Prospecto'}) # type: ignore
+
+    # Volvemos la Referencia a String
+    prosp_cred_df['Referencia'] = prosp_cred_df['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Dejamos solo las Columnas de Referencia y Prospecto
+    prosp_cred_df = prosp_cred_df[['Referencia', 'Prospecto']]
+
+    # Cargamos el Diccionario de Cambios de Referencias
+    refChangesDict = load_reference_changes()
+    # Aplicamos el Cambio de las Referencias en el DataFrame
+    prosp_cred_df['Referencia'] = prosp_cred_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
+    # Quitamos Datos con nans
+    prosp_cred_df = prosp_cred_df.dropna(subset=['Referencia', 'Prospecto'])
+
+    # Eliminamos Duplicados por Referencia, dejando el último registro (el más reciente)
+    prosp_cred_df = prosp_cred_df.drop_duplicates(subset=['Referencia'], keep='last')
+
+    # Validamos el DF (Si no esta vacío)
+    if not prosp_cred_df.empty:
+        prosp_cred_df = ProspectosCreditoSchema.validate(prosp_cred_df)
+    else:
+        prosp_cred_df = ProspectosCreditoSchema.empty()
+
+    # Creamos el Diccionario de Búsqueda para Referencia -> Prospecto
+    prospectoDict = prosp_cred_df.set_index('Referencia')['Prospecto'].to_dict()
+    # Volvemos el Diccionario a defaultdict con valor por defecto "Tradicional"
+    prospectoDict = defaultdict(defaultProspecto, prospectoDict)
+
+    # Devolvemos el Diccionario de PaB Ideal de Crédito
+    return prospectoDict
 
 # --> Carga de Datos de Aliados
 @st.cache_data(show_spinner="Cargando Datos de Aliados desde Google Sheets...", ttl=HOUR_WAIT)
