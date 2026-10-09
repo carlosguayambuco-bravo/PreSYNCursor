@@ -262,56 +262,60 @@ def cleanNumeroCredito(nc: Any) -> str:
 
 def cleanText(txt):
     # Verificamos que no sea NaN
-    if pd.isna(txt) or not (isinstance(txt,str)):
+    if pd.isna(txt) or not (isinstance(txt, str)):
         return 'NAN'
+    
     # Primero Quitamos tildes y dejamos Upper
     txt = txt.lower().replace("ó", "o").replace("á", "a").replace("í", "i").replace("é", "e").replace("ú", "u").upper().strip()
+    
     # Ahora Reemplazamos #N/A con NO_HAY_INFORMACION
-    txt = txt.replace('#N/A','NO_HAY_INFORMACION')
+    txt = txt.replace('#N/A', 'NO_HAY_INFORMACION')
+    
     # Ahora Iteramos por cada uno de los signos de puntuación y los quitamos
     for p in '\'!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~´-':
-        txt = txt.replace(p,'')
+        txt = txt.replace(p, '')
+        
     # Ahora Reemplazamos (\d+) con '' para evitar numeros y parentesis
     txt = re.sub(r'\(\d+\)', '', txt)
+    
     # Remplazamos Bco. por BANCO y AV VILLAS POR AVVILLAS
-    txt = txt.replace('BCO.','BANCO').replace('AV VILLAS','AVVILLAS')
-    # Reemplazams JEFFERSON_CAPITAL por JCAP
-    txt = txt.replace('JEFFERSON_CAPITAL','JCAP')
+    txt = txt.replace('BCO', 'BANCO').replace('AV VILLAS', 'AVVILLAS')
+    
+    # Reemplazamos JEFFERSON_CAPITAL por JCAP
+    txt = txt.replace('JEFFERSON_CAPITAL', 'JCAP')
+    
     # Quitamos Números Romanos por cada uno de los Splits por espacio
     romanRegex = r'\b(?=[MDCLXVI])M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})\b'
     txt = ' '.join(re.sub(romanRegex, '', t) for t in txt.split())
-    # Ahora realizamos split por espacio y ordenamos
-    txt = ' '.join(sorted(txt.split()))
-    # Quitamos Valores de Banco\s
-    txt = ' '.join(t for t in txt.split() if not t == 'BANCO')
-    # Quitamos Nombres Comunes de Casas de Cobro
-    commonNames = r'\b(' \
-            r'grupo|juridico|jurídico|sas|sa|s a|ltda|suma|financiera|'\
-            r'contactosol|contacto|solucion|soluciones|citisumma|'\
-            r'cobrando|cobranzas|adcore|logros|factoring|origen|origem|'\
-            r'gestiones|gestion|profesionales|bpo|inversionistas|'\
-            r'estrategicos|estratégicos|casa|de|cobro|servicios|'\
-            r'creditos|credito|abogados|asociados|'\
-            r'outsourcing|risk|patrimonio|autonomo|autónomo|central|'\
-            r'inversiones|valora|punto|com|puntocom|activos|'\
-            r'recuperacion|recuperación|financiera|financiero|'\
-            r'asesores|asociados|gest|prof|eyc|gca|summa'\
-            r')\b'
-    # Volvemos los Nombres Comunes a Upper
-    commnNames = commonNames.upper()
-    # Quitamos los nombres comunes
-    txt = re.sub(commnNames, '', txt)
+    
+    # Quitamos "BANCO" y Nombres Comunes/Stopwords antes de ordenar
+    common_words = {
+        'BANCO', 'GRUPO', 'JURIDICO', 'JURÍDICO', 'SAS', 'SA', 'S A', 'LTDA', 'SUMMA', 
+        'FINANCIERA', 'FINANCIERO', 'CONTACTOSOL', 'CONTACTO', 'SOLUCION', 'SOLUCIONES', 
+        'CITISUMMA', 'COBRANDO', 'COBRANZAS', 'ADCORE', 'LOGROS', 'FACTORING', 'ORIGEN', 
+        'ORIGEM', 'GESTIONES', 'GESTION', 'PROFESIONALES', 'BPO', 'INVERSIONISTAS', 
+        'ESTRATEGICOS', 'ESTRATÉGICOS', 'CASA', 'DE', 'COBRO', 'SERVICIOS', 'CREDITOS', 
+        'CREDITO', 'ABOGADOS', 'ASOCIADOS', 'OUTSOURCING', 'RISK', 'PATRIMONIO', 
+        'AUTONOMO', 'AUTÓNOMO', 'CENTRAL', 'INVERSIONES', 'VALORA', 'PUNTO', 'COM', 
+        'PUNTOCOM', 'ACTIVOS', 'RECUPERACION', 'RECUPERACIÓN', 'ASESORES', 'GEST', 
+        'PROF', 'EYC', 'GCA'
+    }
+    
+    # Filtramos las palabras descartadas respetando límites de palabra exactos
+    words = [w for w in txt.split() if w not in common_words]
+    
+    # Ordenamos las palabras restantes y unimos con espacio
+    txt = ' '.join(sorted(words))
 
     # Reemplazamos NUBANK POR NU
-    txt = txt.replace('NUBANK','NU')
+    txt = txt.replace('NUBANK', 'NU')
 
-    # Regla de Negocio: Si tiene COLPATRIA se devuelve DAVI BANK
+    # Reglas de Negocio
     if 'COLPATRIA' in txt:
         txt = 'DAVI BANK'
-    if 'BBVA' in txt:
+    elif 'BBVA' in txt:
         txt = 'BBVA'
 
-    # Se devuelve el valor
     return txt.strip()
 
 # Función Auxiliar para Leer la Base Subida por el Usuario (xlsx o csv)
