@@ -607,6 +607,54 @@ def mostrar_boton_actualizar_solicitudes(
         else:
             st.error("Error al Subir la Solicitud a Google Sheets o el Acuerdo de Pago a Google Drive. Por favor, intente nuevamente.")
 
+# Función Auxiliar para Construir el Pills de Deudas y Addendums de un Acuerdo de Pago
+# Las Opciones pueden ser Todas las Deudas/Addendums o Solo las que Tienen Monto Propuesto.
+# Antes de Renderizar Repara la Selección Persistida en el Session State para Evitar que
+# un Estado Vacío (Por Ejemplo Cuando Todas las Opciones se Quedan sin Monto) Deje el Pills
+# Sin Opciones y Bloquee la Generación del Acuerdo de Pago.
+def mostrar_pills_deudas_acuerdo(
+        *,
+        solicitud: pd.Series,
+        deudas_info: list[dict],
+        sufijo: str = '',
+        solo_con_monto: bool = False,
+    ) -> list[str]:
+
+    # Definimos Todas las Deudas Disponibles (o Solo las que Tienen Monto Propuesto)
+    debt_ids = [
+        d['Id_Deuda'] for d in deudas_info
+        if (not solo_con_monto) or (cleanNumber(d.get('Monto_Propuesto', 0), default_nan=0.0) > 0)
+    ]
+
+    # Definimos la Key del Widget (La Misma para los Formatos 'Subir Archivo' y 'Generar PDF')
+    key_pills = "deudas_addendums_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo)
+
+    # Si Hay Opciones, Reparamos la Selección Persistida:
+    # Quitamos los Ids que Ya No Están Disponibles y, si la Selección Quedó Vacía, Restauramos el Default
+    seleccion_previa = st.session_state.get(key_pills)
+    if debt_ids and (seleccion_previa is not None):
+        seleccion_valida = [id_deuda for id_deuda in debt_ids if id_deuda in seleccion_previa]
+        if not seleccion_valida:
+            seleccion_valida = list(debt_ids)
+        if seleccion_valida != list(seleccion_previa):
+            st.session_state[key_pills] = seleccion_valida
+
+    # Si No Hay Opciones No se Renderiza un Pills Vacío (Streamlit Congela su Valor en Vacío)
+    if not debt_ids:
+        return []
+
+    # Devolvemos la Selección del Pills (Lista Vacía si el Usuario No Selecciona Nada)
+    return st.pills(
+        "**Deudas y Addendums usados**",
+        options=debt_ids,
+        default=debt_ids,
+        help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
+        key=key_pills,
+        selection_mode="multi",
+        width="stretch",
+        persist_state="page",
+    ) or []
+
 # Función Auxiliar para mostrar las Especificaciones del Acuerdo de Pago Generado
 def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series, sufijo: str = '') -> bytes:
 
@@ -617,23 +665,20 @@ def mostrar_especificaciones_acuerdo_generado(*, solicitud: pd.Series, sufijo: s
         # Reunimos la Información de las Deudas y los Addendums en uno Solo
         deudas_info = solicitud["JSON_Respuesta"] + solicitud["Metadata_Solicitud"].get("Addendums",[])
 
-        # Definimos todas las Deudas Disponibles
-        debt_ids = [d['Id_Deuda'] for d in deudas_info if cleanNumber(d['Monto_Propuesto'], default_nan=0) > 0]
-
-        # Creamos una Vista de Pills para definir las Deudas a Usar
-        selected_ids = st.pills(
-            "**Deudas y Addendums usados**",
-            options=debt_ids,
-            default=debt_ids,
-            help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
-            key = "deudas_addendums_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
-            selection_mode="multi",
-            width="stretch",
-            persist_state="page",
+        # Creamos una Vista de Pills para definir las Deudas a Usar (Solo las que Tienen Monto Propuesto)
+        selected_ids = mostrar_pills_deudas_acuerdo(
+            solicitud=solicitud,
+            deudas_info=deudas_info,
+            sufijo=sufijo,
+            solo_con_monto=True,
         )
 
         if selected_ids is None or not selected_ids:
-            st.error("Debe seleccionar al menos una deuda o addendum para generar el acuerdo de pago.")
+            # Mostramos un Mensaje Específico si el Problema es que No Hay Deudas con Monto Propuesto
+            if any(cleanNumber(d.get('Monto_Propuesto', 0), default_nan=0.0) > 0 for d in deudas_info):
+                st.error("Debe seleccionar al menos una deuda o addendum para generar el acuerdo de pago.")
+            else:
+                st.warning("No hay deudas ni addendums con monto propuesto. Ingrese los montos para poder generar el acuerdo de pago.", icon="⚠️")
             st.stop()
 
         selected_deudas_info = [d for d in deudas_info if (d['Id_Deuda'] in selected_ids)]
@@ -798,20 +843,18 @@ def construir_respuesta_solicitud_acuerdo_pago(*, solicitud: pd.Series, solicitu
             # Reunimos la Información de las Deudas y los Addendums en uno Solo
             deudas_info = solicitud_respuesta["JSON_Respuesta"] + solicitud_respuesta["Metadata_Solicitud"].get("Addendums",[])
 
-            # Definimos todas las Deudas Disponibles
-            debt_ids = [d['Id_Deuda'] for d in deudas_info]
-
-            # Creamos una Vista de Pills para definir las Deudas a Usar
-            selected_ids = st.pills(
-                "**Deudas y Addendums usados**",
-                options=debt_ids,
-                default=debt_ids,
-                help="Seleccione las deudas y addendums que desea incluir en el acuerdo de pago generado.",
-                key = "deudas_addendums_solicitud_info_{}{}".format(solicitud['ID_Solicitud'], sufijo),
-                selection_mode="multi",
-                width="stretch",
-                persist_state="page",
+            # Creamos una Vista de Pills para definir las Deudas a Usar (Todas las Deudas y Addendums)
+            selected_ids = mostrar_pills_deudas_acuerdo(
+                solicitud=solicitud,
+                deudas_info=deudas_info,
+                sufijo=sufijo,
+                solo_con_monto=False,
             )
+
+            # No se Permite Continuar sin Deudas/Addendums Seleccionados
+            if not selected_ids:
+                st.warning("Debe seleccionar al menos una deuda o addendum para incluir en el acuerdo de pago.", icon="⚠️")
+                st.stop()
 
             acuerdo_pdf_list = st.file_uploader(
                 label="**Subir Acuerdo(s) de Pago e Imágenes**",
@@ -1275,6 +1318,11 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
     monto_propuesto_portafolio = sum(
         cleanNumber(d['Monto_Propuesto']) for d in datos_montos if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
     )
+    # Base de Respaldo (Datos_Solicitud) para cuando la Respuesta Anterior No Tiene Montos (Por Ejemplo No Exitosa)
+    monto_propuesto_datos = sum(
+        cleanNumber(d['Monto_Propuesto'], default_nan=0.0) for d in solicitud["Datos_Solicitud"]
+        if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
+    )
 
     # Paso 3: Aplicar Lógica de Recálculo basado en los Session States
     if st.session_state[key_usar_monto_total]:
@@ -1282,6 +1330,10 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
         monto_total = cleanNumber(st.session_state[key_monto_total], default_nan=0.0)
         # Lo formateamos para que se vea bonito
         st.session_state[key_monto_total] = formatNumber(monto_total)
+        # Definimos las Deudas Seleccionadas para la Distribución
+        deudas_seleccionadas = [
+            d for d in solicitud["Datos_Solicitud"] if d['Id_Deuda'] in st.session_state[key_deudas_dist_monto]
+        ]
         # Iteramos por las Deudas
         for d in solicitud["Datos_Solicitud"]:
             key_monto = 'monto_propuesto_{}_{}{}'.format(solicitud['ID_Solicitud'], d['Id_Deuda'], sufijo)
@@ -1290,12 +1342,25 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                 st.session_state[key_monto] = "Sin Oferta"
                 continue
             # Calculamos el Monto Propuesto por Deuda basado en el Monto Total y el Monto Propuesto Original
-            if modo_edicion:
+            # Se usa el JSON_Respuesta cuando es la Base y Datos_Solicitud en Caso Contrario (Respuestas No Exitosas)
+            if usar_json_como_base:
                 respuesta_deuda = next((r for r in solicitud["JSON_Respuesta"] if r['Id_Deuda'] == d['Id_Deuda']), None)
                 monto_base = cleanNumber(respuesta_deuda['Monto_Propuesto']) if respuesta_deuda is not None else 0.0
             else:
                 monto_base = cleanNumber(d['Monto_Propuesto'])
-            porcentaje_propuesto_original = monto_base / monto_propuesto_portafolio if monto_propuesto_portafolio > 0 else 0
+            # Definimos la Base Total de la Distribución: si la Respuesta Anterior No Tiene Montos Positivos
+            # se usan los Montos Solicitados Originales y, si tampoco hay, se Reparte en Partes Iguales
+            if monto_propuesto_portafolio > 0:
+                total_base = monto_propuesto_portafolio
+            elif monto_propuesto_datos > 0:
+                monto_base = cleanNumber(d['Monto_Propuesto'], default_nan=0.0)
+                total_base = monto_propuesto_datos
+            else:
+                total_base = 0
+            if total_base > 0:
+                porcentaje_propuesto_original = monto_base / total_base
+            else:
+                porcentaje_propuesto_original = (1 / len(deudas_seleccionadas)) if deudas_seleccionadas else 0
             monto_propuesto_nuevo = round(monto_total * porcentaje_propuesto_original)
             # Actualizamos el Session State del Monto Propuesto por Deuda
             st.session_state[key_monto] = formatNumber(monto_propuesto_nuevo)
