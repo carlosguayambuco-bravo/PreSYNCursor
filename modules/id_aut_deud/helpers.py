@@ -26,6 +26,8 @@ from modules.constants import (
     ETIQUETA_ADDENDUM,
     ETIQUETA_EXACTO,
     ETIQUETA_NULO,
+    MIN_COLUMNAS_HOJA_EXCEL,
+    MIN_FILAS_HOJA_EXCEL,
     MIN_LEN_TEXTO,
     TIPOS_CONTRAOFERTAS
 )
@@ -318,26 +320,85 @@ def cleanText(txt):
 
     return txt.strip()
 
+# Función Auxiliar para Obtener las Hojas Posibles de un Excel (más de 1 Fila y más de 1 Columna)
+def obtener_hojas_excel(uploaded_file: io.BytesIO) -> tuple[list[str], list[str]]:
+    """Clasifica las hojas de un Excel en (Hojas Posibles, Hojas Descartadas).
+
+    Una hoja es posible cuando tiene más de 1 fila y más de 1 columna.
+    """
+    # Abrimos el Excel una sola vez y leemos solo las filas mínimas de cada hoja
+    excel_file = pd.ExcelFile(io.BytesIO(uploaded_file.getvalue()), engine='openpyxl')
+    hojas_posibles = []
+    hojas_descartadas = []
+    for hoja in excel_file.sheet_names:
+        try:
+            vista_previa = excel_file.parse(hoja, dtype=str, nrows=MIN_FILAS_HOJA_EXCEL)
+        except Exception:
+            # Si una hoja no se puede leer, se descarta como posible
+            hojas_descartadas.append(hoja)
+            continue
+        if (len(vista_previa) >= MIN_FILAS_HOJA_EXCEL) and (len(vista_previa.columns) >= MIN_COLUMNAS_HOJA_EXCEL):
+            hojas_posibles.append(hoja)
+        else:
+            hojas_descartadas.append(hoja)
+    return hojas_posibles, hojas_descartadas
+
 # Función Auxiliar para Leer la Base Subida por el Usuario (xlsx o csv)
-def leer_base_subida(uploaded_file: io.BytesIO) -> pd.DataFrame:
+def leer_base_subida(uploaded_file: io.BytesIO) -> tuple[pd.DataFrame, Optional[str]]:
+    """Lee la base subida y devuelve (DataFrame, Nombre de la Hoja Leída).
+
+    Para los Excels se muestran las hojas posibles (más de 1 fila y más de 1 columna)
+    y el usuario escoge cuál leer. Para los CSV la hoja siempre es None.
+    """
     buffer_bytes = uploaded_file.getvalue()
     ext = uploaded_file.name.split('.')[-1].lower()
 
-    # Caso 1: Excel
+    # Caso 1: Excel (se escoge la Hoja a leer entre las Hojas Posibles)
     if ext == 'xlsx':
-        return pd.read_excel(io.BytesIO(buffer_bytes), dtype=str)
+        try:
+            hojas_posibles, hojas_descartadas = obtener_hojas_excel(uploaded_file)
+        except Exception as e:
+            st.error("No se pudo leer el archivo Excel: {}".format(e), icon="❌")
+            return pd.DataFrame(), None
+
+        # Informamos las Hojas que no cumplen con el Mínimo de Filas y Columnas
+        if hojas_descartadas:
+            st.caption(
+                "ℹ️ Hojas ignoradas por no tener más de 1 fila y más de 1 columna: {}".format(
+                    ", ".join(hojas_descartadas)
+                )
+            )
+
+        # Sin Hojas Posibles no se puede continuar con el Cruce
+        if not hojas_posibles:
+            st.error("El Excel no tiene ninguna hoja con más de 1 fila y más de 1 columna.", icon="🚫")
+            return pd.DataFrame(), None
+
+        # Si hay Varias Hojas Posibles el Usuario Escoge la Hoja a Leer
+        if len(hojas_posibles) > 1:
+            hoja_escogida = st.selectbox(
+                label="**📄 Hoja del Excel a Leer**",
+                options=hojas_posibles,
+                index=0,
+                key="cruce_hoja_excel_{}_{}".format(uploaded_file.name, uploaded_file.size),
+                help="Selecciona la hoja que contiene la base que se va a cruzar.",
+            )
+        else:
+            hoja_escogida = hojas_posibles[0]
+
+        return pd.read_excel(io.BytesIO(buffer_bytes), sheet_name=hoja_escogida, dtype=str), hoja_escogida
 
     # Caso 2: CSV (intentamos la lectura y si falla pedimos el separador)
     try:
         df = pd.read_csv(io.BytesIO(buffer_bytes), dtype=str)
         if len(df) >= 2 and len(df.columns) > 1:
-            return df
+            return df, None
     except Exception:
         pass
     try:
         df = pd.read_csv(io.BytesIO(buffer_bytes), dtype=str, encoding='latin-1')
         if len(df) >= 2 and len(df.columns) > 1:
-            return df
+            return df, None
     except Exception:
         pass
 
@@ -350,12 +411,12 @@ def leer_base_subida(uploaded_file: io.BytesIO) -> pd.DataFrame:
     if separador:
         try:
             sep = '\t' if separador == '\\t' else separador
-            return pd.read_csv(io.BytesIO(buffer_bytes), sep=sep, dtype=str)
+            return pd.read_csv(io.BytesIO(buffer_bytes), sep=sep, dtype=str), None
         except Exception as e:
             st.error("No se pudo leer el CSV con el separador '{}': {}".format(separador, e), icon="❌")
-            return pd.DataFrame()
+            return pd.DataFrame(), None
     st.error("No se pudo leer el archivo CSV. Indica el separador para continuar.", icon="🚧")
-    return pd.DataFrame()
+    return pd.DataFrame(), None
 
 # Función Auxiliar para Adivinar la Columna que corresponde a un dato del esquema
 def adivinar_columna(columnas: list, candidatos: list) -> str:

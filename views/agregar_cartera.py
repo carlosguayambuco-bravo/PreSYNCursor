@@ -94,7 +94,7 @@ def _aplicar_filtros_base(*, df: pd.DataFrame, filtros: list[dict]) -> pd.DataFr
     return df_filtrado
 
 # Función Auxiliar para Mostrar la Configuración del Cruce (Columnas, Modelo y Subida)
-def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str) -> None:
+def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: str, hoja_excel: Optional[str] = None) -> None:
     # --- 2. Selección del Aliado y Alias ---
     st.markdown("### 🥸 Selección del Aliado")
     colAliado, colAlias = st.columns(2)
@@ -112,8 +112,8 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
             key="cruce_alias_input",
             help="Texto pequeño para identificar la base en caso de multiples Contactos (Ej: 'Liquitty Administrada').",
         )
-    # Clave base del cruce (relacionada con la Casa de Cobro, el Alias y el Archivo)
-    base_key = "{}_{}_{}_{}".format(casa_cobro, alias or 'SIN_ALIAS', uploaded_file.name, uploaded_file.size)
+    # Clave base del cruce (relacionada con la Casa de Cobro, el Alias, el Archivo y la Hoja)
+    base_key = "{}_{}_{}_{}_{}".format(casa_cobro, alias or 'SIN_ALIAS', uploaded_file.name, uploaded_file.size, hoja_excel or 'CSV')
 
     # --- 2.1 Verificación de Base Subida Anteriormente ---
     st.markdown("### 🗂️ Verificación de Base Subida")
@@ -928,25 +928,29 @@ if tab_subida.open:
             if uploaded_file is None:
                 st.warning("Esperando la subida de un archivo...", icon="⏳")
                 st.stop()
-            else:
-                # Detección de un archivo nuevo para reiniciar los widgets de columnas
-                id_archivo = "{}_{}".format(uploaded_file.name, uploaded_file.size)
-                if st.session_state.get('cruce_archivo_actual') != id_archivo:
-                    st.session_state['cruce_archivo_actual'] = id_archivo
-                    resetear_widgets_columnas(id_archivo)
 
-                # Lectura de la Base
-                raw_df = leer_base_subida(uploaded_file)
-                if raw_df is not None:
-                    ext = uploaded_file.name.split('.')[-1].lower()
-                    st.caption("✅ Base leída: **{:,}** registros y **{}** columnas".format(len(raw_df), raw_df.shape[1]))
-                    with st.expander("🔎 Vista Previa de la Base (Primeros 50 Registros)", expanded=False):
-                        st.dataframe(raw_df.head(50), width="stretch")
-                else:
-                    st.stop()
+            # Lectura de la Base (para los Excel se escoge la Hoja a Leer)
+            raw_df, hoja_excel = leer_base_subida(uploaded_file)
+            if (raw_df is None) or raw_df.empty:
+                st.stop()
+
+            # Detección de un archivo (o Hoja) nuevo para reiniciar los widgets de columnas
+            id_archivo = "{}_{}_{}".format(uploaded_file.name, uploaded_file.size, hoja_excel or 'csv')
+            if st.session_state.get('cruce_archivo_actual') != id_archivo:
+                st.session_state['cruce_archivo_actual'] = id_archivo
+                resetear_widgets_columnas(id_archivo)
+
+            ext = uploaded_file.name.split('.')[-1].lower()
+            st.caption("✅ Base leída: **{:,}** registros y **{}** columnas{}".format(
+                len(raw_df),
+                raw_df.shape[1],
+                "" if hoja_excel is None else " (Hoja: **{}**)".format(hoja_excel),
+            ))
+            with st.expander("🔎 Vista Previa de la Base (Primeros 50 Registros)", expanded=False):
+                st.dataframe(raw_df.head(50), width="stretch")
 
         # Configuración del Cruce (Columnas, Modelo y Subida de Datos)
-        _mostrar_configuracion_cruce(uploaded_file=uploaded_file, raw_df=raw_df, ext=ext)
+        _mostrar_configuracion_cruce(uploaded_file=uploaded_file, raw_df=raw_df, ext=ext, hoja_excel=hoja_excel)
 
 # ==============================
 # Tab 2: Escogencia Manual de Id_Deuda Definitivo

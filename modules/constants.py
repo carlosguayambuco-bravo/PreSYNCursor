@@ -303,6 +303,10 @@ MIMETYPES = {
     'csv': 'text/csv',
 }
 
+# --- Configuración de Lectura de Hojas de Excel ---
+MIN_FILAS_HOJA_EXCEL = 2    # Mínimo de filas (más de 1) para considerar una hoja del Excel como posible
+MIN_COLUMNAS_HOJA_EXCEL = 2 # Mínimo de columnas (más de 1) para considerar una hoja del Excel como posible
+
 COLUMNAS_MAPEABLES = [
     (COL_CEDULA, 'Cedula', ['cedula', 'documento', 'identificacion','cédula']),
     (COL_NOMBRE, 'Nombre del Cliente', ['nombre', 'cliente']),
