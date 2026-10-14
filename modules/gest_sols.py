@@ -117,13 +117,13 @@ def get_descuento_en_base(*, debt: str, original_amount: float, show_casa: bool)
 
     return descuentos_formateados
 
-def obtener_descuentos_pab_ideal(*,debt: str, original_amount: float) -> list[str]:
+def obtener_descuentos_pab_ideal(*,debt: str, original_amount: float) -> str:
     # Paso 1: Cargar los datos de pab ideal
     pabIdealDict = load_pab_ideal()
     # Paso 2: Obtener el descuento ideal para la deuda específica
-    descuento_ideal = pabIdealDict.get(debt, 0.0)
+    pab_ideal = pabIdealDict.get(debt, 0.0)
     # Paso 3: Devolver el descuento en el formato deseado
-    return [f"(*{debt}*) **PAB Ideal**: {descuento_ideal:,.0f} ({1 - descuento_ideal / original_amount:.1%} Desc.)"] if original_amount != 0 else []
+    return f"(*{debt}*) **PAB Ideal**: {pab_ideal:,.0f} ({1 - pab_ideal / original_amount:.1%} Desc.)" if (original_amount != 0 and pab_ideal != 0) else "Sin PaB Ideal"
 
 def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     """
