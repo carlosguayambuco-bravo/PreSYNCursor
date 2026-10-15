@@ -323,7 +323,7 @@ with colAliado:
 st.divider()
 
 # Mostramos la Selección de los Montos Propuestos por Deuda
-info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df) # type: ignore
+info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df, aliado=aliado_seleccionado) # type: ignore
 
 # Mostramos el Monto Recomendado para la Solicitud (Si es Validacion u Oferta de Acuerdo)
 if tipo_solicitud in ['Validación', 'Oferta de Acuerdo']:

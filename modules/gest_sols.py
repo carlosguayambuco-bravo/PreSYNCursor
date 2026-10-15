@@ -2,7 +2,7 @@
 # Librerías de Python
 import json
 import re
-from typing import Literal, Any, Hashable, Optional
+from typing import Literal, Any, Hashable, Optional, TypedDict
 from io import BytesIO
 # Librerías de Terceros
 import numpy as np
@@ -24,6 +24,12 @@ from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
 
 METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago','Modificaciones']
+
+class ResultadoDistribucionMontos(TypedDict):
+    """Resultado de Distribuir un Monto Total entre un Conjunto de Deudas"""
+    montos: dict[str, float]  # Monto Propuesto por Id_Deuda (Enteros que Suman el Monto Total)
+    pesos: dict[str, float]   # Peso Usado por Id_Deuda (Valor en Base o Monto Actual)
+    uso_base: bool            # True si se Distribuyó por Valores en Base
 
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
@@ -124,6 +130,127 @@ def obtener_descuentos_pab_ideal(*,debt: str, original_amount: float) -> str:
     pab_ideal = pabIdealDict.get(debt, 0.0)
     # Paso 3: Devolver el descuento en el formato deseado
     return f"(*{debt}*) **PAB Ideal**: {pab_ideal:,.0f} ({1 - pab_ideal / original_amount:.1%} Desc.)" if (original_amount != 0 and pab_ideal != 0) else "Sin PaB Ideal"
+
+def _obtener_valores_base_por_deuda(*, deudas: list[str], aliado: str, masivas_df: Optional[pd.DataFrame] = None) -> dict[str, float]:
+    """
+    Obtiene el Valor en Base (Menor PaB_Propuesta) por Deuda para un Aliado (Casa de Cobro) Específico.
+
+    Los Descuentos en Base se obtienen con la Misma Resolución del Formulario
+    (resolver_aliado_directo_base) y se elige el Menor PaB_Propuesta por Deuda
+    (el Mejor Descuento en Base) para el Aliado Indicado.
+
+    Args:
+        deudas (list[str]): Ids de las Deudas a Consultar.
+        aliado (str): Aliado (Casa de Cobro) con el que se Consultan los Valores en Base.
+        masivas_df (Optional[pd.DataFrame]): Actualizaciones Masivas ya Cargadas (si no, se cargan).
+
+    Returns:
+        dict[str, float]: Valor en Base por Id_Deuda (Solo las Deudas con Valor en Base Válido).
+    """
+    # Paso 1: Cargamos las Actualizaciones Masivas si no Fueron Provistas
+    if masivas_df is None:
+        masivas_df = load_masivas()
+
+    # Paso 2: Obtenemos las Masivas Locales con la Misma Resolución del Formulario
+    # (Al Pasar un Aliado Concreto la Resolución no Muestra Advertencias ni Detiene la App)
+    from ui.forms_components import resolver_aliado_directo_base
+    masivas_locales = resolver_aliado_directo_base(
+        aliado_seleccionado=aliado,
+        deudas_seleccionadas=deudas,
+        masivas_df=masivas_df,
+        aliados_dict={},
+    )['masivas_locales']
+
+    # Paso 3: Filtramos los Registros del Aliado Indicado (Mismo Aliado para Todas las Deudas)
+    aliado_normalizado = str(aliado).strip().upper()
+    mask_aliado = masivas_locales['Casa_Cobro'].astype(str).str.strip().str.upper() == aliado_normalizado
+    filas_aliado = masivas_locales[mask_aliado].copy()
+
+    # Paso 4: Elegimos el Menor PaB_Propuesta (Mejor Descuento en Base) por Deuda
+    filas_aliado['PaB_Propuesta'] = pd.to_numeric(filas_aliado['PaB_Propuesta'], errors='coerce')
+    valores_base = filas_aliado.groupby('Id_Deuda')['PaB_Propuesta'].min()
+
+    # Paso 5: Devolvemos Solo los Valores Válidos (Mayores a 0)
+    return {
+        str(id_deuda): float(valor)
+        for id_deuda, valor in valores_base.items()
+        if pd.notna(valor) and float(valor) > 0
+    }
+
+def distribuir_monto_por_deuda(
+        *,
+    deudas: list[str],
+    montos_actuales: dict[str, float],
+    monto_total: float,
+    aliado: Optional[str] = None,
+    masivas_df: Optional[pd.DataFrame] = None,
+) -> ResultadoDistribucionMontos:
+    """
+    Distribuye un Monto Total entre un Conjunto de Deudas de Forma Consolidada.
+
+    Reglas de Distribución:
+        1. Si TODAS las Deudas Tienen un Descuento en Base para un MISMO Aliado, el
+           Monto se Distribuye Proporcionalmente a los Valores en Base (Menor
+           PaB_Propuesta por Deuda del Aliado). Así, desde la Perspectiva del Aliado,
+           Todos los Valores Cambian de Forma Equitativa.
+        2. Si Falta el Descuento en Base de Alguna Deuda o los Descuentos Pertenecen
+           a Más de un Aliado, el Monto se Distribuye Proporcionalmente al Monto
+           Actual de cada Deuda.
+        3. Si la Suma de los Pesos es 0, el Monto se Reparte en Partes Iguales.
+
+    Args:
+        deudas (list[str]): Ids de las Deudas entre las que se Distribuye el Monto.
+        montos_actuales (dict[str, float]): Monto Actual por Id_Deuda (Distribución Normal).
+        monto_total (float): Monto Total a Distribuir entre las Deudas.
+        aliado (Optional[str]): Aliado (Casa de Cobro) con el que se Consultan los Valores
+            en Base. Si es None o 'Directo Base' se usa la Distribución Normal.
+        masivas_df (Optional[pd.DataFrame]): Actualizaciones Masivas ya Cargadas (si no, se cargan).
+
+    Returns:
+        ResultadoDistribucionMontos: Resultado de la Distribución:
+            - 'montos' (dict[str, float]): Monto Propuesto por Id_Deuda (Enteros que Suman el Monto Total).
+            - 'pesos' (dict[str, float]): Peso Usado por Id_Deuda (Valor en Base o Monto Actual).
+            - 'uso_base' (bool): True si se Distribuyó por Valores en Base.
+    """
+    # Paso 1: Normalizamos las Deudas a Distribuir (Sin Duplicados y Manteniendo el Orden)
+    deudas_unicas = list(dict.fromkeys(str(deuda) for deuda in deudas))
+    if not deudas_unicas:
+        return {'montos': {}, 'pesos': {}, 'uso_base': False}
+
+    # Paso 2: Verificamos si se Puede Usar la Base (Aliado Concreto y Valores para Todas las Deudas)
+    valores_base: dict[str, float] = {}
+    if aliado and str(aliado).strip().lower() != 'directo base':
+        valores_base = _obtener_valores_base_por_deuda(deudas=deudas_unicas, aliado=str(aliado), masivas_df=masivas_df)
+    uso_base = all(deuda in valores_base for deuda in deudas_unicas) and (sum(valores_base.values()) > 0)
+
+    # Paso 3: Definimos los Pesos de la Distribución (Base si Aplica, de lo Contrario el Monto Actual)
+    pesos: dict[str, float] = {}
+    for deuda in deudas_unicas:
+        if uso_base:
+            pesos[deuda] = valores_base[deuda]
+        else:
+            monto_actual = cleanNumber(montos_actuales.get(deuda, 0), default_nan=0.0)
+            if (monto_actual is None) or (not isinstance(monto_actual, (int, float))) or pd.isna(monto_actual):
+                monto_actual = 0.0
+            pesos[deuda] = max(float(monto_actual), 0.0)
+
+    # Paso 4: Repartimos el Monto Total según los Pesos Definidos
+    monto_total = float(monto_total) if pd.notna(monto_total) else 0.0
+    suma_pesos = sum(pesos.values())
+    if suma_pesos > 0:
+        montos_brutos = {deuda: monto_total * (peso / suma_pesos) for deuda, peso in pesos.items()}
+    else:
+        montos_brutos = {deuda: monto_total / len(deudas_unicas) for deuda in deudas_unicas}
+
+    # Paso 5: Redondeamos a Enteros y Ajustamos la Diferencia en la Deuda de Mayor Peso
+    # (Para que la Suma de los Montos Corresponda Exactamente con el Monto Total)
+    montos = {deuda: float(round(monto)) for deuda, monto in montos_brutos.items()}
+    diferencia = round(monto_total) - sum(montos.values())
+    if diferencia != 0:
+        deuda_ajuste = max(pesos, key=lambda deuda: pesos[deuda])
+        montos[deuda_ajuste] += float(diferencia)
+
+    return {'montos': montos, 'pesos': pesos, 'uso_base': uso_base}
 
 def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     """

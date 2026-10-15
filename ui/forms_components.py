@@ -9,6 +9,7 @@ import streamlit as st
 from data.data_loader import load_current_month_solicitudes
 from data.data_models import DeudasActivasSchema
 from modules.forms import mostrar_como_subir_solicitud_aliados_diferentes, obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
+from modules.gest_sols import distribuir_monto_por_deuda
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat
 
 class ResultadoDirectoBase(TypedDict):
@@ -222,15 +223,16 @@ def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: flo
         monto_recomendado = pago_original * (1-descuento_optimo)
         st.success(f"💰 Monto Recomendado: ${monto_recomendado:,.0f} (Descuento Óptimo: {descuento_optimo:.2%}, Tipo de Pago: {tipo_pago})")
 
-def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[dict[str,Any]]:
+def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema], *, aliado: Optional[str] = None) -> list[dict[str,Any]]:
     st.subheader("🗒️ Montos Propuestos por Deuda")
 
-    # 1. Copia de DataFrame y cálculo de %Total
+    # 1. Copia del DataFrame y Definición de los Montos Actuales por Deuda
     deudas_activas_df_copy = deudas_activas_df.copy()
     suma_pab = deudas_activas_df_copy['PaB_Origen'].sum()
-    deudas_activas_df_copy['%Total'] = (
-        deudas_activas_df_copy['PaB_Origen'] / suma_pab if suma_pab > 0 else 0
-    )
+    montos_actuales = {
+        str(row['Id_Deuda']): cleanNumber(row['PaB_Origen'], default_nan=0.0)
+        for _, row in deudas_activas_df_copy.iterrows()
+    }
 
     # 2. Inicialización de valores por primera vez (Valores por defecto)
     if 'usar_para_todos' not in st.session_state:
@@ -241,19 +243,37 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
 
     pago_total = cleanNumber(st.session_state['pago_total'])
 
+    # 3. Distribución Consolidada del Monto Total (Valores en Base si Aplican, si no Monto Actual)
+    distribucion = distribuir_monto_por_deuda(
+        deudas=list(montos_actuales.keys()),
+        montos_actuales=montos_actuales,
+        monto_total=pago_total,
+        aliado=aliado,
+    )
+    suma_pesos = sum(distribucion['pesos'].values())
+    if suma_pesos > 0:
+        deudas_activas_df_copy['%Total'] = [
+            distribucion['pesos'][str(id_deuda)] / suma_pesos
+            for id_deuda in deudas_activas_df_copy['Id_Deuda']
+        ]
+    else:
+        deudas_activas_df_copy['%Total'] = (
+            1 / len(deudas_activas_df_copy) if len(deudas_activas_df_copy) > 0 else 0
+        )
+
     for _, row in deudas_activas_df_copy.iterrows():
         key_monto = f"monto_propuesto_{row['Id_Deuda']}"
         key_cuotas = f"num_cuotas_{row['Id_Deuda']}"
         if key_monto not in st.session_state:
-            st.session_state[key_monto] = formatNumber(pago_total * row['%Total'])
+            st.session_state[key_monto] = formatNumber(distribucion['montos'][str(row['Id_Deuda'])])
         if key_cuotas not in st.session_state:
             st.session_state[key_cuotas] = 1
 
-    # 3. LÓGICA DE RECALCULO (Se ejecuta ANTES de dibujar los inputs en pantalla)
+    # 4. LÓGICA DE RECALCULO (Se ejecuta ANTES de dibujar los inputs en pantalla)
     if st.session_state['usar_para_todos']:
         # Si la opción "Distribuir" está activa, actualizamos el estado de cada deuda
         for _, row in deudas_activas_df_copy.iterrows():
-            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = formatNumber(pago_total * row['%Total'])
+            st.session_state[f"monto_propuesto_{row['Id_Deuda']}"] = formatNumber(distribucion['montos'][str(row['Id_Deuda'])])
         # Aplicamos el formateo para el pago_total
         st.session_state['pago_total'] = formatNumber(pago_total)
     else:
@@ -267,7 +287,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             key_monto = f"monto_propuesto_{row['Id_Deuda']}"
             st.session_state[key_monto] = formatNumber(st.session_state[key_monto])
 
-    # 4. Renderizado de Controles Principales
+    # 5. Renderizado de Controles Principales
     colPagoTotal, colUsarParaTodos, colCuotas = st.columns([2, 1, 1], vertical_alignment="center")
 
     with colPagoTotal:
@@ -304,7 +324,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
             key="num_cuotas_global_forms"
         )
 
-    # 5. Encabezados de la Tabla
+    # 6. Encabezados de la Tabla
     if tipo_cuotas == 'Por Deuda':
         colIdDeuda, colPaBOrigen, colProp, colPorcentaje, colMontoPropuesto, colCuotasCol = st.columns([2, 2, 2, 1, 3, 2], gap="small", vertical_alignment="center")
     else:
@@ -324,7 +344,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
         with colCuotasCol: # type: ignore
             st.markdown("**Número de Cuotas**")
 
-    # 6. Renderizado de Filas de la Tabla
+    # 7. Renderizado de Filas de la Tabla
     for _, row in deudas_activas_df_copy.iterrows():
         id_deuda = row['Id_Deuda']
         descuento_base = obtener_descuento_base(deuda=id_deuda)
@@ -394,7 +414,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> 
                     help="Seleccione el número de cuotas para esta deuda"
                 )
 
-    # 7. Construcción de la Respuesta Final
+    # 8. Construcción de la Respuesta Final
     info_completa_deudas = []
     for _, row in deudas_activas_df_copy.iterrows():
         id_deuda = row['Id_Deuda']
