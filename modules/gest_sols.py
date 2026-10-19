@@ -21,6 +21,7 @@ from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador, obtener_nombres_negociadores_masivo
 from services import GoogleDriveService, GoogleMailService
+from ui.forms_components import resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
 
 METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago','Modificaciones']
@@ -153,7 +154,7 @@ def _obtener_valores_base_por_deuda(*, deudas: list[str], aliado: str, masivas_d
 
     # Paso 2: Obtenemos las Masivas Locales con la Misma Resolución del Formulario
     # (Al Pasar un Aliado Concreto la Resolución no Muestra Advertencias ni Detiene la App)
-    from ui.forms_components import resolver_aliado_directo_base
+    
     masivas_locales = resolver_aliado_directo_base(
         aliado_seleccionado=aliado,
         deudas_seleccionadas=deudas,
