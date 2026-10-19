@@ -21,7 +21,6 @@ from modules.classes import get_banned_manager
 from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
 from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador, obtener_nombres_negociadores_masivo
 from services import GoogleDriveService, GoogleMailService
-from ui.forms_components import resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
 
 METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago','Modificaciones']
@@ -125,12 +124,589 @@ def get_descuento_en_base(*, debt: str, original_amount: float, show_casa: bool)
     return descuentos_formateados
 
 def obtener_descuentos_pab_ideal(*,debt: str, original_amount: float) -> str:
-    # Paso 1: Cargar los datos de pab ideal
-    pabIdealDict = load_pab_ideal()
-    # Paso 2: Obtener el descuento ideal para la deuda específica
-    pab_ideal = pabIdealDict.get(debt, 0.0)
-    # Paso 3: Devolver el descuento en el formato deseado
+    # Paso 1: Obtener el descuento ideal para la deuda específica
+    pab_ideal = obtener_valor_pab_ideal(debt=debt)
+    # Paso 2: Devolver el descuento en el formato deseado
     return f"(*{debt}*) **PAB Ideal**: {pab_ideal:,.0f} ({1 - pab_ideal / original_amount:.1%} Desc.)" if (original_amount != 0 and pab_ideal != 0) else "Sin PaB Ideal"
+
+# --> Utilidades para la Comparación de Descuentos (Valor Solicitado vs PaB Ideal vs Descuento en Base)
+def _a_numero(valor: Any, default: float = 0.0) -> float:
+    """
+    Convierte un valor a Número de Forma Segura.
+
+    Args:
+        valor (Any): Valor a Convertir.
+        default (float): Valor por Defecto si no se Puede Convertir.
+
+    Returns:
+        float: Valor Numérico (o el Valor por Defecto).
+    """
+    # Descartamos Estructuras que no Representan un Escalar
+    if isinstance(valor, (list, tuple, set, dict, pd.Series, pd.DataFrame)):
+        return default
+
+    try:
+        numero = cleanNumber(valor, default_nan=default)
+    except Exception:
+        return default
+
+    if pd.isna(numero):
+        return default
+
+    try:
+        return float(numero)
+    except (TypeError, ValueError):
+        return default
+
+def _normalizar_id_deuda(valor: Any) -> str:
+    """
+    Normaliza un Identificador de Deuda (String, sin Espacios y sin Sufijo '.0').
+
+    Args:
+        valor (Any): Identificador de Deuda.
+
+    Returns:
+        str: Identificador Normalizado.
+    """
+    if valor is None:
+        return ""
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    id_deuda = str(valor).strip()
+    if id_deuda.endswith(".0"):
+        id_deuda = id_deuda[:-2]
+    return id_deuda
+
+def obtener_valor_pab_ideal(*, debt: str) -> float:
+    """
+    Obtiene el Valor Numérico de PaB Ideal de Crédito para una Deuda.
+
+    Args:
+        debt (str): Identificador de la Deuda.
+
+    Returns:
+        float: Valor de PaB Ideal (0.0 si no Existe).
+    """
+    pabIdealDict = load_pab_ideal()
+    return _a_numero(pabIdealDict.get(_normalizar_id_deuda(debt), 0.0))
+
+def calcular_porcentaje_descuento(*, valor: float, monto_actual: float) -> float:
+    """
+    Calcula el Porcentaje de Descuento que Representa un Valor frente al Monto Actual.
+
+    Args:
+        valor (float): Valor de Pago (Propuesto, PaB Ideal o Descuento en Base).
+        monto_actual (float): Monto Actual de la Deuda.
+
+    Returns:
+        float: Descuento en Decimal (0.25 = 25%). Si el Monto Actual es 0, Retorna 0.
+    """
+    valor = _a_numero(valor)
+    monto_actual = _a_numero(monto_actual)
+    if monto_actual <= 0:
+        return 0.0
+    return 1 - (valor / monto_actual)
+
+def formatear_valor_solicitado(*, monto_propuesto: float, monto_actual: float) -> str:
+    """
+    Formatea el Valor Solicitado (Monto Propuesto) junto con el % de Descuento
+    que Representa frente al Monto Actual.
+
+    Args:
+        monto_propuesto (float): Monto Propuesto en la Solicitud.
+        monto_actual (float): Monto Actual de la Deuda.
+
+    Returns:
+        str: Texto con Formato '$Valor (%Descuento)'.
+    """
+    monto_propuesto = _a_numero(monto_propuesto)
+    descuento = calcular_porcentaje_descuento(valor=monto_propuesto, monto_actual=monto_actual)
+    return r"\${:,.0f} ({:.1%})".format(monto_propuesto, descuento)
+
+def formatear_pab_ideal(*, valor: float, monto_actual: float) -> str:
+    """
+    Formatea el Valor de PaB Ideal junto con el % de Descuento que Representa
+    frente al Monto Actual.
+
+    Args:
+        valor (float): Valor de PaB Ideal de Crédito.
+        monto_actual (float): Monto Actual de la Deuda.
+
+    Returns:
+        str: Texto con Formato '$Valor (%Descuento)'.
+    """
+    valor = _a_numero(valor)
+    descuento = calcular_porcentaje_descuento(valor=valor, monto_actual=monto_actual)
+    return r"\${:,.0f} ({:.1%})".format(valor, descuento)
+
+def formatear_descuento_base(*,
+        casa_cobro: str,
+        valor: float,
+        monto_actual: float,
+        origen: str = "Base",
+        valor_portafolio: Optional[float] = None,
+        incluir_origen: bool = True,
+    ) -> str:
+    """
+    Formatea un Descuento en Base con el Mismo Estilo de 'get_descuento_en_base',
+    agregando el Origen del Descuento.
+
+    Args:
+        casa_cobro (str): Casa de Cobro que Ofrece el Descuento.
+        valor (float): Valor de Pago (PaB_Propuesta) del Descuento en Base.
+        monto_actual (float): Monto Actual de la Deuda.
+        origen (str): Origen del Descuento ('Base', 'Solicitud Exitosa', etc.).
+        valor_portafolio (Optional[float]): Valor de Portafolio Asociado (si existe).
+        incluir_origen (bool): Si se Debe Incluir el Origen en el Texto.
+
+    Returns:
+        str: Texto con Formato '**Casa**: $Valor (%Descuento) - **Origen**: Base'.
+    """
+    valor = _a_numero(valor)
+    descuento = calcular_porcentaje_descuento(valor=valor, monto_actual=monto_actual)
+    casa_cobro = str(casa_cobro).strip() if pd.notna(casa_cobro) and str(casa_cobro).strip() else "Directo Base"
+
+    partes = [r"**{}**: \${:,.0f} ({:.1%})".format(casa_cobro, valor, descuento)]
+    if incluir_origen:
+        partes.append("**Origen**: {}".format(origen))
+
+    valor_portafolio = _a_numero(valor_portafolio)
+    if valor_portafolio > 0:
+        partes.append(r"**Portafolio**: \${:,.0f}".format(valor_portafolio))
+
+    return " - ".join(partes)
+
+def obtener_color_comparacion(*, valor: float, valor_solicitado: float) -> str:
+    """
+    Define el Color de Fondo para un Valor de Comparación.
+
+    Reglas:
+        - Verde: valor <= Valor Solicitado.
+        - Amarillo: valor <= Valor Solicitado * 1.15.
+        - Naranja: cualquier otro caso.
+
+    Args:
+        valor (float): Valor a Comparar (PaB Ideal o Descuento en Base).
+        valor_solicitado (float): Monto Propuesto de la Deuda.
+
+    Returns:
+        str: 'green', 'yellow' u 'orange'.
+    """
+    valor = _a_numero(valor)
+    valor_solicitado = _a_numero(valor_solicitado)
+
+    # Comparamos con una Tolerancia Mínima para Evitar Errores de Punto Flotante
+    def _menor_o_igual(limite: float) -> bool:
+        tolerancia = max(1e-9, abs(limite) * 1e-12)
+        return (valor <= limite) or bool(np.isclose(valor, limite, rtol=0, atol=tolerancia))
+
+    if _menor_o_igual(valor_solicitado):
+        return "green"
+    if _menor_o_igual(valor_solicitado * 1.15):
+        return "yellow"
+    return "orange"
+
+def _obtener_mejores_descuentos_base(*, masivas_df: pd.DataFrame, deudas: list[str]) -> pd.DataFrame:
+    """
+    Obtiene el Mejor Descuento en Base (Menor PaB_Propuesta) por Aliado y Deuda.
+
+    Args:
+        masivas_df (pd.DataFrame): Actualizaciones Masivas.
+        deudas (list[str]): Ids de las Deudas a Consultar.
+
+    Returns:
+        pd.DataFrame: Una Fila por Aliado y Deuda con el Menor PaB_Propuesta.
+    """
+    columnas = ["Id_Deuda", "Casa_Cobro", "PaB_Propuesta", "PaB_Portafolio", "_aliado_key", "Origen"]
+    if masivas_df is None or not isinstance(masivas_df, pd.DataFrame) or masivas_df.empty:
+        return pd.DataFrame(columns=columnas)
+
+    base = masivas_df.copy().reset_index(drop=True)
+    for columna in ["Id_Deuda", "Casa_Cobro", "PaB_Propuesta", "PaB_Portafolio"]:
+        if columna not in base.columns:
+            base[columna] = np.nan
+
+    # Normalizamos los Identificadores y los Valores
+    base["Id_Deuda"] = base["Id_Deuda"].apply(_normalizar_id_deuda)
+    base["Casa_Cobro"] = base["Casa_Cobro"].astype(str).str.strip()
+    base["PaB_Propuesta"] = pd.to_numeric(base["PaB_Propuesta"], errors="coerce")
+    base["PaB_Portafolio"] = pd.to_numeric(base["PaB_Portafolio"], errors="coerce")
+
+    # El Origen Puede Venir en el DF de Base; si no, se Asume 'Base'
+    if "Origen" not in base.columns:
+        base["Origen"] = "Base"
+    else:
+        base["Origen"] = (
+            base["Origen"]
+            .fillna("Base")
+            .astype(str)
+            .str.strip()
+            .replace("", "Base")
+        )
+
+    # Filtramos las Deudas Solicitadas y los Valores Válidos
+    base = base[base["Id_Deuda"].isin(deudas)]
+    base = base[base["PaB_Propuesta"].notna() & (base["PaB_Propuesta"] > 0)]
+    if base.empty:
+        return pd.DataFrame(columns=columnas)
+
+    # Elegimos el Menor PaB_Propuesta (Mejor Descuento) por Aliado y Deuda
+    base["_aliado_key"] = base["Casa_Cobro"].str.upper()
+    indices_mejores = base.groupby(["_aliado_key", "Id_Deuda"], dropna=False)["PaB_Propuesta"].idxmin()
+    return base.loc[indices_mejores].copy()
+
+def _calcular_totales_comparacion(*, filas: list[dict[str, Any]], clave_valor: str) -> dict[str, Any]:
+    """
+    Calcula los Totales de una Columna de Comparación (PaB Ideal o Descuento en Base).
+
+    Args:
+        filas (list[dict[str, Any]]): Filas de la Comparación por Deuda.
+        clave_valor (str): Clave de la Fila que Contiene el Valor a Sumar.
+
+    Returns:
+        dict[str, Any]: Totales con Valor, Descuento, Texto, Color y Deudas Faltantes.
+    """
+    cubiertas = [fila for fila in filas if fila.get(clave_valor) is not None]
+    deudas_faltantes = [fila["id_deuda"] for fila in filas if fila.get(clave_valor) is None]
+
+    if not cubiertas:
+        return {
+            "valor": None,
+            "descuento": None,
+            "completo": False,
+            "texto": None,
+            "color": None,
+            "deudas_faltantes": deudas_faltantes,
+        }
+
+    total_valor = sum(_a_numero(fila[clave_valor]) for fila in cubiertas)
+    total_actual = sum(_a_numero(fila["monto_actual"]) for fila in cubiertas)
+    total_solicitado = sum(_a_numero(fila["valor_solicitado"]) for fila in cubiertas)
+    descuento = calcular_porcentaje_descuento(valor=total_valor, monto_actual=total_actual)
+    completo = len(deudas_faltantes) == 0
+
+    texto = r"\${:,.0f} ({:.1%})".format(total_valor, descuento)
+    if not completo:
+        texto += " - N/A para Todas"
+
+    return {
+        "valor": total_valor,
+        "descuento": descuento,
+        "completo": completo,
+        "texto": texto,
+        "color": obtener_color_comparacion(valor=total_valor, valor_solicitado=total_solicitado),
+        "deudas_faltantes": deudas_faltantes,
+    }
+
+def _calcular_totales_otros_aliados(*, mejores_base: pd.DataFrame, deudas: list[dict[str, Any]], aliado_key: str) -> list[dict[str, Any]]:
+    """
+    Calcula los Totales de Descuento en Base para los Aliados distintos al Resuelto.
+
+    Args:
+        mejores_base (pd.DataFrame): Mejor Descuento en Base por Aliado y Deuda.
+        deudas (list[dict[str, Any]]): Deudas Normalizadas de la Solicitud.
+        aliado_key (str): Aliado Resuelto (Normalizado).
+
+    Returns:
+        list[dict[str, Any]]: Totales por Aliado, ordenados de Menor a Mayor Valor.
+    """
+    if mejores_base is None or mejores_base.empty:
+        return []
+
+    totales = []
+    for aliado_key_otro, grupo in mejores_base.groupby("_aliado_key", dropna=False):
+        if str(aliado_key_otro) == aliado_key:
+            continue
+
+        valores_por_deuda = {
+            str(fila["Id_Deuda"]): _a_numero(fila["PaB_Propuesta"])
+            for _, fila in grupo.iterrows()
+        }
+        cubiertas = [deuda for deuda in deudas if deuda["Id_Deuda"] in valores_por_deuda]
+        total_valor = sum(valores_por_deuda[deuda["Id_Deuda"]] for deuda in cubiertas)
+        total_actual = sum(_a_numero(deuda["Monto_Actual"]) for deuda in cubiertas)
+        descuento = calcular_porcentaje_descuento(valor=total_valor, monto_actual=total_actual)
+        completo = len(cubiertas) == len(deudas)
+
+        texto = r"\${:,.0f} ({:.1%})".format(total_valor, descuento)
+        if not completo:
+            texto += " - N/A para Todas"
+
+        totales.append({
+            "aliado": str(grupo["Casa_Cobro"].iloc[0]).strip(),
+            "valor": total_valor,
+            "descuento": descuento,
+            "completo": completo,
+            "texto": texto,
+        })
+
+    totales.sort(key=lambda total: total["valor"])
+    return totales
+
+def calcular_comparacion_descuentos(*,
+        deudas: list[dict[str, Any]],
+        masivas_df: pd.DataFrame,
+        pab_ideal_dict: dict[str, float],
+        aliado: str,
+    ) -> dict[str, Any]:
+    """
+    Calcula la Comparación entre el Valor Solicitado, el PaB Ideal de Crédito y
+    el Descuento en Base para cada Deuda y para el Total de la Solicitud.
+
+    Esta Función es Pura: No Renderiza en Streamlit ni Carga Datos por su Cuenta.
+
+    Args:
+        deudas (list[dict[str, Any]]): Deudas con 'Id_Deuda', 'Monto_Actual' y 'Monto_Propuesto'.
+        masivas_df (pd.DataFrame): Actualizaciones Masivas (Descuentos en Base).
+        pab_ideal_dict (dict[str, float]): Mapa Id_Deuda -> PaB Ideal de Crédito.
+        aliado (str): Aliado Resuelto (Casa de Cobro) de la Solicitud.
+
+    Returns:
+        dict[str, Any]: Filas por Deuda, Totales y Banderas de Disponibilidad.
+    """
+    # Paso 1: Normalizamos las Deudas de la Solicitud
+    deudas_normalizadas = []
+    for deuda in deudas:
+        deudas_normalizadas.append({
+            "Id_Deuda": _normalizar_id_deuda(deuda.get("Id_Deuda", "")),
+            "Monto_Actual": _a_numero(deuda.get("Monto_Actual", 0.0)),
+            "Monto_Propuesto": _a_numero(deuda.get("Monto_Propuesto", 0.0)),
+        })
+
+    ids_deudas = [deuda["Id_Deuda"] for deuda in deudas_normalizadas]
+    aliado = "" if pd.isna(aliado) else str(aliado).strip()
+    aliado_key = aliado.upper()
+
+    # Paso 2: Obtenemos el Mejor Descuento en Base por Aliado y Deuda
+    mejores_base = _obtener_mejores_descuentos_base(masivas_df=masivas_df, deudas=ids_deudas)
+    base_por_deuda = {
+        str(id_deuda): grupo
+        for id_deuda, grupo in mejores_base.groupby("Id_Deuda", dropna=False)
+    } if not mejores_base.empty else {}
+
+    # Paso 3: Construimos la Comparación por Deuda
+    filas = []
+    for deuda in deudas_normalizadas:
+        id_deuda = deuda["Id_Deuda"]
+        monto_actual = deuda["Monto_Actual"]
+        monto_propuesto = deuda["Monto_Propuesto"]
+
+        # Valor Solicitado
+        descuento_solicitado = calcular_porcentaje_descuento(valor=monto_propuesto, monto_actual=monto_actual)
+        texto_valor_solicitado = formatear_valor_solicitado(
+            monto_propuesto=monto_propuesto,
+            monto_actual=monto_actual,
+        )
+
+        # PaB Ideal de Crédito
+        pab_ideal = _a_numero((pab_ideal_dict or {}).get(id_deuda, 0.0))
+        if pab_ideal > 0:
+            descuento_pab_ideal = calcular_porcentaje_descuento(valor=pab_ideal, monto_actual=monto_actual)
+            texto_pab_ideal = formatear_pab_ideal(valor=pab_ideal, monto_actual=monto_actual)
+            color_pab_ideal = obtener_color_comparacion(valor=pab_ideal, valor_solicitado=monto_propuesto)
+        else:
+            pab_ideal = None
+            descuento_pab_ideal = None
+            texto_pab_ideal = None
+            color_pab_ideal = None
+
+        # Descuento en Base del Aliado Resuelto y de los Demás Aliados
+        base = None
+        descuento_base = None
+        texto_base = None
+        texto_base_detalle = None
+        color_base = None
+        origen_base = None
+        base_otros = []
+
+        grupo = base_por_deuda.get(id_deuda)
+        if grupo is not None and not grupo.empty:
+            fila_aliado = grupo[grupo["_aliado_key"] == aliado_key]
+            if not fila_aliado.empty:
+                fila = fila_aliado.iloc[0]
+                origen_base = str(fila.get("Origen", "Base") or "Base").strip()
+                base = _a_numero(fila["PaB_Propuesta"])
+                descuento_base = calcular_porcentaje_descuento(valor=base, monto_actual=monto_actual)
+                texto_base = formatear_descuento_base(
+                    casa_cobro=aliado,
+                    valor=base,
+                    monto_actual=monto_actual,
+                    origen=origen_base,
+                    valor_portafolio=fila.get("PaB_Portafolio"),
+                    incluir_origen=False,
+                )
+                texto_base_detalle = formatear_descuento_base(
+                    casa_cobro=aliado,
+                    valor=base,
+                    monto_actual=monto_actual,
+                    origen=origen_base,
+                    valor_portafolio=fila.get("PaB_Portafolio"),
+                    incluir_origen=True,
+                )
+                color_base = obtener_color_comparacion(valor=base, valor_solicitado=monto_propuesto)
+
+            for _, fila_otro in grupo.iterrows():
+                if str(fila_otro["_aliado_key"]) == aliado_key:
+                    continue
+
+                valor_otro = _a_numero(fila_otro["PaB_Propuesta"])
+                origen_otro = str(fila_otro.get("Origen", "Base") or "Base").strip()
+                descuento_otro = calcular_porcentaje_descuento(valor=valor_otro, monto_actual=monto_actual)
+                base_otros.append({
+                    "aliado": str(fila_otro["Casa_Cobro"]).strip(),
+                    "valor": valor_otro,
+                    "descuento": descuento_otro,
+                    "texto": formatear_descuento_base(
+                        casa_cobro=fila_otro["Casa_Cobro"],
+                        valor=valor_otro,
+                        monto_actual=monto_actual,
+                        origen=origen_otro,
+                        valor_portafolio=fila_otro.get("PaB_Portafolio"),
+                        incluir_origen=True,
+                    ),
+                    "texto_corto": formatear_descuento_base(
+                        casa_cobro=fila_otro["Casa_Cobro"],
+                        valor=valor_otro,
+                        monto_actual=monto_actual,
+                        origen=origen_otro,
+                        valor_portafolio=fila_otro.get("PaB_Portafolio"),
+                        incluir_origen=False,
+                    ),
+                })
+
+            base_otros.sort(key=lambda otro: otro["valor"])
+
+        filas.append({
+            "id_deuda": id_deuda,
+            "monto_actual": monto_actual,
+            "valor_solicitado": monto_propuesto,
+            "descuento_solicitado": descuento_solicitado,
+            "texto_valor_solicitado": texto_valor_solicitado,
+            "pab_ideal": pab_ideal,
+            "descuento_pab_ideal": descuento_pab_ideal,
+            "texto_pab_ideal": texto_pab_ideal,
+            "color_pab_ideal": color_pab_ideal,
+            "base": base,
+            "descuento_base": descuento_base,
+            "texto_base": texto_base,
+            "texto_base_detalle": texto_base_detalle,
+            "color_base": color_base,
+            "origen_base": origen_base,
+            "base_otros": base_otros,
+        })
+
+    # Paso 4: Calculamos los Totales de la Solicitud
+    total_solicitado_valor = sum(fila["valor_solicitado"] for fila in filas)
+    total_solicitado_actual = sum(fila["monto_actual"] for fila in filas)
+    total_solicitado_descuento = calcular_porcentaje_descuento(
+        valor=total_solicitado_valor,
+        monto_actual=total_solicitado_actual,
+    )
+    total_solicitado = {
+        "valor": total_solicitado_valor,
+        "descuento": total_solicitado_descuento,
+        "completo": True,
+        "texto": r"\${:,.0f} ({:.1%})".format(total_solicitado_valor, total_solicitado_descuento),
+        "color": None,
+        "deudas_faltantes": [],
+    }
+
+    total_pab_ideal = _calcular_totales_comparacion(filas=filas, clave_valor="pab_ideal")
+    total_base = _calcular_totales_comparacion(filas=filas, clave_valor="base")
+    total_base_otros = _calcular_totales_otros_aliados(
+        mejores_base=mejores_base,
+        deudas=deudas_normalizadas,
+        aliado_key=aliado_key,
+    )
+
+    # Paso 5: Banderas de Disponibilidad y Deudas Faltantes
+    hay_pab_ideal = any(fila["pab_ideal"] is not None for fila in filas)
+    hay_base = any((fila["base"] is not None) or bool(fila["base_otros"]) for fila in filas)
+    hay_base_aliado = any(fila["base"] is not None for fila in filas)
+
+    return {
+        "filas": filas,
+        "aliado": aliado,
+        "hay_pab_ideal": hay_pab_ideal,
+        "hay_base": hay_base,
+        "hay_base_aliado": hay_base_aliado,
+        "deudas_sin_pab_ideal": [fila["id_deuda"] for fila in filas if fila["pab_ideal"] is None],
+        "deudas_sin_base_aliado": [fila["id_deuda"] for fila in filas if fila["base"] is None],
+        "deudas_sin_base_aliado_con_otros": [
+            fila["id_deuda"] for fila in filas
+            if (fila["base"] is None) and bool(fila["base_otros"])
+        ],
+        "deudas_sin_base": [
+            fila["id_deuda"] for fila in filas
+            if (fila["base"] is None) and (not fila["base_otros"])
+        ],
+        "totales": {
+            "valor_solicitado": total_solicitado,
+            "pab_ideal": total_pab_ideal,
+            "base": total_base,
+            "base_otros": total_base_otros,
+        },
+    }
+
+def obtener_comparacion_descuentos_solicitud(*, solicitud: pd.Series) -> dict[str, Any]:
+    """
+    Obtiene la Comparación de Descuentos de una Solicitud usando las Fuentes Reales
+    de Datos (PaB Ideal, Masivas y la Resolución del Aliado del Formulario).
+
+    Args:
+        solicitud (pd.Series): Información de la Solicitud.
+
+    Returns:
+        dict[str, Any]: Resultado de 'calcular_comparacion_descuentos'.
+    """
+    # Paso 1: Extraemos las Deudas de la Solicitud
+    datos_solicitud = solicitud.get("Datos_Solicitud", [])
+    if not isinstance(datos_solicitud, list):
+        datos_solicitud = []
+    deudas = [
+        {
+            "Id_Deuda": deuda.get("Id_Deuda", ""),
+            "Monto_Actual": deuda.get("Monto_Actual", 0.0),
+            "Monto_Propuesto": deuda.get("Monto_Propuesto", 0.0),
+        }
+        for deuda in datos_solicitud
+    ]
+    ids_deudas = [_normalizar_id_deuda(deuda["Id_Deuda"]) for deuda in deudas]
+
+    # Paso 2: Obtenemos el Aliado Resuelto y las Masivas Locales con la Misma
+    # Resolución del Formulario (si el Aliado es Concreto no se Detiene la App).
+    # No Mezclamos Solicitudes Exitosas/Validaciones con el Descuento en Base:
+    # el Valor Principal se Filtra por el Aliado Resuelto de la Solicitud.
+    aliado_solicitud = solicitud.get("Casa_Cobro", "")
+    aliado = "" if pd.isna(aliado_solicitud) else str(aliado_solicitud).strip()
+    masivas_df = load_masivas()
+    if aliado and (aliado.upper() != "DIRECTO BASE"):
+        # Importamos de Forma Local para Evitar un Import Circular entre Módulos
+        from ui.forms_components import resolver_aliado_directo_base
+
+        masivas_locales = resolver_aliado_directo_base(
+            aliado_seleccionado=aliado,
+            deudas_seleccionadas=ids_deudas,
+            masivas_df=masivas_df,
+            aliados_dict={},
+        )["masivas_locales"]
+    else:
+        masivas_locales = masivas_df[masivas_df["Id_Deuda"].isin(ids_deudas)].copy()
+
+    # Paso 3: Obtenemos el PaB Ideal de Crédito y Calculamos la Comparación
+    pab_ideal_dict = {
+        id_deuda: obtener_valor_pab_ideal(debt=id_deuda)
+        for id_deuda in ids_deudas
+    }
+    return calcular_comparacion_descuentos(
+        deudas=deudas,
+        masivas_df=masivas_locales,
+        pab_ideal_dict=pab_ideal_dict,
+        aliado=aliado,
+    )
 
 def _obtener_valores_base_por_deuda(*, deudas: list[str], aliado: str, masivas_df: Optional[pd.DataFrame] = None) -> dict[str, float]:
     """
@@ -154,7 +730,9 @@ def _obtener_valores_base_por_deuda(*, deudas: list[str], aliado: str, masivas_d
 
     # Paso 2: Obtenemos las Masivas Locales con la Misma Resolución del Formulario
     # (Al Pasar un Aliado Concreto la Resolución no Muestra Advertencias ni Detiene la App)
-    
+    # Importamos de Forma Local para Evitar un Import Circular entre Módulos
+    from ui.forms_components import resolver_aliado_directo_base
+
     masivas_locales = resolver_aliado_directo_base(
         aliado_seleccionado=aliado,
         deudas_seleccionadas=deudas,
