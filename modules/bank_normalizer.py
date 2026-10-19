@@ -28,7 +28,8 @@ PATRONES_UNICOS_BANCOS = {
     'Megalinea':'Megalinea','Comultrasan':'Financiera Comultrasan','Asesores Legales Gama':'Asesores Legales Gama','Rapicredit':'Rappicredit',
     'Aslegal Servicios Cred':'Aslegal','Davi Bank':'Davi Bank','Recupera S.A.S':'Recupera','Aslegal':'Aslegal','Baninca':'Baninca',
     'Dinamica':'Dinamica',"Fon Garantias Empr Y Consult":"FGA","Banco De Bogotá": "Banco de Bogotá","Contacto Solucion Serfinanza": "Serfinanza",
-    "Nu": "Nubank","Qnt Bogota": "QNT","John": "John F. Kennedy","Mundo Mujer": "Banco Mundo Mujer",
+    "Nu": "Nubank","Qnt Bogota": "Banco de Bogotá","John": "John F. Kennedy","Mundo Mujer": "Banco Mundo Mujer","Fon Garantias Empr Y Consult":"FGA",
+    "Banco De Bogotá": "Banco de Bogotá","Contacto Solucion Serfinanza": "Serfinanza","Nu": "Nubank","Qnt Bogota": "QNT","John": "John F. Kennedy","Mundo Mujer": "Banco Mundo Mujer",
 }
 
 # Agregar el Diccionario Completo
@@ -77,6 +78,7 @@ DICCIONARIO_BANCOS = {
     'Banco GNB Sudameris': ['Gnb Sudameris'],
     'Banco Credijamar': ['Credijamar'],
     'Banco Caja Social': ['Caja Social'],
+    'Banco Mundo Mujer': ['Banco Mundo Mujer','Mundo Mujer'],
 }
 
 # Diccionario de Búsqueda de Patrones Únicos
@@ -97,6 +99,7 @@ DICCIONARIO_BUSQUEDA_PATRONES_BANCOS = {
     'Banco Caja Social': 'Caja Social',
     'Tuya': 'Tuya',
     'Itaú': 'Itau',
+    'Banco Mundo Mujer': 'Mundo Mujer',
 }
 
 # Lista de Bancos Únicos
