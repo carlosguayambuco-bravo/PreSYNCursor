@@ -35,7 +35,7 @@ if 'deudas_seleccionadas' not in st.session_state:
     st.session_state['deudas_seleccionadas'] = []
 
 
-st.title("🗒️ Nuevo Formulario de Alianzas")
+st.title("🗒️ Formulario de Solicitudes de Alianzas")
 st.divider()
 
 st.subheader("Referencia del Cliente")

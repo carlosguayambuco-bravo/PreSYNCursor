@@ -82,7 +82,7 @@ DEFAULT_PERMISSIONS = {
 }
 
 PAGES_ROUTE_MAPPING = {
-    "subida_formulario": {"page": "views/rellenar_forms.py", "title": "Formulario Alianzas", "icon": "📝"},
+    "subida_formulario": {"page": "views/rellenar_forms.py", "title": "Subir Solicitud", "icon": "📝"},
     "agregar_cartera": {"page": "views/agregar_cartera.py", "title": "Agregar Cartera", "icon": "💼"},
     "gestionar_solicitudes": {"page": "views/gestionar_solicitudes.py", "title": "Gestionar Solicitudes", "icon": "🛠️"},
     "ver_mis_solicitudes": {"page": "views/ver_solicitudes.py", "title": "Ver Mis Solicitudes", "icon": "📋"},
