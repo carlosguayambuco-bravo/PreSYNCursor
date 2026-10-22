@@ -1677,6 +1677,10 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         "id_deuda_solicitud_gestion_input",
         "organizar_abc_solicitudes_gestion_input",
         "estado_liq_ejec_input",
+        "fecha_min_solicitud_gestion_input",
+        "fecha_max_solicitud_gestion_input",
+        "casa_base_solicitud_gestion_input",
+        "referencia_solicitud_gestion_input",
     ]
     keys_to_list = [
         'tipo_solicitud_gestion_input',
@@ -1691,6 +1695,8 @@ def reiniciar_filtros_solicitudes_ejecutivo(method: Literal['reset','basic'] = "
         "cedula_solicitud_gestion_input",
         "id_deuda_solicitud_gestion_input",
         "estado_liq_ejec_input",
+        "casa_base_solicitud_gestion_input",
+        "referencia_solicitud_gestion_input",
     ]
     for key in keys_to_remove:
         if key in keys_to_list:
@@ -2658,6 +2664,7 @@ def check_if_validacion_uploaded(*, solicitud: dict[str, Any], old_id: str) -> b
     mask_final = maskCasa & maskTipo & maskCorreo & maskIds & maskOrigen
     return mask_final.any()
 
+@st.cache_data(ttl=15*60, show_spinner=False)
 def obtener_casas_cobro_base(*, deudas: list[str]) -> list[str]:
     # Paso 1: Cargar las Actualizaciones Masivas
     massive_df = load_masivas()
@@ -2665,7 +2672,7 @@ def obtener_casas_cobro_base(*, deudas: list[str]) -> list[str]:
     massive_debts = massive_df[massive_df['Id_Deuda'].isin(deudas)]
     # Paso 3: Devolver la lista de Casas (Sin Duplicados ya que puede haber varios Registros por Deuda)
     if not massive_debts.empty:
-        return list(dict.fromkeys(massive_debts['Casa_Cobro'].tolist()))
+        return list(massive_debts['Casa_Cobro'].unique())
     else:
         return []
 
