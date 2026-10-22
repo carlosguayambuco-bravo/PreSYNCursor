@@ -1168,10 +1168,12 @@ if tab_control.open:
                     options=[
                         "**Sin Portafolio**",
                         "**Distribuir Monto de Portafolio**",
+                        "**Monto Individual de Portafolio**"
                     ],
                     captions=[
                         "Cada deuda trae su propio monto a pagar de forma individual",
                         "El monto se repite para las deudas del portafolio y se redistribuye por participación",
+                        "Cada deuda trae su propio monto a pagar, pero se considera que pertenecen a un portafolio",
                     ],
                     horizontal=True,
                     index=None,
@@ -1300,6 +1302,7 @@ if tab_control.open:
                         cruce_df=base_df,
                         distribucion_df=df_distribucion,
                         columnas_portafolio=columnas_portafolio,
+                        tipo_portafolio=tipo_portafolio,
                     )
                 if exito_base_mes:
                     # Refrescamos el Cache de las Masivas para que los Formularios vean los Nuevos Datos

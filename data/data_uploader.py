@@ -377,6 +377,7 @@ def preparar_datos_base_mes(
         cruce_df: pd.DataFrame,
         distribucion_df: Optional[pd.DataFrame] = None,
         columnas_portafolio: Optional[list[str]] = None,
+        tipo_portafolio: Optional[str] = None,
     ) -> pd.DataFrame:
     columnas_salida = [COL_ID_CRUCE] + MASIVAS_BASE_MES_COLUMNS
     df = cruce_df.copy()
@@ -413,7 +414,7 @@ def preparar_datos_base_mes(
     df['_Plazo_Estructurado'] = [pago[1] for pago in pagos_estructurados]
 
     # Paso 3: Determinar los Portafolios según la Distribución del tab Control
-    df['_Portafolio'] = ''
+    df['_Portafolio'] = ("" if tipo_portafolio != "Monto Individual de Portafolio" else "SI")
     df['_Monto_Portafolio'] = np.nan
     df['_Id_Portafolio'] = ''
     columnas_grupo = [col for col in (columnas_portafolio or []) if col in df.columns]
@@ -600,6 +601,7 @@ def upload_base_mes_info(
         cruce_df: pd.DataFrame,
         distribucion_df: Optional[pd.DataFrame] = None,
         columnas_portafolio: Optional[list[str]] = None,
+        tipo_portafolio: Optional[str] = None,
     ) -> bool:
     # Paso 1: Obtener el Servicio de Google Sheets y Abrir la Hoja de la Base del Mes
     sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
@@ -626,6 +628,7 @@ def upload_base_mes_info(
         cruce_df=cruce_df,
         distribucion_df=distribucion_df,
         columnas_portafolio=columnas_portafolio,
+        tipo_portafolio=tipo_portafolio,
     )
     if df_subida.empty:
         st.warning("No hay registros cruzados (con Id_Definitivo y sin ADDENDUM) para subir a la Base del Mes.", icon="⚠️")
