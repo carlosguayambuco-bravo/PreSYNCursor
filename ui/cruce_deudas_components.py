@@ -227,26 +227,38 @@ def mostrar_advertencia_ids_no_validados() -> None:
 
 # Función Auxiliar para estilizar el DF de las Deudas Posibles
 def estilizar_deudas(deudas_df: pd.DataFrame):
-    deudas_df = deudas_df[['Banco','Numero_Credito','Monto_Actual','Id_Deuda'] + (['Es_Liquidada'] if 'Es_Liquidada' in deudas_df.columns else [])]
-    
+    deudas_df = deudas_df[
+        ['Banco', 'Numero_Credito', 'Monto_Actual', 'Id_Deuda']
+        + (['Es_Liquidada'] if 'Es_Liquidada' in deudas_df.columns else [])
+    ]
+
     # 1. Crear el objeto Styler base
     styler = deudas_df.style
-    
-    # 2. Aplicar color de fondo por fila si existe la columna Es_Liquidada
+
+    # 2. Mostrar Numero_Credito sin notación científica
+    styler = styler.format({
+        'Numero_Credito': lambda v: f'{v:.0f}' if (pd.notna(v) and isinstance(v, (int, float))) else (v if pd.notna(v) else ''),
+    })
+
+    # 3. Aplicar color de fondo por fila si existe la columna Es_Liquidada
     if 'Es_Liquidada' in deudas_df.columns:
         styler = styler.apply(
-            lambda r: ['background-color: {}'.format(
-                "#ce1424" if r['Es_Liquidada'] else "#009723"
-            )] * len(r), axis=1
+            lambda r: [
+                'background-color: {}'.format(
+                    "#ce1424" if r['Es_Liquidada'] else "#009723"
+                )
+            ] * len(r),
+            axis=1
         ).hide(subset=['Es_Liquidada'], axis='columns')
-        
-    # 3. Aplicar Negrita a la columna 'Id_Deuda' y a los encabezados (th)
+
+    # 4. Aplicar negrita a Id_Deuda y a los encabezados
     styler = styler.map(
-        lambda v: 'font-weight: bold;', subset=['Id_Deuda']
+        lambda v: 'font-weight: bold;',
+        subset=['Id_Deuda']
     ).set_table_styles([
-        {'selector': 'th', 'props': [('font-weight', 'bold')]}  # Headers en negrita
+        {'selector': 'th', 'props': [('font-weight', 'bold')]}
     ])
-    
+
     return styler
 
 # Función Auxiliar para Mostrar un Registro del Cruce (Vista de 2 Columnas)
@@ -416,8 +428,8 @@ def mostrar_deudas_cruce_paginadas(*, cruce_df: pd.DataFrame, key: str) -> None:
     st.session_state[key_pagina_actual] = pagina_actual
 
     # Rebanada del DataFrame correspondiente a la página actual
-    inicio = (pagina_actual - 1) * registros_por_pagina
-    fin = min(inicio + registros_por_pagina, total_deudas)
+    inicio = int((pagina_actual - 1) * registros_por_pagina)
+    fin = int(min(inicio + registros_por_pagina, total_deudas))
     pagina_df = cruce_df.iloc[inicio:fin]
 
     # Paso 1: Mostrar los Registros de la Página Actual
