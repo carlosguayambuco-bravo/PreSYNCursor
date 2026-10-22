@@ -12,8 +12,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_loader import get_solicitud_row_in_google_sheets, normalizeMetadata, parse_metadata_cruce
-from data.data_models import MasivasMetadata, MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
-from modules.constants import COL_CREDITO, COL_ID_CRUCE, COL_MONTO_ACTUAL, ETIQUETA_ADDENDUM, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from data.data_models import MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
+from modules.constants import COL_ID_CRUCE, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from modules.id_aut_deud.helpers import preparar_datos_base_mes
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, build_column_batch_updates, col_to_letter, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
 
@@ -312,167 +313,9 @@ def upload_base_cruce_info(*,cruce_df: DataFrame[PendienteCruceSchema]) -> bool:
 
 # =====================================================================
 # Subida a la Base del Mes (Hoja 'Bases mes actual 2024' de Masivas)
+# Las Funciones de Transformación/Preparación de los Datos viven en
+# modules/id_aut_deud/helpers.py (preparar_datos_base_mes)
 # =====================================================================
-
-# Función Auxiliar para Obtener el Número de Cuotas de un Pago
-def _int_cuotas_pago(pago: dict) -> int:
-    try:
-        return int(float(pago.get('Cuotas', 1) or 1))
-    except (TypeError, ValueError):
-        return 1
-
-# Función Auxiliar para Calcular la 'Propuesta Pago' de un Registro
-def _calcular_propuesta_pago(*, mtdt: dict, monto_actual_fila: Optional[float] = None) -> float:
-    # Paso 1: Pago con el Mínimo de Plazos (el Monto_Propuesto quedó guardado como Pago a 1 Cuota)
-    pagos = mtdt.get('Pagos_Cuotas') or []
-    if pagos:
-        pago_min = min(pagos, key=_int_cuotas_pago)
-        monto_pago = pago_min.get('Monto')
-        if (monto_pago is not None) and pd.notna(monto_pago):
-            return float(monto_pago)
-    # Paso 2: Si tampoco hay, se usa el Monto_Actual de la Deuda Identificada
-    monto_original = mtdt.get('Monto_Actual_Original')
-    if (monto_original is not None) and pd.notna(monto_original):
-        return float(monto_original)
-    id_definitivo = str(mtdt.get('Id_Definitivo') or '')
-    for deuda in (mtdt.get('Deudas_Posibles') or []):
-        if str(deuda.get('Id_Deuda') or '') == id_definitivo:
-            monto_deuda = deuda.get('Monto_Actual')
-            if (monto_deuda is not None) and pd.notna(monto_deuda):
-                return float(monto_deuda)
-    # Paso 3: Último caso, el Monto_Actual de la fila del cruce
-    if (monto_actual_fila is not None) and pd.notna(monto_actual_fila):
-        return float(monto_actual_fila)
-    return np.nan
-
-# Función Auxiliar para Calcular el Pago y Plazo Estructurado (Mayor Plazo)
-def _calcular_pago_estructurado(mtdt: dict) -> tuple[float, int]:
-    pagos = mtdt.get('Pagos_Cuotas') or []
-    pagos_estructurados = [pago for pago in pagos if _int_cuotas_pago(pago) > 1]
-    if not pagos_estructurados:
-        return np.nan, np.nan # type: ignore
-    pago_mayor = max(pagos_estructurados, key=_int_cuotas_pago)
-    monto_mayor = pago_mayor.get('Monto')
-    monto_mayor = float(monto_mayor) if (monto_mayor is not None) and pd.notna(monto_mayor) else np.nan
-    return monto_mayor, _int_cuotas_pago(pago_mayor)
-
-# Función Auxiliar para Construir la Metadata de Masivas (MasivasMetadata)
-def _construir_metadata_masivas(*, id_cruce: str, mtdt_cruce: dict, id_portafolio: str = '', pab_portafolio: Optional[float] = None) -> MasivasMetadata:
-    # Se incluyen TODAS las Claves del Esquema (las Opcionales quedan en None si no aplican)
-    # El Tipo_Contraoferta reemplaza a Es_Maximo_Descuento (ya indica si es 'Descuento Máximo')
-    fecha_limite = mtdt_cruce.get('Fecha_Limite_Pago')
-    mtdt = MasivasMetadata(
-        Id_Cruce=str(id_cruce),
-        Tipo_Contraoferta=(mtdt_cruce.get('Tipo_Contraoferta') or 'Descuento Máximo'), # type: ignore
-        Fecha_Limite_Uso=(fecha_limite if (fecha_limite is not None) and pd.notna(fecha_limite) else None), # type: ignore
-        Alias=(str(mtdt_cruce.get('Alias_Casa')) if mtdt_cruce.get('Alias_Casa') else None),
-        Id_Portafolio=str(id_portafolio or ''),
-        PaB_Portafolio=(float(pab_portafolio) if (pab_portafolio is not None) and pd.notna(pab_portafolio) else None),
-    )
-    return mtdt
-
-# Función para Preparar los Datos Cruzados con las Columnas de la Base del Mes
-def preparar_datos_base_mes(
-        *,
-        cruce_df: pd.DataFrame,
-        distribucion_df: Optional[pd.DataFrame] = None,
-        columnas_portafolio: Optional[list[str]] = None,
-        tipo_portafolio: Optional[str] = None,
-    ) -> pd.DataFrame:
-    columnas_salida = [COL_ID_CRUCE] + MASIVAS_BASE_MES_COLUMNS
-    df = cruce_df.copy()
-    if df.empty:
-        return pd.DataFrame(columns=columnas_salida)
-
-    # Paso 1: Filtrar únicamente los Registros Cruzados (Id_Definitivo real, sin ADDENDUM)
-    df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or '').strip())
-    mask_cruzados = df['_Id_Definitivo'].ne('') & df['_Id_Definitivo'].str.upper().ne(ETIQUETA_ADDENDUM)
-    df = df.loc[mask_cruzados].copy()
-    # Paso 1.1: Descartar los Registros sin Fecha Límite de Pago (la Metadata de Masivas la Exige)
-    mask_fecha = df['Metadata'].apply(lambda m: pd.notna(m.get('Fecha_Limite_Pago')))
-    if not mask_fecha.all():
-        st.warning(
-            "Se omitieron **{:,}** registro(s) sin Fecha Límite de Pago válida (no cumplen el esquema de Masivas).".format(
-                int((~mask_fecha).sum())
-            ),
-            icon="⚠️",
-        )
-        df = df.loc[mask_fecha].copy()
-    if df.empty:
-        return pd.DataFrame(columns=columnas_salida)
-
-    # Paso 2: Calcular 'Propuesta Pago' y el Pago/Plazo Estructurado (Mayor Plazo)
-    df['_Propuesta_Pago'] = df.apply(
-        lambda fila: _calcular_propuesta_pago(
-            mtdt=fila['Metadata'],
-            monto_actual_fila=fila.get(COL_MONTO_ACTUAL),
-        ),
-        axis=1,
-    )
-    pagos_estructurados = df['Metadata'].apply(_calcular_pago_estructurado)
-    df['_Monto_Estructurado'] = [pago[0] for pago in pagos_estructurados]
-    df['_Plazo_Estructurado'] = [pago[1] for pago in pagos_estructurados]
-
-    # Paso 3: Determinar los Portafolios según la Distribución del tab Control
-    df['_Portafolio'] = ("" if tipo_portafolio != "Monto Individual de Portafolio" else "SI")
-    df['_Monto_Portafolio'] = np.nan
-    df['_Id_Portafolio'] = ''
-    columnas_grupo = [col for col in (columnas_portafolio or []) if col in df.columns]
-    if (distribucion_df is not None) and (not distribucion_df.empty) and columnas_grupo:
-        # 3.1: Mapear si el Registro quedó Dentro de un Grupo Distribuido
-        flags_distribucion = (
-            distribucion_df
-            .drop_duplicates(subset=COL_ID_CRUCE, keep='last')
-            .set_index(COL_ID_CRUCE)['Portafolio_Distribuido']
-        )
-        df['_Distribuido'] = df[COL_ID_CRUCE].map(flags_distribucion).fillna(False).astype(bool)
-        # 3.2: Calcular el Tamaño, el Monto y los Ids de cada Grupo de Portafolio
-        grupos = df.groupby(columnas_grupo, dropna=False)
-        tamano_grupo = grupos[COL_ID_CRUCE].transform('size')
-        monto_grupo = grupos['_Propuesta_Pago'].transform('sum')
-        ids_grupo = grupos[COL_ID_CRUCE].transform(lambda ids: '-'.join(str(i) for i in ids))
-        # 3.3: Solo los Grupos Distribuidos con más de una Deuda se marcan como Portafolio
-        mask_portafolio = df['_Distribuido'] & (tamano_grupo > 1)
-        df.loc[mask_portafolio, '_Portafolio'] = 'SI'
-        df.loc[mask_portafolio, '_Monto_Portafolio'] = monto_grupo[mask_portafolio].round(2)
-        df.loc[mask_portafolio, '_Id_Portafolio'] = ids_grupo[mask_portafolio]
-
-    # Paso 4: Fecha y Hora Actual en la Zona Horaria de Bogotá
-    ahora = pd.Timestamp.now(tz='America/Bogota')
-    fecha_actual = ahora.strftime('%d/%m/%Y')
-    hora_actual = ahora.strftime('%X')
-
-    # Paso 5: Construir el DataFrame con las Columnas de la Base del Mes
-    numero_producto = (
-        df[COL_CREDITO].apply(lambda v: str(v).replace('.0', '').strip() if pd.notna(v) else '')
-        if COL_CREDITO in df.columns else pd.Series('', index=df.index)
-    )
-    metadata_masivas = df.apply(
-        lambda fila: convert_data_to_string(
-            _construir_metadata_masivas(
-                id_cruce=str(fila[COL_ID_CRUCE]),
-                mtdt_cruce=fila['Metadata'],
-                id_portafolio=str(fila.get('_Id_Portafolio') or ''),
-                pab_portafolio=(fila.get('_Monto_Portafolio') if fila.get('_Portafolio') == 'SI' else None),
-            )
-        ),
-        axis=1,
-    )
-    df_salida = pd.DataFrame({
-        COL_ID_CRUCE: df[COL_ID_CRUCE].astype(str),
-        'Metadata': metadata_masivas,
-        'Fecha': fecha_actual,
-        'Hora': hora_actual,
-        'ID': df['_Id_Definitivo'],
-        'Casa': df['Metadata'].apply(lambda m: str(m.get('Casa_Cobro') or '')),
-        'Número de producto': numero_producto,
-        'Propuesta Pago': df['_Propuesta_Pago'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
-        'Monto Pago Estructurado': df['_Monto_Estructurado'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
-        'Plazo Estructurado': df['_Plazo_Estructurado'].apply(lambda v: int(v) if pd.notna(v) else ''),
-        'Portafolio': df['_Portafolio'],
-        'Monto Portafolio': df['_Monto_Portafolio'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
-    })
-    return df_salida.reset_index(drop=True)
 
 # Función para Obtener el Mapeo Id_Cruce -> Fila de Sheets de la Base del Mes (SIN Cache)
 def get_masivas_rows_by_id_cruce(*, ws: gspread.Worksheet, headers: list[str]) -> tuple[dict[str, int], int]:

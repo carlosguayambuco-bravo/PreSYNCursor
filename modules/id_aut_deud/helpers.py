@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_loader import obtener_datos_deuda_cedula, obtener_montos_deudas, parse_metadata_cruce
-from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MetadataPendienteCruce, PendienteCruceSchema
+from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MasivasMetadata, MetadataPendienteCruce, PendienteCruceSchema
 from modules.constants import (
     COL_BANCO,
     COL_CEDULA,
@@ -26,9 +26,12 @@ from modules.constants import (
     ETIQUETA_ADDENDUM,
     ETIQUETA_EXACTO,
     ETIQUETA_NULO,
+    MASIVAS_BASE_MES_COLUMNS,
     MIN_COLUMNAS_HOJA_EXCEL,
     MIN_FILAS_HOJA_EXCEL,
     MIN_LEN_TEXTO,
+    TIPO_PORTAFOLIO_DISTRIBUCION,
+    TIPO_PORTAFOLIO_INDIVIDUAL,
     TIPOS_CONTRAOFERTAS
 )
 from services import GoogleDriveService
@@ -885,6 +888,277 @@ def distribuir_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio:
         'Montos_Consultados': montos_consultados,
         'Montos_Encontrados': montos_encontrados,
     }
+
+# --- Funciones de Transformación para la Subida a la Base del Mes ---
+
+# Función Auxiliar para Calcular la 'Propuesta Pago' de un Registro
+def _calcular_propuesta_pago(*, mtdt: dict, monto_actual_fila: Optional[float] = None) -> float:
+    # Paso 1: Pago con el Mínimo de Plazos (el Monto_Propuesto quedó guardado como Pago a 1 Cuota)
+    pago_min = obtener_pago_minimo(mtdt)
+    if pago_min is not None:
+        monto_pago = pago_min.get('Monto')
+        if (monto_pago is not None) and pd.notna(monto_pago):
+            return float(monto_pago)
+    # Paso 2: Si tampoco hay, se usa el Monto_Actual de la Deuda Identificada
+    monto_original = mtdt.get('Monto_Actual_Original')
+    if (monto_original is not None) and pd.notna(monto_original):
+        return float(monto_original)
+    id_definitivo = str(mtdt.get('Id_Definitivo') or '')
+    for deuda in (mtdt.get('Deudas_Posibles') or []):
+        if str(deuda.get('Id_Deuda') or '') == id_definitivo:
+            monto_deuda = deuda.get('Monto_Actual')
+            if (monto_deuda is not None) and pd.notna(monto_deuda):
+                return float(monto_deuda)
+    # Paso 3: Último caso, el Monto_Actual de la fila del cruce
+    if (monto_actual_fila is not None) and pd.notna(monto_actual_fila):
+        return float(monto_actual_fila)
+    return np.nan
+
+# Función Auxiliar para Calcular el Pago y Plazo Estructurado (Mayor Plazo)
+def _calcular_pago_estructurado(mtdt: dict) -> tuple[float, int]:
+    pagos = mtdt.get('Pagos_Cuotas') or []
+    pagos_estructurados = [pago for pago in pagos if _int_cuotas_pago(pago) > 1]
+    if not pagos_estructurados:
+        return np.nan, np.nan # type: ignore
+    pago_mayor = max(pagos_estructurados, key=_int_cuotas_pago)
+    monto_mayor = pago_mayor.get('Monto')
+    monto_mayor = float(monto_mayor) if (monto_mayor is not None) and pd.notna(monto_mayor) else np.nan
+    return monto_mayor, _int_cuotas_pago(pago_mayor)
+
+# Función Auxiliar para Construir la Metadata de Masivas (MasivasMetadata)
+def _construir_metadata_masivas(*, id_cruce: str, mtdt_cruce: dict, id_portafolio: str = '', pab_portafolio: Optional[float] = None) -> MasivasMetadata:
+    # Se incluyen TODAS las Claves del Esquema (las Opcionales quedan en None si no aplican)
+    # El Tipo_Contraoferta reemplaza a Es_Maximo_Descuento (ya indica si es 'Descuento Máximo')
+    fecha_limite = mtdt_cruce.get('Fecha_Limite_Pago')
+    mtdt = MasivasMetadata(
+        Id_Cruce=str(id_cruce),
+        Tipo_Contraoferta=(mtdt_cruce.get('Tipo_Contraoferta') or 'Descuento Máximo'), # type: ignore
+        Fecha_Limite_Uso=(fecha_limite if (fecha_limite is not None) and pd.notna(fecha_limite) else None), # type: ignore
+        Alias=(str(mtdt_cruce.get('Alias_Casa')) if mtdt_cruce.get('Alias_Casa') else None),
+        Id_Portafolio=str(id_portafolio or ''),
+        PaB_Portafolio=(float(pab_portafolio) if (pab_portafolio is not None) and pd.notna(pab_portafolio) else None),
+    )
+    return mtdt
+
+# Función Auxiliar para Agrupar los Registros de un Portafolio y Sumar sus Pagos Individuales
+def agrupar_montos_portafolio(*, cruce_df: pd.DataFrame, columnas_portafolio: list[str]) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Agrupa los Registros por las Columnas del Portafolio y suma sus Pagos Individuales.
+
+    Es la Operación Inversa a `distribuir_montos_portafolio`: mientras que allí el Monto
+    Total viene repetido en cada Deuda y se reparte por Participación, aquí cada Deuda
+    trae su propio Pago (el Pago Mínimo de sus Pagos_Cuotas) y el Monto_Portafolio del
+    Grupo es la Suma de esos Pagos Individuales.
+
+    Solo se consideran los Registros que se suben a la Base del Mes (con Id_Definitivo
+    válido y sin ADDENDUM). Si un Grupo tiene Registros sin Id_Definitivo o algún Pago
+    Individual faltante, no se marca como Portafolio para no guardar una Suma Incompleta.
+
+    Returns:
+        tuple: (DataFrame del cruce sin cambios, DataFrame resumen de la agrupación,
+        dict con las cantidades de registros y grupos de la agrupación)
+    """
+    columnas_portafolio = [c for c in columnas_portafolio if c in cruce_df.columns]
+    info = {
+        'Registros_Agrupados': 0,
+        'Grupos_Portafolio': 0,
+        'Registros_Sin_Id': 0,
+        'Registros_Addendum': 0,
+        'Grupos_Incompletos': 0,
+        'Grupos_Sin_Monto': 0,
+    }
+    # Si no hay Columnas o Datos, no se realiza ninguna Agrupación
+    if (not columnas_portafolio) or cruce_df.empty:
+        return cruce_df, pd.DataFrame(), info
+
+    df = cruce_df.copy()
+    df['_agrup_Id_Definitivo'] = df['Metadata'].apply(
+        lambda m: str(m.get('Id_Definitivo') or '').strip()
+    )
+    # Los ADDENDUMS no forman parte de la Agrupación (no se suben a la Base del Mes)
+    mask_addendum = df['_agrup_Id_Definitivo'].str.upper().eq(ETIQUETA_ADDENDUM)
+    info['Registros_Addendum'] = int(mask_addendum.sum())
+    df = df.loc[~mask_addendum].copy()
+    if df.empty:
+        return cruce_df, pd.DataFrame(), info
+
+    df['_agrup_Valido'] = df['_agrup_Id_Definitivo'].ne('')
+    df['_agrup_Pago_Individual'] = df.apply(
+        lambda fila: _calcular_propuesta_pago(
+            mtdt=fila['Metadata'],
+            monto_actual_fila=fila.get(COL_MONTO_ACTUAL),
+        ),
+        axis=1,
+    )
+
+    # Paso 1: Validar que TODO el Grupo tenga Id_Definitivo y Pago Individual
+    grupos = df.groupby(columnas_portafolio, dropna=False)
+    df['_agrup_Grupo_Id_Completo'] = grupos['_agrup_Valido'].transform('all')
+    df['_agrup_Grupo_Monto_Completo'] = grupos['_agrup_Pago_Individual'].transform(lambda s: s.notna().all())
+    df['_agrup_Puede_Agrupar'] = (
+        df['_agrup_Valido']
+        & df['_agrup_Grupo_Id_Completo']
+        & df['_agrup_Grupo_Monto_Completo']
+    )
+
+    # Paso 2: Calcular los Ids y la Suma de los Pagos Individuales de cada Grupo
+    monto_grupo = grupos['_agrup_Pago_Individual'].transform('sum')
+    ids_grupo = grupos[COL_ID_CRUCE].transform(lambda ids: '-'.join(str(i) for i in ids))
+
+    # Paso 3: Construir el Resumen (solo los Registros que se suben a la Base del Mes)
+    df_validos = df.loc[df['_agrup_Valido']].copy()
+    flags_agrupacion = df_validos['_agrup_Puede_Agrupar'].to_numpy(dtype=bool)
+    montos_resumen = monto_grupo.loc[df_validos.index].round(2).to_numpy(dtype=float)
+    ids_resumen = ids_grupo.loc[df_validos.index].to_numpy(dtype=object)
+    resumen = pd.DataFrame({
+        COL_ID_CRUCE: df_validos[COL_ID_CRUCE].to_numpy(),
+        COL_CEDULA: (df_validos[COL_CEDULA].to_numpy() if COL_CEDULA in df_validos.columns else np.full(len(df_validos), np.nan)),
+        COL_NOMBRE: (df_validos[COL_NOMBRE].to_numpy() if COL_NOMBRE in df_validos.columns else np.full(len(df_validos), np.nan)),
+        COL_MONTO_ACTUAL: (df_validos[COL_MONTO_ACTUAL].to_numpy() if COL_MONTO_ACTUAL in df_validos.columns else np.full(len(df_validos), np.nan)),
+        'Id_Definitivo': df_validos['_agrup_Id_Definitivo'].to_numpy(),
+        'Pago_Minimo_Individual': df_validos['_agrup_Pago_Individual'].to_numpy(),
+        'Monto_Portafolio': np.where(flags_agrupacion, montos_resumen, np.nan),
+        'Ids_Portafolio': np.where(flags_agrupacion, ids_resumen, ''),
+        'Portafolio_Agrupado': flags_agrupacion,
+    })
+
+    # Paso 4: Contabilizar los Registros y Grupos de la Agrupación
+    info['Registros_Agrupados'] = int(resumen['Portafolio_Agrupado'].sum())
+    info['Grupos_Portafolio'] = int(
+        df_validos.loc[df_validos['_agrup_Puede_Agrupar'], columnas_portafolio].drop_duplicates().shape[0]
+    )
+    info['Registros_Sin_Id'] = int((~df['_agrup_Valido']).sum())
+    info['Grupos_Incompletos'] = int(
+        df.loc[~df['_agrup_Grupo_Id_Completo'], columnas_portafolio].drop_duplicates().shape[0]
+    )
+    info['Grupos_Sin_Monto'] = int(
+        df.loc[~df['_agrup_Grupo_Monto_Completo'], columnas_portafolio].drop_duplicates().shape[0]
+    )
+
+    return cruce_df, resumen, info
+
+# Función para Preparar los Datos Cruzados con las Columnas de la Base del Mes
+def preparar_datos_base_mes(
+        *,
+        cruce_df: pd.DataFrame,
+        distribucion_df: Optional[pd.DataFrame] = None,
+        columnas_portafolio: Optional[list[str]] = None,
+        tipo_portafolio: Optional[str] = None,
+    ) -> pd.DataFrame:
+    columnas_salida = [COL_ID_CRUCE] + MASIVAS_BASE_MES_COLUMNS
+    df = cruce_df.copy()
+    if df.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    # Paso 0: Agrupar los Portafolios Individuales antes de Filtrar (para validar los Grupos Completos)
+    agrupacion_df = pd.DataFrame()
+    columnas_portafolio = columnas_portafolio or []
+    if (tipo_portafolio == TIPO_PORTAFOLIO_INDIVIDUAL) and (COL_CEDULA in columnas_portafolio):
+        _, agrupacion_df, _ = agrupar_montos_portafolio(
+            cruce_df=df,
+            columnas_portafolio=columnas_portafolio,
+        )
+
+    # Paso 1: Filtrar únicamente los Registros Cruzados (Id_Definitivo real, sin ADDENDUM)
+    df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or '').strip())
+    mask_cruzados = df['_Id_Definitivo'].ne('') & df['_Id_Definitivo'].str.upper().ne(ETIQUETA_ADDENDUM)
+    df = df.loc[mask_cruzados].copy()
+    # Paso 1.1: Descartar los Registros sin Fecha Límite de Pago (la Metadata de Masivas la Exige)
+    mask_fecha = df['Metadata'].apply(lambda m: pd.notna(m.get('Fecha_Limite_Pago')))
+    if not mask_fecha.all():
+        st.warning(
+            "Se omitieron **{:,}** registro(s) sin Fecha Límite de Pago válida (no cumplen el esquema de Masivas).".format(
+                int((~mask_fecha).sum())
+            ),
+            icon="⚠️",
+        )
+        df = df.loc[mask_fecha].copy()
+    if df.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    # Paso 2: Calcular 'Propuesta Pago' y el Pago/Plazo Estructurado (Mayor Plazo)
+    df['_Propuesta_Pago'] = df.apply(
+        lambda fila: _calcular_propuesta_pago(
+            mtdt=fila['Metadata'],
+            monto_actual_fila=fila.get(COL_MONTO_ACTUAL),
+        ),
+        axis=1,
+    )
+    pagos_estructurados = df['Metadata'].apply(_calcular_pago_estructurado)
+    df['_Monto_Estructurado'] = [pago[0] for pago in pagos_estructurados]
+    df['_Plazo_Estructurado'] = [pago[1] for pago in pagos_estructurados]
+
+    # Paso 3: Determinar los Portafolios según el Tipo de Manejo escogido en el tab Control
+    df['_Portafolio'] = ''
+    df['_Monto_Portafolio'] = np.nan
+    df['_Id_Portafolio'] = ''
+    columnas_grupo = [col for col in (columnas_portafolio or []) if col in df.columns]
+
+    if (tipo_portafolio == TIPO_PORTAFOLIO_INDIVIDUAL) and (not agrupacion_df.empty):
+        # 3.1: Mapear la Agrupación y la Suma de los Pagos Individuales de cada Portafolio
+        agrupacion_idx = (
+            agrupacion_df
+            .drop_duplicates(subset=COL_ID_CRUCE, keep='last')
+            .set_index(COL_ID_CRUCE)
+        )
+        flags_agrupacion = df[COL_ID_CRUCE].map(agrupacion_idx['Portafolio_Agrupado']).fillna(False).astype(bool)
+        df.loc[flags_agrupacion, '_Portafolio'] = 'SI'
+        df['_Monto_Portafolio'] = df[COL_ID_CRUCE].map(agrupacion_idx['Monto_Portafolio'])
+        df['_Id_Portafolio'] = df[COL_ID_CRUCE].map(agrupacion_idx['Ids_Portafolio']).fillna('')
+    elif (tipo_portafolio == TIPO_PORTAFOLIO_DISTRIBUCION) and (distribucion_df is not None) and (not distribucion_df.empty) and columnas_grupo:
+        # 3.2: Mapear si el Registro quedó Dentro de un Grupo Distribuido
+        flags_distribucion = (
+            distribucion_df
+            .drop_duplicates(subset=COL_ID_CRUCE, keep='last')
+            .set_index(COL_ID_CRUCE)['Portafolio_Distribuido']
+        )
+        df['_Distribuido'] = df[COL_ID_CRUCE].map(flags_distribucion).fillna(False).astype(bool)
+        # 3.3: Calcular el Tamaño, el Monto y los Ids de cada Grupo de Portafolio
+        grupos = df.groupby(columnas_grupo, dropna=False)
+        tamano_grupo = grupos[COL_ID_CRUCE].transform('size')
+        monto_grupo = grupos['_Propuesta_Pago'].transform('sum')
+        ids_grupo = grupos[COL_ID_CRUCE].transform(lambda ids: '-'.join(str(i) for i in ids))
+        # 3.4: Solo los Grupos Distribuidos con más de una Deuda se marcan como Portafolio
+        mask_portafolio = df['_Distribuido'] & (tamano_grupo > 1)
+        df.loc[mask_portafolio, '_Portafolio'] = 'SI'
+        df.loc[mask_portafolio, '_Monto_Portafolio'] = monto_grupo[mask_portafolio].round(2)
+        df.loc[mask_portafolio, '_Id_Portafolio'] = ids_grupo[mask_portafolio]
+
+    # Paso 4: Fecha y Hora Actual en la Zona Horaria de Bogotá
+    ahora = pd.Timestamp.now(tz='America/Bogota')
+    fecha_actual = ahora.strftime('%d/%m/%Y')
+    hora_actual = ahora.strftime('%X')
+
+    # Paso 5: Construir el DataFrame con las Columnas de la Base del Mes
+    numero_producto = (
+        df[COL_CREDITO].apply(lambda v: str(v).replace('.0', '').strip() if pd.notna(v) else '')
+        if COL_CREDITO in df.columns else pd.Series('', index=df.index)
+    )
+    metadata_masivas = df.apply(
+        lambda fila: convert_data_to_string(
+            _construir_metadata_masivas(
+                id_cruce=str(fila[COL_ID_CRUCE]),
+                mtdt_cruce=fila['Metadata'],
+                id_portafolio=str(fila.get('_Id_Portafolio') or ''),
+                pab_portafolio=(fila.get('_Monto_Portafolio') if fila.get('_Portafolio') == 'SI' else None),
+            )
+        ),
+        axis=1,
+    )
+    df_salida = pd.DataFrame({
+        COL_ID_CRUCE: df[COL_ID_CRUCE].astype(str),
+        'Metadata': metadata_masivas,
+        'Fecha': fecha_actual,
+        'Hora': hora_actual,
+        'ID': df['_Id_Definitivo'],
+        'Casa': df['Metadata'].apply(lambda m: str(m.get('Casa_Cobro') or '')),
+        'Número de producto': numero_producto,
+        'Propuesta Pago': df['_Propuesta_Pago'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
+        'Monto Pago Estructurado': df['_Monto_Estructurado'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
+        'Plazo Estructurado': df['_Plazo_Estructurado'].apply(lambda v: int(v) if pd.notna(v) else ''),
+        'Portafolio': df['_Portafolio'],
+        'Monto Portafolio': df['_Monto_Portafolio'].apply(lambda v: round(float(v), 2) if pd.notna(v) else ''),
+    })
+    return df_salida.reset_index(drop=True)
 
 # Función Auxiliar para Buscar los Datos de las Deudas
 def search_data_deudas(*,cedula: str):

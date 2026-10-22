@@ -14,10 +14,10 @@ from data.data_deleter import eliminar_base_cruce
 from data.data_loader import load_cartera_activa, load_masivas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
-from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPOS_STATUS
+from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPO_PORTAFOLIO_DISTRIBUCION, TIPO_PORTAFOLIO_INDIVIDUAL, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
-    agregar_resultados_a_df_original, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, resetear_widgets_columnas,
+    agregar_resultados_a_df_original, agrupar_montos_portafolio, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
@@ -901,6 +901,22 @@ def _construir_preview_control(*, base_df: pd.DataFrame) -> pd.DataFrame:
         })
     return pd.DataFrame(filas)
 
+# Función Auxiliar para Mostrar la Selección de Columnas que Definen un Portafolio
+def _mostrar_selector_columnas_portafolio(
+        *,
+        key: str,
+        columnas_disponibles: list[str],
+        defecto: list[str],
+        help: str,
+    ) -> list[str]:
+    return st.multiselect(
+        label="**Columnas que definen el Portafolio**",
+        options=columnas_disponibles,
+        default=[c for c in defecto if c in columnas_disponibles],
+        key=key,
+        help=help,
+    )
+
 # --- Página Principal ---
 tab_subida, tab_escogencia, tab_control = st.tabs(
     tabs = ["📤 Subida de Datos", "✍️ Identificación Manual", "🟢 Control"],
@@ -1062,7 +1078,8 @@ if tab_control.open:
         st.markdown("### 🟢 Control de Subida a la Base del Mes")
         st.info(
             "Selecciona la base que deseas subir, revisa el resumen del cruce y define si los "
-            "montos corresponden a un portafolio para redistribuirlos entre sus deudas.",
+            "montos corresponden a un portafolio para redistribuirlos entre sus deudas o para "
+            "agruparlos y sumarlos por cliente.",
             icon="ℹ️",
         )
 
@@ -1173,7 +1190,7 @@ if tab_control.open:
                     captions=[
                         "Cada deuda trae su propio monto a pagar de forma individual",
                         "El monto se repite para las deudas del portafolio y se redistribuye por participación",
-                        "Cada deuda trae su propio monto a pagar, pero se considera que pertenecen a un portafolio",
+                        "Cada deuda trae su propio monto a pagar y el monto del portafolio es la suma de los pagos agrupados",
                     ],
                     horizontal=True,
                     index=None,
@@ -1188,17 +1205,16 @@ if tab_control.open:
             # Resultado de la Distribución de Portafolio (se envía a la subida de la Base del Mes)
             df_distribucion = None
             columnas_portafolio = []
-            if tipo_portafolio == 'Distribuir Monto de Portafolio':
+            if tipo_portafolio == TIPO_PORTAFOLIO_DISTRIBUCION:
                 with st.container(border=True):
                     columnas_disponibles = [
                         c for c in [COL_CEDULA, COL_NOMBRE, COL_BANCO, COL_MONTO_ACTUAL, COL_CREDITO]
                         if c in base_df.columns
                     ]
-                    columnas_portafolio = st.multiselect(
-                        label="**Columnas que definen el Portafolio**",
-                        options=columnas_disponibles,
-                        default=[c for c in [COL_CEDULA, COL_MONTO_ACTUAL] if c in columnas_disponibles],
+                    columnas_portafolio = _mostrar_selector_columnas_portafolio(
                         key="control_columnas_portafolio",
+                        columnas_disponibles=columnas_disponibles,
+                        defecto=[COL_CEDULA, COL_MONTO_ACTUAL],
                         help="Selecciona las columnas que identifican un mismo portafolio. Como mínimo Cédula y Monto_Actual.",
                     )
 
@@ -1260,6 +1276,108 @@ if tab_control.open:
                                 'Participacion': st.column_config.NumberColumn('Participacion', format="percent"),
                             },
                         )
+            elif tipo_portafolio == TIPO_PORTAFOLIO_INDIVIDUAL:
+                with st.container(border=True):
+                    columnas_disponibles = [
+                        c for c in [COL_CEDULA, COL_NOMBRE, COL_BANCO, COL_MONTO_ACTUAL, COL_CREDITO]
+                        if c in base_df.columns
+                    ]
+                    columnas_portafolio = _mostrar_selector_columnas_portafolio(
+                        key="control_columnas_portafolio_individual",
+                        columnas_disponibles=columnas_disponibles,
+                        defecto=[COL_CEDULA],
+                        help=(
+                            "Selecciona las columnas que identifican un mismo portafolio. "
+                            "El monto del portafolio será la suma de los montos individuales de cada grupo. "
+                            "Como mínimo Cédula."
+                        ),
+                    )
+
+                if COL_CEDULA not in columnas_portafolio:
+                    st.warning(
+                        "Selecciona como mínimo la columna **Cédula** para agrupar el portafolio.",
+                        icon="⚠️",
+                    )
+                else:
+                    with st.spinner("💼 Agrupando y sumando los montos individuales del portafolio..."):
+                        _, df_agrupacion, info_agrupacion = agrupar_montos_portafolio(
+                            cruce_df=base_df,
+                            columnas_portafolio=columnas_portafolio,
+                        )
+                    registros_agrupados = info_agrupacion['Registros_Agrupados']
+                    grupos_portafolio = info_agrupacion['Grupos_Portafolio']
+                    if registros_agrupados == 0:
+                        st.warning(
+                            "No se pudo agrupar ningún registro. Revisa que los registros tengan "
+                            "Id_Definitivo y Monto de Pago válidos en las columnas seleccionadas.",
+                            icon="⚠️",
+                        )
+                    else:
+                        st.success(
+                            "✅ Se agruparon **{:,}** registro(s) en **{:,}** portafolio(s) "
+                            "sumando sus montos individuales.".format(
+                                registros_agrupados, grupos_portafolio
+                            ),
+                            icon="💼",
+                        )
+                        # Informamos los Registros que no se pudieron incluir en la Agrupación
+                        if info_agrupacion['Registros_Sin_Id'] > 0:
+                            st.caption(
+                                "ℹ️ **{:,}** registro(s) sin Id_Definitivo no se incluyeron "
+                                "en la agrupación.".format(info_agrupacion['Registros_Sin_Id'])
+                            )
+                        if info_agrupacion['Registros_Addendum'] > 0:
+                            st.caption(
+                                "ℹ️ **{:,}** ADDENDUM(s) no forman parte de la agrupación.".format(
+                                    info_agrupacion['Registros_Addendum']
+                                )
+                            )
+                        if info_agrupacion['Grupos_Incompletos'] > 0:
+                            st.warning(
+                                "**{:,}** grupo(s) tienen registros sin Id_Definitivo y no se marcarán "
+                                "como portafolio.".format(info_agrupacion['Grupos_Incompletos']),
+                                icon="⚠️",
+                            )
+                        if info_agrupacion['Grupos_Sin_Monto'] > 0:
+                            st.warning(
+                                "**{:,}** grupo(s) tienen montos individuales faltantes y no se marcarán "
+                                "como portafolio.".format(info_agrupacion['Grupos_Sin_Monto']),
+                                icon="⚠️",
+                            )
+                        # Sumamos una sola vez el Monto de cada Portafolio (todos sus Registros comparten el Total)
+                        registros_portafolio = df_agrupacion['Portafolio_Agrupado']
+                        monto_individual_total = df_agrupacion.loc[
+                            registros_portafolio, 'Pago_Minimo_Individual'
+                        ].sum()
+                        monto_portafolio_total = (
+                            df_agrupacion
+                            .loc[registros_portafolio]
+                            .drop_duplicates(subset=['Ids_Portafolio'])
+                            ['Monto_Portafolio']
+                            .sum()
+                        )
+                        colAntes, colDespues = st.columns(2, border=True)
+                        with colAntes:
+                            st.metric(
+                                label="**💸 Pago Individual (Suma)**",
+                                value="${:,.0f}".format(monto_individual_total),
+                            )
+                        with colDespues:
+                            st.metric(
+                                label="**💼 Monto Portafolio (Suma)**",
+                                value="${:,.0f}".format(monto_portafolio_total),
+                            )
+                        with st.expander("🔎 Ver Detalle de la Agrupación", expanded=False):
+                            st.dataframe(
+                                df_agrupacion,
+                                width="stretch",
+                                hide_index=True,
+                                column_config={
+                                    COL_MONTO_ACTUAL: st.column_config.NumberColumn(COL_MONTO_ACTUAL, format="localized"),
+                                    'Pago_Minimo_Individual': st.column_config.NumberColumn('Pago_Minimo_Individual', format="localized"),
+                                    'Monto_Portafolio': st.column_config.NumberColumn('Monto_Portafolio', format="localized"),
+                                },
+                            )
 
             # --- 4. Resumen de los Cruce_Status ---
             st.divider()

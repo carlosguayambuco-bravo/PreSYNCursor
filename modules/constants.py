@@ -321,6 +321,11 @@ TIPOS_ETIQUETAS = Literal['EXACTO','DUPLICADO','AMBIGUO','ADDENDUM','NULO']
 TIPOS_STATUS = Literal['Sin Reconocer','Reconocido','Subido Alianzas']
 TIPOS_CONTRAOFERTAS = Literal['ContraOferta sin Compromiso','ContraOferta de Pago Obligatorio','Descuento Máximo']
 
+# Tipos de Manejo de Portafolio en la Subida a la Base del Mes
+TIPOS_PORTAFOLIO = Literal['Sin Portafolio','Distribuir Monto de Portafolio','Monto Individual de Portafolio']
+TIPO_PORTAFOLIO_DISTRIBUCION = 'Distribuir Monto de Portafolio'
+TIPO_PORTAFOLIO_INDIVIDUAL = 'Monto Individual de Portafolio'
+
 # Configuraciones de Subida de Datos de Masivas
 # Configuraciones de la Subida a la Base del Mes
 MASIVAS_BASE_MES_SHEET = 'Bases mes actual 2024'
