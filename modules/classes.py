@@ -2,6 +2,8 @@
 # Librerías de Python
 import threading
 import re
+import time
+from typing import Optional
 # Librerías de Terceros
 import pandas as pd
 from pandera.typing import DataFrame
@@ -143,3 +145,42 @@ def get_banned_manager():
                 self.banned.clear()
 
     return BannedManager()
+
+# Manejo Compartido de las Identificaciones de Cruces (Sincronización entre Sesiones)
+@st.cache_resource
+def get_cruce_identificaciones_manager():
+    class CruceIdentificacionesManager:
+        def __init__(self):
+            self.identificaciones: dict[str, dict] = {}
+            self.lock = threading.Lock()
+
+        def registrar(self, *, id_cruce: str, correo: str, nombre: str) -> bool:
+            """Registra quién identificó un cruce. La primera identificación prevalece."""
+            id_cruce = str(id_cruce)
+            with self.lock:
+                if id_cruce in self.identificaciones:
+                    return False
+                self.identificaciones[id_cruce] = {
+                    'correo': str(correo or 'N/A').strip(),
+                    'nombre': str(nombre or 'N/A').strip(),
+                    'fecha_identificacion': time.time(),
+                }
+                return True
+
+        def obtener(self, id_cruce: str) -> Optional[dict]:
+            """Devuelve una copia de la Identificación del Cruce (o None si no existe)."""
+            id_cruce = str(id_cruce)
+            with self.lock:
+                info = self.identificaciones.get(id_cruce)
+                return dict(info) if info is not None else None
+
+        def esta_identificada(self, id_cruce: str) -> bool:
+            id_cruce = str(id_cruce)
+            with self.lock:
+                return id_cruce in self.identificaciones
+
+        def reset(self) -> None:
+            with self.lock:
+                self.identificaciones.clear()
+
+    return CruceIdentificacionesManager()

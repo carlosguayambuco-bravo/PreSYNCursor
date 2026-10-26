@@ -14,10 +14,11 @@ from data.data_deleter import eliminar_base_cruce
 from data.data_loader import load_cartera_activa, load_masivas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
+from modules.classes import get_cruce_identificaciones_manager
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPO_PORTAFOLIO_DISTRIBUCION, TIPO_PORTAFOLIO_INDIVIDUAL, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
-    agregar_resultados_a_df_original, agrupar_montos_portafolio, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, resetear_widgets_columnas,
+    agregar_resultados_a_df_original, agrupar_montos_portafolio, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, obtener_ultimo_status_cruce, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
 from ui.cruce_deudas_components import (
@@ -866,7 +867,7 @@ def _extraer_columnas_control(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     df['_Archivo_Origen'] = df['Metadata'].apply(lambda m: str(m.get('Archivo_Origen') or ''))
     df['_Id_Definitivo'] = df['Metadata'].apply(lambda m: str(m.get('Id_Definitivo') or ''))
     df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta') or ''))
-    df['_Cruce_Status'] = df['Metadata'].apply(lambda m: str(m.get('Cruce_Status') or 'Sin Reconocer'))
+    df['_Cruce_Status'] = df['Metadata'].apply(obtener_ultimo_status_cruce)
     df['_Pago_Minimo'] = df['Metadata'].apply(lambda m: (obtener_pago_minimo(m) or {}).get('Monto', np.nan))
     df['_Pagos_Cuotas'] = df['Metadata'].apply(lambda m: m.get('Pagos_Cuotas') or [])
     return df
@@ -894,7 +895,8 @@ def _construir_preview_control(*, base_df: pd.DataFrame) -> pd.DataFrame:
             COL_MONTO_ACTUAL: fila.get(COL_MONTO_ACTUAL),
             'Id_Definitivo': mtdt.get('Id_Definitivo', ''),
             'Etiqueta': mtdt.get('Etiqueta', ''),
-            'Cruce_Status': mtdt.get('Cruce_Status', 'Sin Reconocer'),
+            'Cruce_Status': obtener_ultimo_status_cruce(mtdt),
+            'Identificado_Por': mtdt.get('Identificado_Por', 'N/A'),
             'Monto_Actual_Original': mtdt.get('Monto_Actual_Original', np.nan),
             'Pago_Minimo': (obtener_pago_minimo(mtdt) or {}).get('Monto', np.nan),
             'Pagos_Cuotas': len(mtdt.get('Pagos_Cuotas') or []),
@@ -1035,8 +1037,21 @@ if tab_escogencia.open:
                         )
                         sleep(1)
                         st.rerun()
+                    # Resolvemos el Correo de la Persona que Identificó cada Deuda (Cache Compartido)
+                    gestor_identificaciones = get_cruce_identificaciones_manager()
+                    correos_identificacion = {
+                        id_cruce: (
+                            (gestor_identificaciones.obtener(id_cruce) or {}).get('correo')
+                            or st.session_state.get('user_email', 'N/A')
+                        )
+                        for id_cruce in cambios_validos
+                    }
                     # Actualizamos únicamente los Cambios Válidos
-                    df_actualizar = aplicar_cambios_id_definitivo(cruce_df=cruce_df, cambios=cambios_validos)
+                    df_actualizar = aplicar_cambios_id_definitivo(
+                        cruce_df=cruce_df,
+                        cambios=cambios_validos,
+                        identificado_por=correos_identificacion,
+                    )
                     # Validamos el DF
                     df_actualizar = PendienteCruceSchema.validate(df_actualizar, lazy=True)
                     with st.spinner("📤 Registrando Cambios en Google Sheets..."):
@@ -1068,9 +1083,10 @@ if tab_escogencia.open:
                 label="🔄 Reset de Cache",
                 key="cruce_reset_cache",
                 width="stretch",
-                help="Reinicia el cache de carga de las Deudas a Identificar y recarga desde Sheets.",
+                help="Reinicia el cache de carga de las Deudas a Identificar, libera las identificaciones en curso y recarga desde Sheets.",
             ):
                 load_pendiente_cruce.clear()
+                get_cruce_identificaciones_manager().reset()
                 st.rerun()
 
 if tab_control.open:

@@ -8,7 +8,7 @@ import pandas as pd
 import pandera.pandas as pa
 from pandera.typing import Series
 # Librerías Locales
-from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD, TIPOS_CONTRAOFERTAS, TIPOS_ETIQUETAS, TIPOS_STATUS
+from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD, TIPOS_CONTRAOFERTAS, TIPOS_ETIQUETAS
 
 class DeudasSolicitud(TypedDict):
     Id_Deuda: str
@@ -311,17 +311,28 @@ class PagosCuotasCruce(TypedDict):
     Cuotas: int
     Monto: float
 
+# Fechas de Actualización por cada Status del Cruce (las claves son los valores de TIPOS_STATUS)
+# Se guardan como texto con formato '%Y-%m-%d %X' en Hora Local de Bogotá
+FechasStatusCruce = TypedDict(
+    'FechasStatusCruce',
+    {
+        'Sin Reconocer': Optional[str],
+        'Reconocido': Optional[str],
+        'Subido Alianzas': Optional[str],
+    },
+    total=False,
+)
+
 class MetadataPendienteCruce(TypedDict):
     Id_Registro: str
     Archivo_Origen: str
     # Los Pagos_Cuotas incluyen siempre el Pago a 1 Cuota (el antiguo Monto_Propuesto)
     Pagos_Cuotas: List[PagosCuotasCruce]
-    Fecha_Identificacion: datetime
     Fecha_Limite_Pago: datetime
     Etiqueta: TIPOS_ETIQUETAS
     Motivos_Cruce: list[str]
     Deudas_Posibles: List[DeudasPosiblesCruce]
-    Cruce_Status: TIPOS_STATUS
+    Identificado_Por: str
     Casa_Cobro: str
     Ejecutivo_Subida: str
     # El Tipo_Contraoferta ya define si es 'Descuento Máximo' (no se duplica con un booleano)
@@ -330,7 +341,8 @@ class MetadataPendienteCruce(TypedDict):
     Id_Definitivo: NotRequired[str]
     Portafolio_Ids: NotRequired[str]
     Monto_Actual_Original: NotRequired[float]
-    Ultima_Actualizacion: Optional[datetime]
+    # Fecha de Actualización por cada Status (reemplaza a Cruce_Status y Ultima_Actualizacion escalar)
+    Ultima_Actualizacion: FechasStatusCruce
 
 class PendienteCruceSchema(pa.DataFrameModel):
     Id_Cruce: Series[str] # Un UUID

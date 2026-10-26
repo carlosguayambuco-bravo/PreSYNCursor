@@ -3,7 +3,7 @@
 # Librerías de Python
 from collections import defaultdict
 import json
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Optional, get_args
 # Librerías de Terceros
 from gspread_dataframe import get_as_dataframe
 from pandera.typing import DataFrame
@@ -15,7 +15,7 @@ import streamlit as st
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage
@@ -1209,19 +1209,86 @@ def load_pendiente_cruce() -> DataFrame[PendienteCruceSchema]:
     # Devolvemos el DataFrame
     return cruce_df
 
+# Función Auxiliar para Determinar si un Valor de la Metadata está Vacío
+def _es_vacio_metadata(valor) -> bool:
+    if valor is None:
+        return True
+    if isinstance(valor, str):
+        return valor.strip().lower() in ('', 'none', 'nan', 'nat')
+    try:
+        return bool(pd.isna(valor))
+    except (TypeError, ValueError):
+        return False
+
+# Función Auxiliar para Parsear una Fecha de la Metadata (sin Zona Horaria)
+def _parse_fecha_metadata(valor) -> Optional[pd.Timestamp]:
+    if _es_vacio_metadata(valor):
+        return None
+    fecha = pd.to_datetime(valor, errors='coerce')
+    if pd.isna(fecha):
+        return None
+    fecha = pd.Timestamp(fecha)
+    # Todas las Fechas se Manejan en Hora Local de Bogotá
+    if fecha.tzinfo is not None:
+        fecha = fecha.tz_convert('America/Bogota').tz_localize(None)
+    return fecha
+
+# Función Auxiliar para Migrar el Esquema Anterior (Cruce_Status + Ultima_Actualizacion)
+# al Nuevo Esquema de Fechas por Status
+def _migrar_ultima_actualizacion_cruce(*, mtdt: dict, fecha_identificacion) -> dict:
+    statuses = set(get_args(TIPOS_STATUS))
+    status_legacy = mtdt.pop('Cruce_Status', None)
+    if status_legacy not in statuses:
+        status_legacy = 'Sin Reconocer'
+    ultima = mtdt.get('Ultima_Actualizacion')
+    fechas: dict[str, pd.Timestamp] = {}
+
+    # Caso 1: Nuevo Esquema (Diccionario Status -> Fecha)
+    if isinstance(ultima, dict):
+        for status, valor in ultima.items():
+            if status not in statuses:
+                continue
+            fecha = _parse_fecha_metadata(valor)
+            if fecha is not None:
+                fechas[status] = fecha
+    # Caso 2: Esquema Anterior (Fecha Escalar de la Última Actualización)
+    else:
+        fecha = _parse_fecha_metadata(ultima)
+        if fecha is not None:
+            fechas[status_legacy] = fecha
+
+    # La Fecha_Identificacion Anterior pasa a ser la Fecha de 'Sin Reconocer'
+    fecha_inicio = _parse_fecha_metadata(fecha_identificacion)
+    if 'Sin Reconocer' not in fechas:
+        if fecha_inicio is not None:
+            fechas['Sin Reconocer'] = fecha_inicio
+        elif fechas:
+            # Fallback: Usar la Fecha Conocida Más Antigua como Inicio
+            fechas['Sin Reconocer'] = min(fechas.values())
+
+    # Si el Status Legado no tiene Fecha, usamos la Fecha de Inicio
+    if fecha_inicio is not None and status_legacy not in fechas:
+        fechas[status_legacy] = fecha_inicio
+
+    # Guardamos las Fechas en el Formato Local Requerido
+    return {
+        status: fecha.strftime('%Y-%m-%d %X')
+        for status, fecha in fechas.items()
+    }
+
 # Función Auxiliar para Parsear la Metadata de un Registro de Cruce desde Sheets
 def parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
-    # Si ya es un Diccionario (Cambios Locales) lo devolvemos tal cual
+    # Normalizamos tanto los Diccionarios (Cambios Locales) como los Strings JSON
     if isinstance(mtdt_val, dict):
-        return MetadataPendienteCruce(**mtdt_val)
-    # Si es Vacío o no es texto devolvemos un Diccionario Vacío
-    if pd.isna(mtdt_val) or not isinstance(mtdt_val, str) or not mtdt_val.strip():
-        return {} # type: ignore
-    try:
-        mtdt = json.loads(mtdt_val)
-    except json.JSONDecodeError:
-        return {} # type: ignore
-    if not isinstance(mtdt, dict):
+        mtdt = dict(mtdt_val)
+    elif isinstance(mtdt_val, str) and mtdt_val.strip():
+        try:
+            mtdt = json.loads(mtdt_val)
+        except json.JSONDecodeError:
+            return {} # type: ignore
+        if not isinstance(mtdt, dict):
+            return {} # type: ignore
+    else:
         return {} # type: ignore
 
     # Sub-Listas que quedaron serializadas como texto dentro del JSON
@@ -1240,10 +1307,20 @@ def parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
         mtdt['Id_Registro'] = str(int(float(mtdt.get('Id_Registro', 0))))
     except (TypeError, ValueError):
         mtdt['Id_Registro'] = str(mtdt.get('Id_Registro') or 0)
-    for key in ['Fecha_Identificacion', 'Fecha_Limite_Pago']:
-        mtdt[key] = pd.to_datetime(mtdt.get(key,''), errors='coerce')
-    ultima_upd = mtdt.get('Ultima_Actualizacion')
-    mtdt['Ultima_Actualizacion'] = pd.to_datetime(ultima_upd, errors='coerce') if (ultima_upd not in (None, '')) else None
+    mtdt['Fecha_Limite_Pago'] = pd.to_datetime(mtdt.get('Fecha_Limite_Pago',''), errors='coerce')
+
+    # Migración: Fecha_Identificacion se elimina del esquema y pasa a la Fecha de 'Sin Reconocer'
+    fecha_identificacion = mtdt.pop('Fecha_Identificacion', None)
+    mtdt['Ultima_Actualizacion'] = _migrar_ultima_actualizacion_cruce(
+        mtdt=mtdt,
+        fecha_identificacion=fecha_identificacion,
+    )
+
+    # Identificado_Por: los Datos Anteriores quedan como 'N/A'
+    identificado_por = mtdt.get('Identificado_Por')
+    mtdt['Identificado_Por'] = (
+        'N/A' if _es_vacio_metadata(identificado_por) else str(identificado_por).strip()
+    )
 
     # Tipado de los Pagos a Cuotas
     for pago in (mtdt.get('Pagos_Cuotas') or []):
@@ -1282,14 +1359,13 @@ def parse_metadata_cruce(mtdt_val) -> MetadataPendienteCruce:
     mtdt.setdefault('Archivo_Origen', '')
     mtdt.setdefault('Pagos_Cuotas', [])
     mtdt.setdefault('Deudas_Posibles', [])
-    mtdt.setdefault('Fecha_Identificacion', pd.NaT)
     mtdt.setdefault('Fecha_Limite_Pago', pd.NaT)
     mtdt.setdefault('Etiqueta', 'NULO')
     mtdt.setdefault('Motivos_Cruce', [])
-    mtdt.setdefault('Cruce_Status', 'Sin Reconocer')
     mtdt.setdefault('Casa_Cobro', '')
     mtdt.setdefault('Ejecutivo_Subida', '')
-    mtdt.setdefault('Ultima_Actualizacion', None)
+    mtdt.setdefault('Identificado_Por', 'N/A')
+    mtdt.setdefault('Ultima_Actualizacion', {})
 
     # Filtramos las Claves no Declaradas en los TypedDicts (la Validación las Rechaza)
     top_keys = set(MetadataPendienteCruce.__annotations__)

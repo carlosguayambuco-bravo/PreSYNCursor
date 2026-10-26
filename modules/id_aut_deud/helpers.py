@@ -1,6 +1,6 @@
 # Estandar usando Pep8
 # Librerías de Python
-from typing import Optional, Any
+from typing import Optional, Any, get_args
 from collections import defaultdict
 import re
 import io
@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from data.data_loader import obtener_datos_deuda_cedula, obtener_montos_deudas, parse_metadata_cruce
-from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, PagosCuotasCruce, MasivasMetadata, MetadataPendienteCruce, PendienteCruceSchema
+from data.data_models import InputFullScehma, InputCruceSchema, DeudasPosiblesCruce, FechasStatusCruce, PagosCuotasCruce, MasivasMetadata, MetadataPendienteCruce, PendienteCruceSchema
 from modules.constants import (
     COL_BANCO,
     COL_CEDULA,
@@ -32,7 +32,8 @@ from modules.constants import (
     MIN_LEN_TEXTO,
     TIPO_PORTAFOLIO_DISTRIBUCION,
     TIPO_PORTAFOLIO_INDIVIDUAL,
-    TIPOS_CONTRAOFERTAS
+    TIPOS_CONTRAOFERTAS,
+    TIPOS_STATUS,
 )
 from services import GoogleDriveService
 from utils.helpers_general import cleanNumber
@@ -478,7 +479,6 @@ def create_metadata_cruce(*,
         id_registro: str,
         nombre_archivo: str,
         pagos_cuotas: list[PagosCuotasCruce],
-        fecha_identificacion: pd.Timestamp,
         fecha_limite_pago: pd.Timestamp,
         etiqueta: str,
         motivos_cruce: list[str],
@@ -486,27 +486,26 @@ def create_metadata_cruce(*,
         casa_cobro: str,
         ejecutivo_subida: str,
         tipo_contraoferta: TIPOS_CONTRAOFERTAS,
-        cruce_status: str = 'Sin Reconocer',
+        identificado_por: str,
+        ultima_actualizacion: FechasStatusCruce,
         alias_casa: Optional[str] = None,
         id_definitivo: Optional[str] = None,
         portafolio_ids: Optional[str] = None,
         monto_actual_original: Optional[float] = None,
-        ultima_actualizacion: Optional[pd.Timestamp] = None,
     ) -> MetadataPendienteCruce:
     # Paso 1: Crear la Metadata con las Claves Obligatorias
     mtdt = MetadataPendienteCruce(
         Id_Registro=str(id_registro),
         Archivo_Origen = nombre_archivo,
         Pagos_Cuotas=pagos_cuotas, # type: ignore
-        Fecha_Identificacion=fecha_identificacion,
         Fecha_Limite_Pago=(fecha_limite_pago if pd.notna(fecha_limite_pago) else pd.NaT),
         Etiqueta=etiqueta, # type: ignore
         Motivos_Cruce=motivos_cruce,
         Deudas_Posibles=deudas_posibles, # type: ignore
-        Cruce_Status=cruce_status, # type: ignore
+        Identificado_Por=identificado_por,
         Casa_Cobro=casa_cobro,
         Ejecutivo_Subida=ejecutivo_subida,
-        Ultima_Actualizacion=ultima_actualizacion,
+        Ultima_Actualizacion=ultima_actualizacion, # type: ignore
         Tipo_Contraoferta = tipo_contraoferta,
     )
     # Paso 2: Agregar las Claves Opcionales (solo si tienen valor)
@@ -534,6 +533,38 @@ def obtener_pago_minimo(mtdt: dict) -> Optional[PagosCuotasCruce]:
     if not pagos:
         return None
     return min(pagos, key=_int_cuotas_pago)
+
+# Función Auxiliar para Obtener el Status Más Reciente de un Cruce (Mayor Fecha; Empate = Más Avanzado)
+def obtener_ultimo_status_cruce(mtdt: dict) -> str:
+    statuses = list(get_args(TIPOS_STATUS))
+    fechas = mtdt.get('Ultima_Actualizacion')
+
+    # Compatibilidad con el Esquema Anterior (Cruce_Status)
+    if not isinstance(fechas, dict):
+        status_legacy = mtdt.get('Cruce_Status')
+        return status_legacy if status_legacy in statuses else 'Sin Reconocer'
+
+    mejor_status = 'Sin Reconocer'
+    mejor_fecha = None
+    mejor_prioridad = -1
+
+    for prioridad, status in enumerate(statuses):
+        fecha = pd.to_datetime(fechas.get(status), errors='coerce')
+        if pd.isna(fecha):
+            continue
+        fecha = pd.Timestamp(fecha)
+        if fecha.tzinfo is not None:
+            fecha = fecha.tz_convert('America/Bogota').tz_localize(None)
+        if (
+            (mejor_fecha is None)
+            or (fecha > mejor_fecha)
+            or ((fecha == mejor_fecha) and (prioridad > mejor_prioridad))
+        ):
+            mejor_status = status
+            mejor_fecha = fecha
+            mejor_prioridad = prioridad
+
+    return mejor_status
 
 # Función Auxiliar para Limpiar la Base Estandarizada del Cruce (misma lógica de
 # limpiar_busqueda, incluyendo el cleanNumber para las Columnas de Montos a Cuotas)
@@ -602,7 +633,7 @@ def build_pendiente_cruce_df(*,
         }
 
     # Paso 4: Construir las Filas del DataFrame de Salida
-    fecha_identificacion = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+    fecha_actual_str = pd.Timestamp.now(tz='America/Bogota').strftime('%Y-%m-%d %X')
     filas_salida = []
     for i, fila in cruce_df.iterrows():
         id_cruce = str(fila[COL_ID_CRUCE])
@@ -625,6 +656,13 @@ def build_pendiente_cruce_df(*,
         id_definitivo = None
         if (etiqueta == ETIQUETA_EXACTO) and (len(ids_candidatos) == 1):
             id_definitivo = ids_candidatos[0]
+
+        # Identificación Automática y Fechas por Status:
+        # Todos empiezan como 'Sin Reconocer' y los EXACTOS también quedan 'Reconocido'
+        identificado_por = 'Automatico' if id_definitivo else 'N/A'
+        ultima_actualizacion: FechasStatusCruce = {'Sin Reconocer': fecha_actual_str}
+        if id_definitivo:
+            ultima_actualizacion['Reconocido'] = fecha_actual_str
 
         # Deudas Posibles: solo los Ids que devolvió el Modelo, cruzados con la Cartera
         deudas_posibles = []
@@ -657,13 +695,14 @@ def build_pendiente_cruce_df(*,
         mtdt = create_metadata_cruce(
             id_registro=(i + 1), # type: ignore
             pagos_cuotas=pagos_cuotas,
-            fecha_identificacion=fecha_identificacion,
             fecha_limite_pago=fecha_limite, # type: ignore
             etiqueta=etiqueta,
             motivos_cruce = motivos_cruce,
             deudas_posibles=deudas_posibles,
             casa_cobro=casa_cobro,
             ejecutivo_subida=ejecutivo_subida,
+            identificado_por=identificado_por,
+            ultima_actualizacion=ultima_actualizacion,
             alias_casa=alias_casa,
             id_definitivo=id_definitivo,
             nombre_archivo = nombre_archivo,
@@ -694,7 +733,12 @@ def build_pendiente_cruce_df(*,
     return df_salida
 
 # Función Auxiliar para Aplicar los Cambios Manuales de Id_Definitivo a la Metadata
-def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> pd.DataFrame:
+def aplicar_cambios_id_definitivo(
+        *,
+        cruce_df: pd.DataFrame,
+        cambios: dict,
+        identificado_por: Optional[dict[str, str]] = None,
+    ) -> pd.DataFrame:
     # Paso 1: Filtramos los Registros con Cambios Pendientes
     cambios_keys = [str(k) for k in cambios.keys()]
     mask = cruce_df[COL_ID_CRUCE].astype(str).isin(cambios_keys)
@@ -702,8 +746,9 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
     if df_actualizar.empty:
         return df_actualizar
 
-    # Paso 2: Definimos la Fecha de Última Actualización
-    ahora = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+    # Paso 2: Definimos la Fecha de Actualización y los Correos de Identificación
+    ahora = pd.Timestamp.now(tz='America/Bogota').strftime('%Y-%m-%d %X')
+    correos_identificacion = identificado_por or {}
 
     # Paso 3: Aplicamos el Cambio a la Metadata de cada Registro
     def actualizar_mtdt(fila):
@@ -711,9 +756,14 @@ def aplicar_cambios_id_definitivo(*, cruce_df: pd.DataFrame, cambios: dict) -> p
         id_cruce = str(fila[COL_ID_CRUCE])
         id_definitivo = cambios[id_cruce]
         mtdt['Id_Definitivo'] = id_definitivo
-        mtdt['Ultima_Actualizacion'] = ahora
-        # Actualizamos el Status de Cruce a Reconocido
-        mtdt['Cruce_Status'] = 'Reconocido'
+        # Guardamos el Correo de la Persona que Identificó la Deuda (Auditoría)
+        mtdt['Identificado_Por'] = str(correos_identificacion.get(id_cruce, 'N/A') or 'N/A')
+        # Fechas por Status: se conserva 'Sin Reconocer' y se registra 'Reconocido'
+        fechas_status_raw = mtdt.get('Ultima_Actualizacion')
+        fechas_status = dict(fechas_status_raw) if isinstance(fechas_status_raw, dict) else {}
+        fechas_status.setdefault('Sin Reconocer', ahora)
+        fechas_status['Reconocido'] = ahora
+        mtdt['Ultima_Actualizacion'] = fechas_status
         # Guardamos la Info de la Deuda Escogida (Monto_Actual Original) para la Distribución de Portafolios
         mtdt.pop('Monto_Actual_Original', None)
         if str(id_definitivo) != ETIQUETA_ADDENDUM:

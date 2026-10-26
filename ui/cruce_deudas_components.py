@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
+from modules.classes import get_cruce_identificaciones_manager
 from modules.constants import COL_CEDULA, COL_NOMBRE, ETIQUETA_EXACTO, PRIORIDAD_ETIQUETAS_CRUCE
 from modules.id_aut_deud.helpers import obtener_pago_minimo, search_data_deudas
 from utils.helpers_general import formatNaN, replaceNaN
@@ -261,15 +262,32 @@ def estilizar_deudas(deudas_df: pd.DataFrame):
 
     return styler
 
+# Función Auxiliar para Formatear la Fecha de Identificación del Cache (Hora Local Bogotá)
+def _formatear_fecha_identificacion(timestamp) -> str:
+    try:
+        fecha = pd.to_datetime(float(timestamp), unit='s', utc=True).tz_convert('America/Bogota')
+    except (TypeError, ValueError):
+        return 'N/A'
+    if pd.isna(fecha):
+        return 'N/A'
+    return fecha.strftime('%Y-%m-%d %X')
+
 # Función Auxiliar para Mostrar un Registro del Cruce (Vista de 2 Columnas)
 def mostrar_registro_cruce(*, registro: pd.Series) -> None:
     # Paso 1: Extraemos la Metadata y el Id_Cruce del Registro
     mtdt = dict(registro['Metadata'])
     id_cruce = str(registro['Id_Cruce'])
+    id_definitivo_previo = str(mtdt.get('Id_Definitivo') or '')
 
     # Paso 2: Inicializamos el Diccionario de Cambios en el Session State
     st.session_state.setdefault(LLAVE_CAMBIOS_ID_DEFINITIVO, {})
     cambios = st.session_state[LLAVE_CAMBIOS_ID_DEFINITIVO]
+
+    # Paso 3: Datos del Usuario y Gestor Compartido de Identificaciones
+    gestor_identificaciones = get_cruce_identificaciones_manager()
+    usuario_actual = st.session_state.get('user_email', 'N/A')
+    nombre_usuario = getattr(st.session_state.get('user_obj'), 'name', '') or ''
+    nombre_usuario = nombre_usuario.split()[0].upper() if nombre_usuario.split() else 'N/A'
 
     # Columna Izquierda (70%): Información de las Posibles Deudas
     # Columna Derecha (30%): Input del Id_Deuda Definitivo
@@ -356,7 +374,16 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
 
         if marcar_addendum:
             # Si está activo, el Id_Definitivo será ADDENDUM
-            cambios[id_cruce] = ID_DEFINITIVO_ADDENDUM
+            if id_definitivo_previo != ID_DEFINITIVO_ADDENDUM:
+                cambios[id_cruce] = ID_DEFINITIVO_ADDENDUM
+                gestor_identificaciones.registrar(
+                    id_cruce=id_cruce,
+                    correo=usuario_actual,
+                    nombre=nombre_usuario,
+                )
+            else:
+                # Limpiamos un Cambio No-Op que haya quedado de una Versión Anterior
+                cambios.pop(id_cruce, None)
             st.selectbox(
                 label="**🆔 Id_Deuda Definitivo**",
                 options=[ID_DEFINITIVO_ADDENDUM],
@@ -399,7 +426,32 @@ def mostrar_registro_cruce(*, registro: pd.Series) -> None:
             # Guardamos la selección en el diccionario del Session State
             # (ignorando el estado del propio input para que no se borre al cambiar de página)
             if seleccion and seleccion != OPCION_SIN_OPCIONES:
-                cambios[id_cruce] = seleccion
+                if str(seleccion) != id_definitivo_previo:
+                    cambios[id_cruce] = seleccion
+                    gestor_identificaciones.registrar(
+                        id_cruce=id_cruce,
+                        correo=usuario_actual,
+                        nombre=nombre_usuario,
+                    )
+                else:
+                    # Limpiamos un Cambio No-Op que haya quedado de una Versión Anterior
+                    cambios.pop(id_cruce, None)
+
+        # Aviso de Identificación Compartida: se muestra al final de la Columna de Selección
+        identificacion = gestor_identificaciones.obtener(id_cruce)
+        if identificacion:
+            st.success(
+                "La Deuda ya fue identificada por **{}**".format(
+                    identificacion.get('nombre') or 'N/A'
+                ),
+                title="Deuda ya identificada",
+                icon="✅",
+            )
+            st.caption(
+                "**Fecha de Identificación**: {}".format(
+                    _formatear_fecha_identificacion(identificacion.get('fecha_identificacion'))
+                )
+            )
 
 # Función Auxiliar para Mostrar las Deudas a Identificar de forma Paginada
 def mostrar_deudas_cruce_paginadas(*, cruce_df: pd.DataFrame, key: str) -> None:

@@ -422,13 +422,17 @@ def _marcar_cruce_subido_alianzas(*, cruce_df: pd.DataFrame, ids_subidos: set[st
     if df_actualizar.empty:
         return True
 
-    # Paso 2: Actualizar la Metadata (Etiqueta de Estado del Cruce y Última Actualización)
-    ahora = pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+    # Paso 2: Actualizar la Metadata (Fecha del Status 'Subido Alianzas')
+    ahora = pd.Timestamp.now(tz='America/Bogota').strftime('%Y-%m-%d %X')
 
     def actualizar_mtdt(mtdt: dict) -> dict:
         mtdt = dict(mtdt)
-        mtdt['Cruce_Status'] = 'Subido Alianzas'
-        mtdt['Ultima_Actualizacion'] = ahora
+        fechas_status_raw = mtdt.get('Ultima_Actualizacion')
+        fechas_status = dict(fechas_status_raw) if isinstance(fechas_status_raw, dict) else {}
+        fechas_status.setdefault('Sin Reconocer', ahora)
+        fechas_status.setdefault('Reconocido', ahora)
+        fechas_status['Subido Alianzas'] = ahora
+        mtdt['Ultima_Actualizacion'] = fechas_status
         return parse_metadata_cruce(mtdt)
 
     df_actualizar['Metadata'] = df_actualizar['Metadata'].apply(actualizar_mtdt)
