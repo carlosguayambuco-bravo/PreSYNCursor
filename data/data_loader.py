@@ -631,11 +631,14 @@ def load_aliados_dataframe() -> DataFrame[AliadosSchema]:
     aliados_df = google_sheets_service.get_sheet_as_dataframe(ALIADOS_SHEET_ID, 'AlianzasVigentes')
 
     # Convertimos las Columnas de 'SI|NO' a Booleano
-    boolean_columns = ['Permite Contacto', 'Cruza Base', 'SYNC', 'Negociación en Bloque', 'Contraofertas de Pago Obligatorio', 'Brindan Máx. Descuento', 'Pago a Cuotas']
+    boolean_columns = ['Contraofertas de Pago Obligatorio', 'Brindan Máx. Descuento', 'Pago a Cuotas','Bloquear Bancos','Bloquear de App']
 
     for col in boolean_columns:
         aliados_df[col] = aliados_df[col].astype(str)  # Aseguramos que sean strings
         aliados_df[col] = aliados_df[col].str.contains('SI', case=False, na=False)
+
+    # Quitamos lso Datos donde la Columna 'Bloquear de App' sea True
+    aliados_df = aliados_df[~aliados_df['Bloquear de App']]
 
     # Realizamos un renombramiento para las Contrapropuestas Relativas
     aliados_df = aliados_df.rename(columns={

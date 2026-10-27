@@ -8,7 +8,8 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_models import DeudasActivasSchema
-from modules.forms import mostrar_como_subir_solicitud_aliados_diferentes, obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo
+from modules.classes import Aliado
+from modules.forms import mostrar_como_subir_solicitud_aliados_diferentes, obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo, verificar_bloqueo_bancos
 from modules.gest_sols import distribuir_monto_por_deuda
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat
 
@@ -17,6 +18,7 @@ class ResultadoDirectoBase(TypedDict):
     cambiado: bool
     masivas_locales: pd.DataFrame
 
+# Función para mostrar la selección de deudas activas del cliente y permitir al usuario seleccionar cuáles incluir en el formulario de alianzas.
 def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) -> list[str]:
     st.subheader("Deudas Activas del Cliente")
     st.info("Seleccione las deudas que desea incluir en el formulario de alianzas")
@@ -75,6 +77,48 @@ def mostrar_seleccion_deudas(deudas_activas_df: DataFrame[DeudasActivasSchema]) 
 
     return deudas_seleccionadas
 
+# Función Auxiliar para mostrear el Bloqueo de los Bancos
+def mostrar_bloqueo_bancos(*,deudas_info_df: pd.DataFrame, aliado_name: str):
+    """
+    Muestra un mensaje de advertencia si alguna de las deudas seleccionadas tiene un banco bloqueado por el aliado.
+
+    Args:
+        deudas_info_df (pd.DataFrame): DataFrame con la información de las deudas seleccionadas.
+        aliado_name (str): Nombre del aliado seleccionado.
+    """
+    # Primero Obtenemos el Objeto del Aliado
+    aliado_obj: Aliado = st.session_state['aliados_dict'].get(aliado_name)
+    # Verificamos que el Objeto exista
+    if aliado_obj is None:
+        st.warning(f"Error: No se encontró el aliado '{aliado_name}' en la lista de aliados. Habla con alguien que pueda ayudarte.", icon="⚠️")
+        st.stop()
+
+    # Ahora verificamos si es necesario el Bloqueo
+    if aliado_obj.necesita_validar_bancos():
+        # Definimos los bancos a verificar
+        bancos_verificar = deudas_info_df['Banco'].tolist()
+        # Buscamos las Verificaciones
+        verificaciones = verificar_bloqueo_bancos(bancos_verificar=bancos_verificar, aliado_bloqueo=aliado_obj)
+
+        # Verificamos si hay algún banco bloqueado
+        bancos_bloqueados = [banco for banco, permitido in verificaciones.items() if not permitido]
+        if bancos_bloqueados:
+            st.warning(f"Alerta: Las siguientes deudas tienen solo estos bancos habilitados por el aliado '{aliado_name}': {', '.join(bancos_bloqueados)}. Verifica la subida de las deudas", icon="⚠️")
+            # Ahora mostramos una selección para decidir continuar o no
+            continuar = st.radio(
+                "¿Deseas continuar con la selección de deudas a pesar del bloqueo de bancos?",
+                options=["Sí, continuar", "No, revisar deudas"],
+                key="continuar_bloqueo_bancos",
+                index=None,
+                horizontal=True
+            )
+            if not continuar or continuar is None:
+                st.stop()
+            elif continuar == "No, revisar deudas":
+                st.info("Por favor, revisa las deudas seleccionadas y asegúrate de que cumplen con los requisitos del aliado.", icon="ℹ️")
+                st.stop()
+
+# Función para obtener los candidatos de descuento a partir de las solicitudes exitosas
 def obtener_candidatos_solicitudes_exitosas(*, deudas: list[str]) -> pd.DataFrame:
     """
     Obtiene los Candidatos de Descuento (Id_Deuda, Casa_Cobro, Monto y Origen) a partir de las
@@ -108,6 +152,7 @@ def obtener_candidatos_solicitudes_exitosas(*, deudas: list[str]) -> pd.DataFram
     # Paso 4: Devolvemos el DF (Vacío con Columnas si no hay Candidatos)
     return pd.DataFrame(candidatos, columns=['Id_Deuda', 'Casa_Cobro', 'Monto', 'Origen'])
 
+# Función para obtener el aliado con la menor suma de montos propuestos
 def _obtener_aliado_menor_monto(*, deudas: list[str], candidatos: pd.DataFrame, aliados_posibles: list[str]) -> str:
     """
     Obtiene el Aliado con la Menor Suma de Montos Propuestos entre los Aliados Posibles.
@@ -131,6 +176,7 @@ def _obtener_aliado_menor_monto(*, deudas: list[str], candidatos: pd.DataFrame, 
     # Paso 3: Sumamos el Monto por Casa de Cobro y elegimos la Casa con la Menor Suma
     return str(mejores.groupby('Casa_Cobro')['Monto'].sum().idxmin())
 
+# Función para resolver el aliado cuando se selecciona 'Directo Base'
 def resolver_aliado_directo_base(*,
         aliado_seleccionado: str,
         deudas_seleccionadas: list[str],
@@ -206,6 +252,7 @@ def resolver_aliado_directo_base(*,
 
     return {'aliado': aliado_seleccionado, 'cambiado': True, 'masivas_locales': masivas_locales}
 
+# Función para mostrar el monto recomendado para la solicitud
 def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: float, deudas_seleccionadas_df: DataFrame[DeudasActivasSchema]) -> None:
     st.subheader("💰 Monto Recomendado para la Solicitud")
 
@@ -223,6 +270,7 @@ def mostrar_monto_recomendado(*,referencia: str, deudas: list[str], pricing: flo
         monto_recomendado = pago_original * (1-descuento_optimo)
         st.success(f"💰 Monto Recomendado: ${monto_recomendado:,.0f} (Descuento Óptimo: {descuento_optimo:.2%}, Tipo de Pago: {tipo_pago})")
 
+# Función para mostrar los montos propuestos por deuda y permitir al usuario editarlos
 def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema], *, aliado: Optional[str] = None) -> list[dict[str,Any]]:
     st.subheader("🗒️ Montos Propuestos por Deuda")
 

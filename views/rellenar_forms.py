@@ -9,7 +9,7 @@ import pandas as pd
 from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, load_prospectos_credito, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, alertar_excedencia_contraprop_max_relativa
-from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
+from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_bloqueo_bancos, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat, move_business_days
 
 # Carga de Información Necesaria para el Formulario
@@ -138,7 +138,7 @@ puede_continuar_sin_actualizacion = es_admin or bool(st.secrets.get('LET_WITHOUT
 if ultima_actualizacion is None:
     # Si No Existe Actualización en el Último Mes Mostramos el Error Correspondiente
     st.error(
-        "No se encontró una actualización de las deudas activas en el último mes. Debes actualizar alguna de las deudas activas antes de poder continuar con el llenado del formulario.",
+        "No se encontró una actualización de las deudas activas en el último mes. Preferible actualizar al cliente :D",
         icon="❌",
     )
 else:
@@ -248,6 +248,8 @@ if not deudas_seleccionadas:
 st.divider()
 st.subheader("🫡Selección de Tipo de Solicitud y Aliado")
 
+st.info("Recuerda que cuando una actualización llega en base se sube como DIRECTO BASE 😁", icon="ℹ️")
+
 colTipoSol, colAliado = st.columns(2)
 
 with colTipoSol:
@@ -319,6 +321,9 @@ with colAliado:
             st.markdown(":green-background[**{}**]".format(
                 curr_aliado_obj.obtener_tr_horas_parsed()
             ))
+
+# Mostramos la Verificación del Bloqueo de Bancos
+mostrar_bloqueo_bancos(deudas_info_df=deudas_seleccionadas_df, aliado_name=aliado_seleccionado)
 
 st.divider()
 

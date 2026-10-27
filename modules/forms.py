@@ -10,6 +10,7 @@ import streamlit as st
 from data.data_loader import load_app_config, load_client_balances, load_headcount_negociacion, load_pab_ideal, load_masivas, load_addendums
 from utils.helpers_general import getBDDaysDiffFloat
 from modules.constants import IVA
+from modules.classes import Aliado
 
 # Función Auxiliar para Obtener el Descuento Óptimo para una Referencia por pago Tradicional
 def obtener_descuento_optimo_tradicional(*,referencia: str, pricing: float, pago_total_original: float, descuento_pl: float):
@@ -174,6 +175,15 @@ def obtener_nombre_negociador(*, email: str, full_name: bool = True) -> str:
         return _obtener_nombre_corto_negociador(nombre_completo)
 
     return "No Encontrado"
+
+# Función Auxiliar para verificar si los bancos aplican la restricción de Bloqueo de Bancos
+def verificar_bloqueo_bancos(*,bancos_verificar: list[str], aliado_bloqueo: Aliado) -> dict[str,bool]:
+    # Paso 1: Verificar si el Aliado tiene la Restricción de Bloqueo de Bancos
+    if not aliado_bloqueo.necesita_validar_bancos():
+        return {banco: True for banco in bancos_verificar}
+
+    # Paso 2: Verificar cada banco contra la lista de bancos del aliado
+    return {banco: aliado_bloqueo.validar_banco(banco) for banco in bancos_verificar}
 
 # Función para Obtener los Nombres (Cortos) de los Negociadores de Forma Masiva
 def obtener_nombres_negociadores_masivo(*, correos: pd.Series) -> pd.Series:

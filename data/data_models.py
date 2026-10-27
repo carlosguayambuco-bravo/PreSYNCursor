@@ -134,19 +134,13 @@ class AliadosSchema(pa.DataFrameModel):
     Nombre_Normalizado: str = pa.Field(alias="Nombre Normalizado")
     Ejecutivo: str = pa.Field(nullable=True)  # Puede ser nulo si no aplica
     Bancos: str = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Tipo_Cartera: str = pa.Field(alias="Tipo Cartera", nullable=True)  # Puede ser nulo si no aplica
-    Tipo_Aliado: str = pa.Field(alias="Tipo Aliado", nullable=True)  # Puede ser nulo si no aplica
-    Forma_de_Contacto: str = pa.Field(alias="Forma de Contacto", nullable=True)  # Puede ser nulo si no aplica
     Tiempos_de_Respuesta: str = pa.Field(alias="Tiempos de Respuesta", nullable=True)  # Puede ser nulo si no aplica
-    Comentario: str = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Permite_Contacto: bool = pa.Field(alias="Permite Contacto")
-    Cruza_Base: bool = pa.Field(alias="Cruza Base")
-    Sync: bool = pa.Field(alias="SYNC")
     Contrapropuesta_Maxima_Relativa: float = pa.Field(nullable=True)
-    Negociacion_en_Bloque: bool = pa.Field(alias="Negociación en Bloque")
     Contraofertas_de_Pago_Obligatorio: bool = pa.Field(alias="Contraofertas de Pago Obligatorio")
     Brindan_max_Descuento: bool = pa.Field(alias="Brindan Máx. Descuento")
     Pago_a_Cuotas: bool = pa.Field(alias="Pago a Cuotas")
+    Bloquear_Bancos: bool = pa.Field(alias="Bloquear Bancos")
+    Bloquear_App: bool = pa.Field(alias="Bloquear de App")
 
     class Config:
         strict = True  # Validación estricta de columnas

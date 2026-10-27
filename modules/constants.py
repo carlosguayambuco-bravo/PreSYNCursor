@@ -5,6 +5,7 @@ from typing import Literal
 # Librerías Locales
 
 IVA = 1.19
+MINIMO_RATIO_FUZZY = 75
 
 # --- Configuraciones de Streamlit ---
 MIN_10_WAIT = 600 # En Segundos
