@@ -23,7 +23,9 @@ from modules.id_aut_deud.helpers import (
 )
 from ui.cruce_deudas_components import (
     ID_DEFINITIVO_ADDENDUM, LLAVE_CAMBIOS_ID_DEFINITIVO, LLAVE_IDS_NO_VALIDADOS,
-    mostrar_advertencia_ids_no_validados, mostrar_deudas_cruce_paginadas, mostrar_filtros_cruce,
+    mostrar_advertencia_ids_no_validados, mostrar_deudas_cruce_paginadas,
+    mostrar_detalles_cruce_paginados, mostrar_filtros_cruce,
+    mostrar_filtros_detalles_cruce,
 )
 from utils.helpers_general import cleanNumber
 from utils.helpers_sheets import convert_data_to_string
@@ -920,8 +922,8 @@ def _mostrar_selector_columnas_portafolio(
     )
 
 # --- Página Principal ---
-tab_subida, tab_escogencia, tab_control = st.tabs(
-    tabs = ["📤 Subida de Datos", "✍️ Identificación Manual", "🟢 Control"],
+tab_subida, tab_escogencia, tab_detalles, tab_control = st.tabs(
+    tabs = ["📤 Subida de Datos", "✍️ Identificación Manual", "🧾 Detalles de Cruce", "🟢 Control"],
     on_change="rerun"
 )
 
@@ -1089,6 +1091,43 @@ if tab_escogencia.open:
                 get_cruce_identificaciones_manager().reset()
                 st.rerun()
 
+# ==============================
+# Tab 3: Detalles de Cruce (Auditoría)
+# ==============================
+if tab_detalles.open:
+    with tab_detalles:
+        st.markdown("### 🧾 Detalles de Cruce")
+        st.info(
+            "Consulta el detalle de cada cruce: qué se identificó, quién lo hizo y cuándo. "
+            "La vista es de solo lectura y muestra la última fecha registrada de cada estado.",
+            icon="ℹ️",
+        )
+        st.caption(
+            "ℹ️ El esquema actual guarda la última actualización de **Sin Reconocer**, **Reconocido** y "
+            "**Subido Alianzas**; no es un historial completo de cambios. Las fechas están en hora local de Bogotá. "
+            "Los cambios pendientes de **Actualizar Cambios** no se reflejan hasta que se guarden."
+        )
+
+        # Carga de los Registros de Cruce (incluye los Cambios Locales ya Guardados)
+        cruce_df = load_pendiente_cruce_con_cambios()
+
+        if cruce_df.empty:
+            st.warning(
+                "No hay registros de cruce disponibles. Sube una base en la pestaña de **Subida de Datos**.",
+                icon="⚠️",
+            )
+        else:
+            # Sección de Filtros y Ordenamiento
+            cruce_filtrado = mostrar_filtros_detalles_cruce(cruce_df=cruce_df)
+
+            st.divider()
+
+            # Sección de Detalles (vista paginada)
+            mostrar_detalles_cruce_paginados(cruce_df=cruce_filtrado, key="detalles_cruce")
+
+# ==============================
+# Tab 4: Control de Subida a la Base del Mes
+# ==============================
 if tab_control.open:
     with tab_control:
         st.markdown("### 🟢 Control de Subida a la Base del Mes")
