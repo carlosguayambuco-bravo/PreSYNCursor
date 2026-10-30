@@ -8,7 +8,7 @@ import pandas as pd
 import pandera.pandas as pa
 from pandera.typing import Series
 # Librerías Locales
-from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD, TIPOS_CONTRAOFERTAS, TIPOS_ETIQUETAS
+from modules.constants import ESTADOS_POSIBLES_SOLICITUD, PAGOS_POSIBLES_SOLICITUD, TIPOS_ARCHIVO_SUBIDO, TIPOS_CONTRAOFERTAS, TIPOS_ETIQUETAS
 
 class DeudasSolicitud(TypedDict):
     Id_Deuda: str
@@ -81,6 +81,25 @@ class SolicitudesSchema(pa.DataFrameModel):
 
     class Config:
         strict = True  # Validación estricta de columnas
+
+class ArchivosSubidosSchema(pa.DataFrameModel):
+    """
+    Esquema para validar los Acuerdos de Pago Firmados y Soportes de Pago subidos.
+    """
+    Id_Archivo: Series[str] = pa.Field(unique=True)  # UUID del registro
+    Id_Archivo_Drive: Series[str]
+    Nombre_Archivo: Series[str]
+    Correo_Subida: Series[str] = pa.Field(str_matches=r"^[\w\.-]+@[\w\.-]+\.\w+$")
+    Referencia: Series[str]
+    Cedula: Series[str] = pa.Field(str_matches=r"^[\d\.]{6,15}$")
+    Fecha_Subida: Series[pa.dtypes.Timestamp]
+    Tipo_Archivo: Series[str] = pa.Field(isin=TIPOS_ARCHIVO_SUBIDO)
+    Id_Solicitud: Series[str] = pa.Field(nullable=True)  # Nulo para Soportes de Pago
+    Ids_Deuda: Series[str]  # Ids separados por -
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
 
 class AhorroSchema(pa.DataFrameModel):
     """

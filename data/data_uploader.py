@@ -5,15 +5,16 @@ import json
 from time import sleep
 from urllib import response
 # Librerías de Terceros
+from gspread.exceptions import WorksheetNotFound
 import gspread
 from pandera.typing import DataFrame
 import numpy as np
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import get_solicitud_row_in_google_sheets, normalizeMetadata, parse_metadata_cruce
+from data.data_loader import get_solicitud_row_in_google_sheets, load_data_archivos_subidos, normalizeMetadata, parse_metadata_cruce
 from data.data_models import MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
-from modules.constants import COL_ID_CRUCE, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from modules.constants import ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, COL_ID_CRUCE, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from modules.id_aut_deud.helpers import preparar_datos_base_mes
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, build_column_batch_updates, col_to_letter, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
@@ -193,6 +194,139 @@ def upload_massive_solicitudes_filtered_plantilla(plantilla_df: pd.DataFrame) ->
         return True
     except Exception as e:
         st.error(f"Error al subir la plantilla masiva a Google Sheets: {e}")
+        return False
+
+# Función Auxiliar para Obtener la Worksheet de Archivos Subidos (si no existe devuelve None)
+def _get_archivos_subidos_worksheet():
+    # Obtenemos el Servicio de Google Sheets desde el Session State
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    spreadsheet = sheets_service.get_spreadsheet(SOLICITUDES_SHEET_ID)
+    try:
+        return _retry(
+            lambda: spreadsheet.worksheet(ARCHIVOS_SUBIDOS_SHEET),
+            label="Get Archivos Subidos Worksheet",
+        )
+    except WorksheetNotFound:
+        return None
+
+# Función Auxiliar para Preparar el DataFrame de un Archivo Subido
+def _preparar_df_archivo_subido(archivo_info: dict) -> pd.DataFrame:
+    df = pd.DataFrame([archivo_info])
+    columnas_faltantes = [col for col in ARCHIVOS_SUBIDOS_COLUMNS if col not in df.columns]
+    if columnas_faltantes:
+        raise ValueError(
+            "Faltan columnas en el registro del archivo subido: {}".format(", ".join(columnas_faltantes))
+        )
+    return df[ARCHIVOS_SUBIDOS_COLUMNS]
+
+# Función para Subir un Registro de Archivo Subido a Google Sheets
+def upload_archivo_subido_to_google_sheets(*, archivo_info: dict) -> bool:
+    """
+    Agrega un registro de Acuerdo Firmado o Soporte de Pago a la hoja 'Archivos_Subidos'.
+    Si la hoja no existe, la crea con los headers del esquema.
+
+    Args:
+        archivo_info (dict): Información del archivo subido.
+
+    Returns:
+        bool: True si la subida fue exitosa, False en caso contrario.
+    """
+    try:
+        # Paso 1: Preparar el DataFrame con las Columnas del Esquema
+        df = _preparar_df_archivo_subido(archivo_info)
+
+        # Paso 2: Obtener la Worksheet (o crearla si no existe)
+        worksheet = _get_archivos_subidos_worksheet()
+        if worksheet is None:
+            sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+            spreadsheet = sheets_service.get_spreadsheet(SOLICITUDES_SHEET_ID)
+            worksheet = _retry(
+                lambda: spreadsheet.add_worksheet(
+                    title=ARCHIVOS_SUBIDOS_SHEET,
+                    rows=max(2, len(df) + 1),
+                    cols=len(ARCHIVOS_SUBIDOS_COLUMNS),
+                ),
+                label="Create Archivos Subidos Worksheet",
+            )
+            uploadToSheets(worksheet, df, resizing=True, retry_label="Upload Archivos Subidos")
+        else:
+            headers = _retry(lambda: worksheet.row_values(1), label="Get Archivos Subidos Headers")
+            if headers:
+                # Evitamos duplicar el registro si un reintento ocurre después de una subida exitosa
+                ids_existentes = _retry(
+                    lambda: worksheet.col_values(1),
+                    label="Get Archivos Subidos IDs",
+                )
+                id_nuevo = str(archivo_info.get('Id_Archivo', '')).strip()
+                if id_nuevo and id_nuevo in [
+                    str(valor).replace('.0', '').strip()
+                    for valor in ids_existentes[1:]
+                ]:
+                    load_data_archivos_subidos.clear()
+                    return True
+                appendDataFrameToEnd(worksheet, df, retry_label="Append Archivo Subido")
+            else:
+                uploadToSheets(worksheet, df, resizing=True, retry_label="Upload Archivos Subidos")
+
+        # Paso 3: Invalidar el Cache de Lectura
+        load_data_archivos_subidos.clear()
+        return True
+
+    except Exception as e:
+        st.error(f"Error al subir el registro del archivo a Google Sheets: {e}", icon="❌")
+        return False
+
+# Función para Actualizar un Registro de Archivo Subido en Google Sheets
+def update_archivo_subido_in_google_sheets(*, id_archivo: str, archivo_info: dict) -> bool:
+    """
+    Actualiza el registro de un Archivo Subido identificado por su UUID.
+
+    Args:
+        id_archivo (str): UUID del registro a actualizar.
+        archivo_info (dict): Nueva información del archivo subido.
+
+    Returns:
+        bool: True si la actualización fue exitosa, False en caso contrario.
+    """
+    try:
+        # Paso 1: Preparar el DataFrame y Obtener la Worksheet
+        df = _preparar_df_archivo_subido(archivo_info)
+        worksheet = _get_archivos_subidos_worksheet()
+        if worksheet is None:
+            # Si la hoja no existe, se inserta el registro
+            return upload_archivo_subido_to_google_sheets(archivo_info=archivo_info)
+
+        # Paso 2: Buscar la Fila del Registro por su UUID
+        ids_archivo = _retry(lambda: worksheet.col_values(1), label="Get Archivos Subidos IDs")
+        fila = next(
+            (
+                indice
+                for indice, valor in enumerate(ids_archivo[1:], start=2)
+                if str(valor).replace('.0', '').strip() == str(id_archivo).strip()
+            ),
+            None,
+        )
+        if fila is None:
+            # Si no se encontró el registro, se inserta uno nuevo
+            return upload_archivo_subido_to_google_sheets(archivo_info=archivo_info)
+
+        # Paso 3: Organizar los Datos en el Orden de los Headers de la Hoja
+        headers = _retry(lambda: worksheet.row_values(1), label="Get Archivos Subidos Headers")
+        if not headers:
+            raise ValueError("La hoja '{}' no tiene headers.".format(ARCHIVOS_SUBIDOS_SHEET))
+        valores = [convert_data_to_string(df.iloc[0].get(header, "")) for header in headers]
+        cell_range = f"A{fila}:{get_column_letter(len(headers))}{fila}"
+
+        # Paso 4: Actualizar la Fila y Invalidar el Cache de Lectura
+        _retry(
+            lambda: worksheet.update(range_name=cell_range, values=[valores]),
+            label="Update Archivo Subido",
+        )
+        load_data_archivos_subidos.clear()
+        return True
+
+    except Exception as e:
+        st.error(f"Error al actualizar el registro del archivo en Google Sheets: {e}", icon="❌")
         return False
 
 def upload_log_to_sheets(*,info: str, detail: str):

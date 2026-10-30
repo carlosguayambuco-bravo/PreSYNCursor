@@ -1,6 +1,7 @@
 # Usando Pep8
 # Librerías de Python
 from io import BytesIO
+from typing import Optional
 # Librerías de Terceros
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -47,6 +48,164 @@ class GoogleDriveService:
         except Exception as e:
             print(f"Error al subir el archivo a Google Drive: {e}")
             st.error(f"Error al subir el archivo a Google Drive: {e}", icon="❌")
+            return ''
+
+    @staticmethod
+    def _escape_query_value(value: str) -> str:
+        """Escapa un valor para usarlo dentro de una consulta de Google Drive."""
+        return str(value).replace("\\", "\\\\").replace("'", "\\'")
+
+    def find_folder(self, *, folder_name: str, parent_id: str) -> Optional[str]:
+        """
+        Busca una carpeta por nombre dentro de un padre específico.
+
+        Args:
+            folder_name (str): Nombre de la carpeta.
+            parent_id (str): ID de la carpeta padre.
+
+        Returns:
+            Optional[str]: ID de la carpeta encontrada, cadena vacía si no existe,
+            o None si ocurrió un error.
+        """
+        try:
+            safe_name = self._escape_query_value(folder_name)
+            safe_parent = self._escape_query_value(parent_id)
+            query = (
+                "name = '{}' and '{}' in parents and "
+                "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            ).format(safe_name, safe_parent)
+            response = self.service.files().list(
+                q=query,
+                spaces='drive',
+                fields='files(id,name,createdTime)',
+                pageSize=100,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                corpora='allDrives',
+            ).execute()
+            folders = response.get('files', [])
+            if not folders:
+                return ''
+            # Si hay varias carpetas con el mismo nombre, usamos la más reciente
+            folders.sort(key=lambda folder: folder.get('createdTime', ''))
+            return folders[-1].get('id', '')
+        except Exception as e:
+            print(f"Error al buscar la carpeta en Google Drive: {e}")
+            st.error(f"Error al buscar la carpeta en Google Drive: {e}", icon="❌")
+            return None
+
+    def create_folder(self, *, folder_name: str, parent_id: str) -> str:
+        """
+        Crea una carpeta en Google Drive.
+
+        Args:
+            folder_name (str): Nombre de la carpeta.
+            parent_id (str): ID de la carpeta padre.
+
+        Returns:
+            str: ID de la carpeta creada, o cadena vacía si falló.
+        """
+        try:
+            folder_metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [parent_id],
+            }
+            folder = self.service.files().create(
+                body=folder_metadata,
+                fields='id',
+                supportsAllDrives=True,
+            ).execute()
+            return folder.get('id', '')
+        except Exception as e:
+            print(f"Error al crear la carpeta en Google Drive: {e}")
+            st.error(f"Error al crear la carpeta en Google Drive: {e}", icon="❌")
+            return ''
+
+    def list_folder_contents(self, folder_id: str) -> Optional[list[dict]]:
+        """
+        Lista los elementos contenidos en una carpeta de Google Drive.
+
+        Args:
+            folder_id (str): ID de la carpeta.
+
+        Returns:
+            Optional[list[dict]]: Lista de archivos/carpetas, o None si ocurrió un error.
+        """
+        try:
+            safe_folder_id = self._escape_query_value(folder_id)
+            query = "'{}' in parents and trashed = false".format(safe_folder_id)
+            files = []
+            page_token = None
+            while True:
+                response = self.service.files().list(
+                    q=query,
+                    spaces='drive',
+                    fields='nextPageToken, files(id,name,mimeType,shortcutDetails)',
+                    pageSize=1000,
+                    pageToken=page_token,
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    corpora='allDrives',
+                ).execute()
+                files.extend(response.get('files', []))
+                page_token = response.get('nextPageToken')
+                if not page_token:
+                    break
+            return files
+        except Exception as e:
+            print(f"Error al listar el contenido de la carpeta en Google Drive: {e}")
+            st.error(f"Error al listar el contenido de la carpeta en Google Drive: {e}", icon="❌")
+            return None
+
+    def delete_folder_contents(self, folder_id: str) -> bool:
+        """
+        Elimina todos los elementos contenidos en una carpeta de Google Drive.
+
+        Args:
+            folder_id (str): ID de la carpeta.
+
+        Returns:
+            bool: True si se eliminaron todos los elementos, False en caso contrario.
+        """
+        files = self.list_folder_contents(folder_id)
+        if files is None:
+            return False
+        for file in files:
+            if not self.delete_file(file_id=file.get('id', '')):
+                return False
+        return True
+
+    def create_shortcut(self, *, target_file_id: str, folder_id: str, shortcut_name: str) -> str:
+        """
+        Crea un acceso directo a un archivo dentro de una carpeta de Google Drive.
+
+        Args:
+            target_file_id (str): ID del archivo destino.
+            folder_id (str): ID de la carpeta donde se creará el acceso directo.
+            shortcut_name (str): Nombre visible del acceso directo.
+
+        Returns:
+            str: ID del acceso directo creado, o cadena vacía si falló.
+        """
+        try:
+            shortcut_metadata = {
+                'name': shortcut_name,
+                'mimeType': 'application/vnd.google-apps.shortcut',
+                'parents': [folder_id],
+                'shortcutDetails': {
+                    'targetId': target_file_id,
+                },
+            }
+            shortcut = self.service.files().create(
+                body=shortcut_metadata,
+                fields='id',
+                supportsAllDrives=True,
+            ).execute()
+            return shortcut.get('id', '')
+        except Exception as e:
+            print(f"Error al crear el acceso directo en Google Drive: {e}")
+            st.error(f"Error al crear el acceso directo en Google Drive: {e}", icon="❌")
             return ''
 
     def delete_file(self, file_id: str) -> bool:

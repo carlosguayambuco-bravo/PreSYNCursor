@@ -8,6 +8,7 @@ import streamlit as st
 from data.data_loader import load_current_month_solicitudes
 from modules.forms import obtener_nombre_negociador
 from modules.gest_sols import filtrar_solicitudes_por_usuario_actual, obtener_correos_a_cargo_usuario_actual, reiniciar_filtros_solicitudes_negociadores
+from ui.archivos_components import mostrar_pestana_archivos
 from ui.solicitudes_components import mostrar_boton_limpiar_filtros_negociador, mostrar_datos_solicitud_negociador, mostrar_filtros_generales_solicitud_negociador, mostrar_resumen_solicitudes_negociador, mostrar_solicitudes_paginadas
 
 # Paso 1: Cargar el DataFrame de Solicitudes
@@ -33,40 +34,51 @@ solicitudes_filtered = mostrar_filtros_generales_solicitud_negociador(solicitude
 # Añadimos un Divisor
 st.divider()
 
-# Creamos las 2 Pestañas: Ver Solicitudes y Resumen de Solicitudes
-tabVer, tabResumen = st.tabs(
-    ["📄 Ver Solicitudes", "😎 Resumen de Solicitudes"], 
+# Creamos las 3 Pestañas: Ver Solicitudes, Resumen de Solicitudes y Archivos
+tabVer, tabResumen, tabArchivos = st.tabs(
+    ["📄 Ver Solicitudes", "😎 Resumen de Solicitudes", "📁 Archivos"],
     on_change=on_change_tab_gest_sols,
     key="tabs_ver_solicitudes",
     width="stretch",
 )
 
-# Si no hay solicitudes, mostramos un mensaje
-if solicitudes_filtered.empty:
-    st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
-    mostrar_boton_limpiar_filtros_negociador(key_extra="_vacio")
-    st.stop()
+# Renderizamos primero la pestaña de Archivos para que siga disponible aunque no haya solicitudes filtradas
+if tabArchivos.open:
+    with tabArchivos:
+        mostrar_pestana_archivos(
+            solicitudes_df=solicitudes_filtered,
+            es_ejecutivo=False,
+        )
 
 if tabVer.open:
     with tabVer:
         st.title("📄 Ver Solicitudes")
         st.space("small")
 
-        # Mostramos las Solicitudes Paginadas (10-20-30-40 por página)
-        mostrar_solicitudes_paginadas(
-            solicitudes_df=solicitudes_filtered,
-            mostrar_funcion=mostrar_datos_solicitud_negociador,
-            key="negociador",
-        )
+        if solicitudes_filtered.empty:
+            st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
+            mostrar_boton_limpiar_filtros_negociador(key_extra="_vacio")
+        else:
+            # Mostramos las Solicitudes Paginadas (10-20-30-40 por página)
+            mostrar_solicitudes_paginadas(
+                solicitudes_df=solicitudes_filtered,
+                mostrar_funcion=mostrar_datos_solicitud_negociador,
+                key="negociador",
+            )
 
-        # Botón para Reiniciar los Filtros de Solicitudes
-        st.space("small")
-        mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_solicitudes")
+            # Botón para Reiniciar los Filtros de Solicitudes
+            st.space("small")
+            mostrar_boton_limpiar_filtros_negociador(key_extra="_ver_solicitudes")
 
 if tabResumen.open:
     with tabResumen:
         st.title("😎 Resumen de Solicitudes")
         st.space("small")
+
+        if solicitudes_filtered.empty:
+            st.info("No hay solicitudes para mostrar. Si quieres reinicia los filtros.", icon="ℹ️")
+            mostrar_boton_limpiar_filtros_negociador(key_extra="_vacio_resumen")
+            st.stop()
 
         # Paso 1: Definir quién se va a mostrar
         if st.session_state.get('ver_todos_a_mi_cargo', False):

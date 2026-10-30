@@ -9,6 +9,7 @@ import streamlit as st
 from data.data_loader import load_current_month_solicitudes
 from data.data_uploader import upload_log_to_sheets
 from modules.gest_sols import generar_descarga_masiva_solicitudes, get_massive_solicitudes_txt, obtener_mascara_sin_responder, reiniciar_filtros_solicitudes_ejecutivo, subir_masivo_plantilla_solicitudes
+from ui.archivos_components import mostrar_pestana_archivos
 from ui.solicitudes_components import dialog_confirmar_actualizacion_solicitudes, dialog_confirmar_actualizacion_vencidas, mostrar_filtros_generales_solicitud_ejecutivo, mostrar_datos_solicitud_ejecutivo, mostrar_resumen_solicitudes_ejecutivo, mostrar_solicitudes_paginadas
 
 # Paso 1: Cargar las Solicitudes MEC
@@ -21,13 +22,21 @@ def on_change_tab_gest_sols():
     if st.session_state['tabs_gestionar_solicitudes'] == "😎 Resumen de Solicitudes":
         reiniciar_filtros_solicitudes_ejecutivo(method='reset')
 
-# Vamos a Crear 2 Sub-Páginas: Una para mostrar las Soliciutdes y otra para mostrar un Dashboard
-tabSolicitudes, tabResumenSolicitudes = st.tabs(
-    ["🗒️ Solicitudes", "😎 Resumen de Solicitudes"],
+# Vamos a Crear 3 Sub-Páginas: Solicitudes, Resumen de Solicitudes y Archivos
+tabSolicitudes, tabResumenSolicitudes, tabArchivos = st.tabs(
+    ["🗒️ Solicitudes", "😎 Resumen de Solicitudes", "📁 Archivos"],
     key = "tabs_gestionar_solicitudes",
     width="stretch",
     on_change=on_change_tab_gest_sols
 )
+
+# Renderizamos primero la pestaña de Archivos para que siga disponible aunque no haya solicitudes filtradas
+if tabArchivos.open:
+    with tabArchivos:
+        mostrar_pestana_archivos(
+            solicitudes_df=solicitudes_filtered,
+            es_ejecutivo=True,
+        )
 
 if tabSolicitudes.open:
     with tabSolicitudes:

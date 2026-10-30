@@ -12,14 +12,14 @@ import plotly.graph_objects as go
 import plotly.express as px
 from pypdf.errors import WrongPasswordError
 # Librerías Locales
-from data.data_loader import load_app_config, obtener_ultima_actualizacion_deudas
+from data.data_loader import load_app_config, load_data_archivos_subidos, load_headcount_negociacion, obtener_ultima_actualizacion_deudas
 from data.data_models import MetadataModificacion, ModificacionSolicitud
 from data.data_uploader import upload_form_response_to_google_sheets, upload_log_to_sheets
 from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreement_pdf
 from modules.bank_normalizer import BANCOS_UNICOS
-from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD
+from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, TIPO_ARCHIVO_ACUERDO_FIRMADO, TIPO_ARCHIVO_SOPORTE_PAGO
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_comparacion_descuentos_solicitud, obtener_estado_liquidacion, obtener_fecha_limite_respuesta_solicitud, obtener_link_archivo_drive, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_metricas_cumplimiento_tiempos_respuesta, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_monto_por_deuda, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitud_to_solicitado, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_comparacion_descuentos_solicitud, obtener_estado_liquidacion, obtener_fecha_limite_respuesta_solicitud, obtener_ids_deuda_validos, obtener_link_archivo_drive, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_metricas_cumplimiento_tiempos_respuesta, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_monto_por_deuda, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitud_to_solicitado, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -3649,6 +3649,188 @@ def mostrar_detalle_acuerdo(*,solicitud: pd.Series, cmt_delta: str):
             delta_arrow="off",
         )
 
+# Función Auxiliar para Normalizar IDs de Archivos
+def _normalizar_id_archivo(valor: Any) -> str:
+    if valor is None:
+        return ''
+    try:
+        if pd.isna(valor):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    return str(valor).replace('.0', '').strip()
+
+# Función Auxiliar para Separar los Ids de Deuda de un Registro de Archivo
+def _separar_ids_archivo(valor: Any) -> list[str]:
+    texto = _normalizar_id_archivo(valor)
+    if not texto:
+        return []
+    return [parte.strip() for parte in texto.split('-') if parte.strip()]
+
+# Función Auxiliar para Obtener el Último Soporte de Pago por Deuda
+def _obtener_soportes_archivo_por_deuda(*, archivos_df: pd.DataFrame, ids_deuda: list[str]) -> pd.DataFrame:
+    if archivos_df.empty or not ids_deuda:
+        return pd.DataFrame()
+    soportes = archivos_df[
+        archivos_df['Tipo_Archivo'] == TIPO_ARCHIVO_SOPORTE_PAGO
+    ].copy()
+    if soportes.empty:
+        return pd.DataFrame()
+    soportes['Id_Deuda'] = soportes['Ids_Deuda'].apply(_separar_ids_archivo)
+    soportes = soportes.explode('Id_Deuda')
+    soportes = soportes[soportes['Id_Deuda'].isin(ids_deuda)]
+    if soportes.empty:
+        return pd.DataFrame()
+    soportes = soportes.sort_values('Fecha_Subida', kind='stable')
+    soportes = soportes.drop_duplicates(subset=['Id_Deuda'], keep='last')
+    return soportes.set_index('Id_Deuda')
+
+# Función Auxiliar para Mostrar los Archivos de una Solicitud Exitosa de Acuerdo
+def mostrar_archivos_solicitud(*, solicitud: pd.Series) -> None:
+    """
+    Muestra el Acuerdo Firmado y los Soportes de Pago asociados a una solicitud exitosa.
+
+    Solo aplica para Acuerdos de Pago u Ofertas de Acuerdo exitosas.
+    """
+    # Paso 1: Validar que sea una Solicitud Exitosa de Acuerdo
+    if solicitud.get('Estado_Solicitud') != 'Exitosa':
+        return
+    if solicitud.get('Tipo_Solicitud') not in ['Acuerdo de Pago', 'Oferta de Acuerdo']:
+        return
+
+    try:
+        archivos_df = load_data_archivos_subidos()
+    except Exception as e:
+        st.warning("No se pudo cargar la información de archivos subidos: {}".format(e), icon="⚠️")
+        return
+
+    st.divider()
+    st.subheader("📎 Acuerdos y Soportes de Pago")
+
+    # Paso 2: Mostrar el Acuerdo Firmado de la Solicitud de Origen (si existe)
+    metadata = solicitud.get('Metadata_Solicitud', {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    id_solicitud = _normalizar_id_archivo(solicitud.get('ID_Solicitud', ''))
+    id_origen = _normalizar_id_archivo(metadata.get('Id_Respuesta_Autom')) or id_solicitud
+
+    if not archivos_df.empty:
+        acuerdos = archivos_df[
+            (archivos_df['Tipo_Archivo'] == TIPO_ARCHIVO_ACUERDO_FIRMADO)
+            & (archivos_df['Id_Solicitud'] == id_origen)
+        ].sort_values('Fecha_Subida', kind='stable')
+    else:
+        acuerdos = pd.DataFrame()
+
+    if not acuerdos.empty:
+        acuerdo = acuerdos.iloc[-1]
+        file_id = _normalizar_id_archivo(acuerdo.get('Id_Archivo_Drive', ''))
+        if file_id:
+            colMensaje, colBoton = st.columns([3, 2], vertical_alignment="center")
+            with colMensaje:
+                st.success(
+                    "El Acuerdo de Pago Firmado de la solicitud `{}` ya fue recibido.".format(
+                        id_origen
+                    ),
+                    icon="✅",
+                )
+            with colBoton:
+                st.link_button(
+                    "📄 Ver Acuerdo Firmado",
+                    url=obtener_link_archivo_drive(file_id),
+                    width="stretch",
+                    type="primary",
+                )
+
+    # Paso 3: Obtener las Deudas Válidas de la Solicitud
+    deudas = []
+    json_respuesta = solicitud.get('JSON_Respuesta', [])
+    if not isinstance(json_respuesta, list):
+        json_respuesta = []
+    for deuda in json_respuesta:
+        monto_propuesto = cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0)
+        if pd.notna(monto_propuesto) and monto_propuesto > 0:
+            deudas.append(deuda)
+    ids_deuda = [
+        _normalizar_id_archivo(deuda.get('Id_Deuda', ''))
+        for deuda in deudas
+    ]
+    ids_deuda = [id_deuda for id_deuda in ids_deuda if id_deuda]
+    if not ids_deuda:
+        return
+
+    # Paso 4: Obtener el Último Soporte por Deuda
+    soportes = _obtener_soportes_archivo_por_deuda(
+        archivos_df=archivos_df,
+        ids_deuda=ids_deuda,
+    )
+
+    if soportes.empty:
+        st.caption(
+            "Faltan los soportes de pago de las {} deudas de la solicitud.".format(
+                len(ids_deuda)
+            )
+        )
+        return
+
+    # Paso 5: Construir la Tabla de Soportes y Deudas Pendientes
+    headcount_df = load_headcount_negociacion()
+    mapa_nombres = (
+        dict(zip(headcount_df['Correo'], headcount_df['Nombre']))
+        if not headcount_df.empty else {}
+    )
+
+    filas = []
+    for id_deuda in ids_deuda:
+        if id_deuda in soportes.index:
+            soporte = soportes.loc[id_deuda]
+            fecha_subida = pd.to_datetime(soporte.get('Fecha_Subida'), errors='coerce')
+            correo_subida = str(soporte.get('Correo_Subida', ''))
+            file_id = _normalizar_id_archivo(soporte.get('Id_Archivo_Drive', ''))
+            filas.append({
+                'Id_Deuda': id_deuda,
+                'Nombre del Acuerdo': str(soporte.get('Nombre_Archivo', '')),
+                'Fecha de Subida': (
+                    fecha_subida.strftime('%Y-%m-%d %H:%M')
+                    if pd.notna(fecha_subida) else 'Sin Fecha'
+                ),
+                'Persona de Subida': mapa_nombres.get(correo_subida, correo_subida),
+                'Archivo': obtener_link_archivo_drive(file_id) if file_id else '',
+            })
+        else:
+            filas.append({
+                'Id_Deuda': id_deuda,
+                'Nombre del Acuerdo': 'Sin soporte',
+                'Fecha de Subida': '',
+                'Persona de Subida': '',
+                'Archivo': '',
+            })
+
+    tabla = pd.DataFrame(filas)
+    with st.container(height=320, border=True):
+        st.dataframe(
+            tabla,
+            column_config={
+                'Archivo': st.column_config.LinkColumn(
+                    'Archivo',
+                    display_text='Abrir PDF',
+                ),
+            },
+            hide_index=True,
+            height=260,
+            width='stretch',
+        )
+
+    faltantes = sum(1 for id_deuda in ids_deuda if id_deuda not in soportes.index)
+    if faltantes > 0:
+        st.caption(
+            "Faltan {} de {} deudas por soporte de pago.".format(
+                faltantes, len(ids_deuda)
+            )
+        )
+    else:
+        st.caption("Todas las deudas de la solicitud tienen soporte de pago.")
+
 # Función para Mostrar los Datos de una Solicitud
 def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = False) -> None:
     # Definimos el Nombre del Expander
@@ -3838,6 +4020,9 @@ def mostrar_datos_solicitud_ejecutivo(*,solicitud: pd.Series, is_main: bool = Fa
             )
 
         mostrar_boton_modificaciones(solicitud=solicitud)
+
+        # Mostrar los Archivos de Acuerdo Firmado y Soportes de Pago (Solo Acuerdos Exitosos)
+        mostrar_archivos_solicitud(solicitud=solicitud)
 
 # Función Auxiliar para mostrar los Botones de Cancelar o Reactivar una Solicitud (Vista Negociador)
 def mostrar_botones_cancelar_reactivar_solicitud(*, solicitud: pd.Series) -> None:
@@ -4154,6 +4339,9 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
                 copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
 
         mostrar_boton_modificaciones(solicitud=solicitud)
+
+        # Mostrar los Archivos de Acuerdo Firmado y Soportes de Pago (Solo Acuerdos Exitosos)
+        mostrar_archivos_solicitud(solicitud=solicitud)
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:

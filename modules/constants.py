@@ -166,6 +166,21 @@ SELECT
 FROM credit_repair_debts AS bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
+# Query de dbId = 50
+QUERY_INFO_BASICA_POR_DEUDA = """
+SELECT
+    bcrd.id AS Id_Deuda,
+    bcr.document_number AS Cedula,
+    bcr.bank_reference AS Referencia,
+    bcr.full_name AS Nombre_Cliente
+FROM
+    dealer_public.berex_credit_repair_debts AS bcrd
+INNER JOIN dealer_public.berex_credit_repairs AS bcr
+    ON bcr.id = bcrd.credit_repair_id
+WHERE
+    bcrd.id = {debt_id}
+"""
+
 # Query de dbId = 12
 QUERY_BUSCAR_MONTO_ACTUAL = """
 SELECT
@@ -195,6 +210,24 @@ COL_MAPPER_LIQ = {
 
 SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud para que no se repita con el ID de la Deuda
 TIEMPOS_RESPUESTA_DEFAULT = 72 # Horas
+
+# --- Archivos Subidos (Acuerdos Firmados y Soportes de Pago) ---
+ARCHIVOS_SUBIDOS_SHEET = 'Archivos_Subidos'
+TIPO_ARCHIVO_ACUERDO_FIRMADO = 'Acuerdo Firmado'
+TIPO_ARCHIVO_SOPORTE_PAGO = 'Soporte de Pago'
+TIPOS_ARCHIVO_SUBIDO = [TIPO_ARCHIVO_ACUERDO_FIRMADO, TIPO_ARCHIVO_SOPORTE_PAGO]
+ARCHIVOS_SUBIDOS_COLUMNS = [
+    'Id_Archivo',
+    'Id_Archivo_Drive',
+    'Nombre_Archivo',
+    'Correo_Subida',
+    'Referencia',
+    'Cedula',
+    'Fecha_Subida',
+    'Tipo_Archivo',
+    'Id_Solicitud',
+    'Ids_Deuda',
+]
 
 DEFAULT_DISCOUNT_PL = 0.15
 LIMITE_MEC = 5 # El Día límite para Considerar el Día como mes operativo

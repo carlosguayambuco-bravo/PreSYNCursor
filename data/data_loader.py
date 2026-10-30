@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
 from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage
@@ -1514,6 +1514,72 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     return ActualizacionesSchema.validate(actsDF, lazy=True)
 
 
+# --> Carga de Archivos Subidos (Acuerdos Firmados y Soportes de Pago)
+@st.cache_data(show_spinner="Cargando Archivos Subidos desde Google Sheets...", ttl=MIN_10_WAIT)
+def load_data_archivos_subidos() -> DataFrame[ArchivosSubidosSchema]:
+    """
+    Carga y valida la hoja 'Archivos_Subidos' del Sheets de Solicitudes.
+
+    Si la hoja todavía no existe (por ejemplo, antes de la primera subida), devuelve
+    un DataFrame vacío con el esquema esperado.
+    """
+    # Paso 1: Obtener el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Leer la Hoja (si no existe, devolvemos el esquema vacío)
+    try:
+        archivos_df = google_sheets_service.get_sheet_as_dataframe(SOLICITUDES_SHEET_ID, ARCHIVOS_SUBIDOS_SHEET)
+    except ValueError:
+        return ArchivosSubidosSchema.empty()
+
+    # Paso 3: Quitar Columnas Unnamed
+    archivos_df = archivos_df.loc[:, ~archivos_df.columns.astype(str).str.contains('^Unnamed', case=False)]
+
+    # Paso 4: Verificar que estén todas las Columnas del Esquema
+    columnas_faltantes = [col for col in ARCHIVOS_SUBIDOS_COLUMNS if col not in archivos_df.columns]
+    if columnas_faltantes:
+        raise ValueError(
+            "La hoja '{}' no tiene las columnas requeridas: {}".format(
+                ARCHIVOS_SUBIDOS_SHEET, ", ".join(columnas_faltantes)
+            )
+        )
+
+    # Paso 5: Si no hay Datos, devolvemos el Esquema Vacío
+    if archivos_df.empty:
+        return ArchivosSubidosSchema.empty()
+
+    # Paso 6: Dejar solo las Columnas del Esquema y Limpiar sus Valores
+    archivos_df = archivos_df[ARCHIVOS_SUBIDOS_COLUMNS].copy()
+    columnas_id = {
+        'Id_Archivo',
+        'Id_Archivo_Drive',
+        'Referencia',
+        'Cedula',
+        'Id_Solicitud',
+        'Ids_Deuda',
+    }
+    for col in ARCHIVOS_SUBIDOS_COLUMNS:
+        if col == 'Fecha_Subida':
+            continue
+        if col in columnas_id:
+            archivos_df[col] = archivos_df[col].apply(
+                lambda s: str(s).replace('.0', '').strip() if pd.notna(s) else ''
+            )
+        else:
+            archivos_df[col] = archivos_df[col].apply(
+                lambda s: str(s).strip() if pd.notna(s) else ''
+            )
+
+    # Paso 7: Quitar Filas sin UUID y Parsear la Fecha de Subida
+    archivos_df = archivos_df[archivos_df['Id_Archivo'] != '']
+    archivos_df['Fecha_Subida'] = pd.to_datetime(archivos_df['Fecha_Subida'], errors='coerce')
+
+    if archivos_df.empty:
+        return ArchivosSubidosSchema.empty()
+
+    # Paso 8: Validar el Esquema
+    return ArchivosSubidosSchema.validate(archivos_df, lazy=True)
+
 # --- Queries a MetaBase ---
 
 # Función Auxiliar para Ejecutar la Query de Deudas Activas
@@ -1536,6 +1602,41 @@ def obtener_referencia_por_deuda(*,deuda: str) -> str:
     if not referencia_df.empty:
         return str(referencia_df.iloc[0]['Referencia']).replace(".0", "").strip()
     return ""
+
+# Función Auxiliar para Obtener la Información Básica de una Deuda desde Metabase
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Información de la Deuda...", max_entries=500)
+def obtener_info_basica_deuda(*, deuda: str) -> dict[str, str]:
+    """
+    Obtiene Cédula, Referencia y Nombre del Cliente de una deuda desde Metabase.
+
+    Se usa como respaldo para los Soportes de Pago cuando la deuda no aparece en
+    las solicitudes o en la cartera cargada desde Google Sheets.
+
+    Args:
+        deuda (str): Id de la Deuda.
+
+    Returns:
+        dict[str, str]: Diccionario con Id_Deuda, Cedula, Referencia y Nombre_Cliente.
+    """
+    # Paso 1: Ejecutar la Query
+    query = QUERY_INFO_BASICA_POR_DEUDA.format(debt_id=deuda)
+    info_df = execute_query_cache(query, dbId=50)
+
+    # Paso 2: Si no hay Datos, devolver un Diccionario Vacío
+    if info_df.empty:
+        return {}
+
+    # Paso 3: Estandarizar los Nombres de las Columnas
+    info_df.columns = [str(col).title() for col in info_df.columns]
+    fila = info_df.iloc[0]
+
+    # Paso 4: Devolver la Información Limpia
+    return {
+        'Id_Deuda': str(fila.get('Id_Deuda', deuda)).replace('.0', '').strip(),
+        'Cedula': str(fila.get('Cedula', '')).replace('.0', '').strip(),
+        'Referencia': str(fila.get('Referencia', '')).replace('.0', '').strip(),
+        'Nombre_Cliente': str(fila.get('Nombre_Cliente', '')).strip(),
+    }
 
 @st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deudas Activas de esa Referencia", max_entries = 100,)
 def obtener_deudas_activas_con_retry(*, referencia: str, todas: bool, todas_reparadoras: bool) -> DataFrame[DeudasActivasSchema]:

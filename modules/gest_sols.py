@@ -1723,6 +1723,58 @@ def upload_massive_addendums(*,solicitud: pd.Series) -> bool:
 
     return True
 
+def obtener_ids_deuda_validos(*, solicitud: pd.Series) -> list[str]:
+    """
+    Obtiene los Ids de Deuda de la respuesta de una solicitud cuyo Monto_Propuesto es mayor a 0.
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        list[str]: Lista de Ids de Deuda válidos.
+    """
+    ids_deuda = []
+    deudas = solicitud.get('JSON_Respuesta', [])
+    if not isinstance(deudas, list):
+        deudas = []
+    for deuda in deudas:
+        monto_propuesto = cleanNumber(deuda.get('Monto_Propuesto', 0), default_nan=0.0)
+        if pd.notna(monto_propuesto) and monto_propuesto > 0:
+            id_deuda = str(deuda.get('Id_Deuda', '')).replace('.0', '').strip()
+            if id_deuda:
+                ids_deuda.append(id_deuda)
+    return ids_deuda
+
+def generar_nombre_acuerdo_firmado(*, solicitud: pd.Series) -> str:
+    """
+    Genera el nombre de un Acuerdo de Pago Firmado: APF_{Cedula}_{ID_Solicitud}_{Ids_Deuda}.pdf
+
+    Args:
+        solicitud (pd.Series): Información de la solicitud.
+
+    Returns:
+        str: Nombre del archivo.
+    """
+    cedula = str(solicitud.get('Cedula', '')).replace('.0', '').strip()
+    id_solicitud = str(solicitud.get('ID_Solicitud', '')).replace('.0', '').strip()
+    ids_deuda = "-".join(obtener_ids_deuda_validos(solicitud=solicitud))
+    return f"APF_{cedula}_{id_solicitud}_{ids_deuda}.pdf"
+
+def generar_nombre_soporte_pago(*, cedula: str, ids_deuda: list[str]) -> str:
+    """
+    Genera el nombre de un Soporte de Pago: SOP_{Cedula}_{Ids_Deuda}.pdf
+
+    Args:
+        cedula (str): Cédula del cliente.
+        ids_deuda (list[str]): Ids de Deuda incluidos en el soporte.
+
+    Returns:
+        str: Nombre del archivo.
+    """
+    cedula_limpia = str(cedula).replace('.0', '').strip()
+    ids_limpios = "-".join(str(id_deuda).replace('.0', '').strip() for id_deuda in ids_deuda)
+    return f"SOP_{cedula_limpia}_{ids_limpios}.pdf"
+
 def generar_nombre_acuerdo_pago(solicitud_info: pd.Series) -> str:
     """
     Genera un nombre de archivo para el Acuerdo de Pago basado en la información de la solicitud.
@@ -2647,8 +2699,31 @@ def generate_plantilla_serie_acuerdo(*, solicitud: pd.Series, deudas: list[str],
     # Paso 2: Convertir el diccionario a una Serie de Pandas
     return pd.Series(acuerdo_data)
 
-def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, Any], password: str | None = None) -> bytes:
-    """Procesa el PDF. Si falla por encriptación, eleva la excepción para que la UI la maneje."""
+def add_metadata_to_pdf(
+    *,
+    pdf_bytes: bytes,
+    metadata_name: str,
+    metadata: dict[Hashable, Any],
+    password: str | None = None,
+    payload_key: str | None = None,
+) -> bytes:
+    """
+    Procesa un PDF e inserta metadata personalizada en una clave oculta.
+
+    Si el PDF está encriptado, se debe enviar la contraseña. Si falla por encriptación,
+    eleva la excepción para que la UI la maneje.
+
+    Args:
+        pdf_bytes (bytes): Bytes del PDF original.
+        metadata_name (str): Nombre de la clave de metadata (sin la barra inicial).
+        metadata (dict[Hashable, Any]): Metadatos a insertar.
+        password (str | None): Contraseña del PDF si está encriptado.
+        payload_key (str | None): Llave del JSON donde se guarda la metadata. Por defecto
+            se usa `metadata_name` (se conserva para compatibilidad con el acuerdo generado).
+
+    Returns:
+        bytes: Bytes del PDF con la metadata insertada.
+    """
     if password == '':
         password = None
 
@@ -2668,9 +2743,11 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
         for page in reader.pages:
             writer.add_page(page)
 
-        hidden_key = NameObject("/Acuerdo_Info_Metadata")
+        nombre_metadata = str(metadata_name).lstrip('/')
+        llave_payload = payload_key or nombre_metadata
+        hidden_key = NameObject(f"/{nombre_metadata}")
         hidden_value = TextStringObject(json.dumps({
-            "agreement": metadata,
+            llave_payload: metadata,
             "generated_at": pd.Timestamp.now('America/Bogota').isoformat()
         }, ensure_ascii=False))
 
@@ -2682,6 +2759,21 @@ def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, A
 
     except (WrongPasswordError, FileNotDecryptedError):
         raise
+
+def add_metadata_to_uploaded_pdf(*, pdf_bytes: bytes, metadata: dict[Hashable, Any], password: str | None = None) -> bytes:
+    """
+    Inserta la metadata de un Acuerdo de Pago en el PDF usando la función general.
+
+    Se mantiene como wrapper para preservar la clave histórica `/Acuerdo_Info_Metadata`
+    y la llave `agreement` que usan los acuerdos generados.
+    """
+    return add_metadata_to_pdf(
+        pdf_bytes=pdf_bytes,
+        metadata_name="Acuerdo_Info_Metadata",
+        metadata=metadata,
+        password=password,
+        payload_key="agreement",
+    )
 
 # Función Auxiliar para obtener los Correos a Cargo del Usuario Actual
 def obtener_correos_a_cargo_usuario_actual() -> list[str]:
