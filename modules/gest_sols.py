@@ -1785,7 +1785,7 @@ def eliminar_acuerdo_pago_de_google_drive(*, file_id: str) -> bool:
     # Paso 2: Eliminar el Archivo de Google Drive
     return google_drive_service.delete_file(file_id=file_id)
 
-def obtener_link_acuerdo_pago(file_id: str) -> str:
+def obtener_link_archivo_drive(file_id: str) -> str:
     """
     Obtiene el enlace de visualización de un archivo en Google Drive.
 
