@@ -1497,7 +1497,8 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
                 st.markdown("**Número de Cuotas**")
 
         # Iteramos por las Deudas de la Solicitud y Mostramos los Inputs correspondientes
-        for d in solicitud["Datos_Solicitud"]:
+        # Teniendo en cuenta que ordenamos los datos por Id_Deuda
+        for d in sorted(solicitud["Datos_Solicitud"], key=lambda d: float(d['Id_Deuda'])):
             with colIdDeuda:
                 st.text_input(
                     label="ID Deuda",
@@ -1941,7 +1942,7 @@ def dialog_subir_acuerdo_pago(*, solicitud: pd.Series) -> None:
         if hay_cuotas:
             with colCuotas: # type: ignore
                 st.markdown("**Cuotas:**")
-        for d in deudas_info:
+        for d in sorted(deudas_info, key=lambda d: float(d['Id_Deuda'])):
             if not (d['Id_Deuda'] in selected_ids):
                 continue
             with colIdDeuda:
@@ -2196,7 +2197,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             with colCuotas: # type: ignore
                 st.markdown("**Cuotas:**")
 
-        for d in solicitud["JSON_Respuesta"]:
+        for d in sorted(solicitud["JSON_Respuesta"],key=lambda d: float(d['Id_Deuda'])):
             if not (d['Id_Deuda'] in selected_deudas):
                 continue
 
@@ -2821,7 +2822,7 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
         with colCuotas: # type: ignore
             st.markdown("**Cuotas:**")
 
-    for d in solicitud["Datos_Solicitud"]:
+    for d in sorted(solicitud["Datos_Solicitud"], key=lambda d: float(d['Id_Deuda'])):
         with colIdDeuda:
             st.text_input(
                 label = "**ID de Deuda**",
@@ -2901,7 +2902,7 @@ def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
         with colCuotas: # type: ignore
             st.markdown("**Cuotas:**")
     
-    for d in solicitud["Datos_Solicitud"]:
+    for d in sorted(solicitud["Datos_Solicitud"], lambda d: float(d['Id_Deuda'])):
         # Definimos el Monto Solicitado Original de la Deuda
         monto_respuesta = next((cleanNumber(item['Monto_Propuesto']) for item in solicitud["JSON_Respuesta"] if item["Id_Deuda"] == d["Id_Deuda"]), "N/A")
         with colIdDeuda:
