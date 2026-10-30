@@ -198,6 +198,15 @@ TIEMPOS_RESPUESTA_DEFAULT = 72 # Horas
 DEFAULT_DISCOUNT_PL = 0.15
 LIMITE_MEC = 5 # El Día límite para Considerar el Día como mes operativo
 
+# --- Configuraciones de Distribución de Montos por Deuda ---
+# La Distribución con Granularidad de Ceros solo se Aplica si el Monto Total es
+# Divisible por DISTRIBUCION_DIVISOR_GRANULARIDAD (para no Perder Residuos).
+DISTRIBUCION_DIVISOR_GRANULARIDAD = 1000
+DISTRIBUCION_UNIDAD_MINIMA = 1000 # Unidad más Fina Permitida (Mínimo 3 Ceros)
+DISTRIBUCION_FACTORES_DESCENSO = (2, 5) # Secuencia: U, U/2, U/10, U/20, U/100...
+DISTRIBUCION_MAE_MAXIMO = 0.01 # 1% del Monto Total: Error Absoluto Medio Máximo
+DISTRIBUCION_MRE_MAXIMO = 0.10 # 10% por Deuda: Error Relativo Máximo
+
 # --- Constantes de Correos Electrónicos ---
 EMAIL_SUBJECT_ACUERDO = "Acuerdo de Pago - REF: {referencia} - {nombre_cliente}"
 EMAIL_SUBJECT_OFERTA_ACUERDO = "Oferta de Acuerdo - REF: {referencia} - {nombre_cliente}"

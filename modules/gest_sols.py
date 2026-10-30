@@ -18,7 +18,11 @@ from data.data_loader import load_current_month_solicitudes, load_headcount_nego
 from data.data_uploader import update_massive_solicitudes_in_google_sheets, update_solicitud_in_google_sheets, upload_log_to_sheets, upload_massive_solicitudes_filtered_plantilla, upload_addendum_debt
 from data.data_models import MasivasSchema, PlantillaSolicitudesSchema
 from modules.classes import get_banned_manager
-from modules.constants import EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO
+from modules.constants import (
+    EMAIL_SUBJECT_MAPPER, EMAIL_BODY_GENERAL, DEFAULT_CCS, CCS_CREDITO,
+    DISTRIBUCION_DIVISOR_GRANULARIDAD, DISTRIBUCION_UNIDAD_MINIMA,
+    DISTRIBUCION_FACTORES_DESCENSO, DISTRIBUCION_MAE_MAXIMO, DISTRIBUCION_MRE_MAXIMO,
+)
 from modules.forms import obtener_correo_lider_negociador, obtener_nombre_negociador, obtener_nombres_negociadores_masivo
 from services import GoogleDriveService, GoogleMailService
 from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_vectorized, move_business_days
@@ -30,6 +34,7 @@ class ResultadoDistribucionMontos(TypedDict):
     montos: dict[str, float]  # Monto Propuesto por Id_Deuda (Enteros que Suman el Monto Total)
     pesos: dict[str, float]   # Peso Usado por Id_Deuda (Valor en Base o Monto Actual)
     uso_base: bool            # True si se Distribuyó por Valores en Base
+    granularidad: float       # Unidad de Redondeo Usada (0 si se Usó el Método Actual)
 
 def get_solicitud_txt(solicitud: pd.Series, origen: Literal['Datos_Solicitud','JSON_Respuesta'] = 'Datos_Solicitud') -> str:
     """
@@ -756,6 +761,230 @@ def _obtener_valores_base_por_deuda(*, deudas: list[str], aliado: str, masivas_d
         if pd.notna(valor) and float(valor) > 0
     }
 
+def _es_multiplo_de(*, monto: float, divisor: float) -> bool:
+    """
+    Verifica si un Monto es Múltiplo Exacto de un Divisor.
+
+    Se Usa una Tolerancia para Absorber Errores de Punto Flotante en los
+    Montos que Provienen del Formulario.
+
+    Args:
+        monto (float): Monto a Verificar.
+        divisor (float): Divisor a Evaluar.
+
+    Returns:
+        bool: True si el Monto es Múltiplo Exacto del Divisor.
+    """
+    if divisor <= 0 or not np.isfinite(monto):
+        return False
+    monto_redondeado = round(monto)
+    if not np.isclose(monto, monto_redondeado, rtol=0, atol=1e-6):
+        return False
+    return int(monto_redondeado) % int(divisor) == 0
+
+def _potencia_de_diez_divisora(*, monto: float) -> int:
+    """
+    Obtiene la Mayor Potencia de 10 que Divide Exactamente a un Monto Entero.
+
+    Args:
+        monto (float): Monto Entero y Positivo.
+
+    Returns:
+        int: Potencia de 10 (por ejemplo, 1000000 para 10,000,000). Si el
+        Monto no es Válido, Retorna 1.
+    """
+    if not np.isfinite(monto) or monto < 1:
+        return 1
+    monto_entero = int(round(monto))
+    unidad = 1
+    while monto_entero % (unidad * 10) == 0:
+        unidad *= 10
+    return unidad
+
+def _generar_unidades_descendentes(*, unidad_inicial: int, unidad_minima: int = DISTRIBUCION_UNIDAD_MINIMA) -> list[int]:
+    """
+    Genera la Secuencia Descendente de Unidades de Granularidad.
+
+    La Secuencia Divide Alternadamente por 2 y por 5: por ejemplo, para
+    10,000,000 genera [10M, 5M, 1M, 500k, 100k, 50k, 10k, 5k, 1k].
+
+    Args:
+        unidad_inicial (int): Mayor Potencia de 10 que Divide al Monto Total.
+        unidad_minima (int): Unidad Más Fina Permitida.
+
+    Returns:
+        list[int]: Unidades a Evaluar, de Mayor a Menor.
+    """
+    if unidad_inicial < unidad_minima:
+        return []
+
+    unidades = [unidad_inicial]
+    unidad_actual = unidad_inicial
+    indice_factor = 0
+    while unidad_actual > unidad_minima:
+        factor = DISTRIBUCION_FACTORES_DESCENSO[indice_factor % len(DISTRIBUCION_FACTORES_DESCENSO)]
+        if factor <= 1 or unidad_actual % factor != 0:
+            break
+        unidad_siguiente = unidad_actual // factor
+        if unidad_siguiente < unidad_minima:
+            break
+        unidades.append(unidad_siguiente)
+        unidad_actual = unidad_siguiente
+        indice_factor += 1
+    return unidades
+
+def _normalizar_pesos_para_distribucion(*, pesos: dict[str, float]) -> dict[str, float]:
+    """
+    Normaliza los Pesos para la Distribución.
+
+    Si la Suma de los Pesos es 0, se Reparte en Partes Iguales (Peso 1 para
+    cada Deuda). De lo Contrario, se Mantienen los Pesos Originales.
+
+    Args:
+        pesos (dict[str, float]): Peso por Id_Deuda.
+
+    Returns:
+        dict[str, float]: Pesos Efectivos de la Distribución.
+    """
+    pesos_normalizados = {deuda: max(float(peso), 0.0) for deuda, peso in pesos.items()}
+    if sum(pesos_normalizados.values()) > 0:
+        return pesos_normalizados
+    return {deuda: 1.0 for deuda in pesos_normalizados}
+
+def _distribuir_hamilton(*, pesos: dict[str, float], monto_total: float, unidad: int) -> dict[str, float]:
+    """
+    Distribuye el Monto Total en Unidades Exactas con el Método de Hamilton.
+
+    Cada Deuda recibe la Parte Entera de su Cuota Ideal en Unidades y las
+    Unidades Restantes se Asignan a los Mayores Residuos.
+
+    Args:
+        pesos (dict[str, float]): Peso Efectivo por Id_Deuda.
+        monto_total (float): Monto Total a Distribuir (Múltiplo de la Unidad).
+        unidad (int): Unidad de Granularidad.
+
+    Returns:
+        dict[str, float]: Monto por Id_Deuda, Múltiplo de la Unidad y con Suma
+        Exacta al Monto Total.
+    """
+    deudas = list(pesos.keys())
+    if not deudas:
+        return {}
+    suma_pesos = sum(pesos.values())
+    if suma_pesos <= 0:
+        pesos = {deuda: 1.0 for deuda in deudas}
+        suma_pesos = float(len(deudas))
+    total_unidades = int(round(monto_total / unidad))
+
+    cuotas = {
+        deuda: total_unidades * pesos[deuda] / suma_pesos
+        for deuda in deudas
+    }
+    unidades_asignadas = {deuda: int(cuotas[deuda]) for deuda in deudas}
+    restos = {deuda: cuotas[deuda] - unidades_asignadas[deuda] for deuda in deudas}
+    unidades_faltantes = total_unidades - sum(unidades_asignadas.values())
+
+    # Asignamos las Unidades Faltantes a los Mayores Residuos (Hamilton).
+    # En Caso de Empate, Priorizamos el Mayor Peso y Luego el Orden Original.
+    orden = sorted(
+        range(len(deudas)),
+        key=lambda indice: (
+            -restos[deudas[indice]],
+            -pesos[deudas[indice]],
+            indice,
+        ),
+    )
+    for indice in orden[:max(0, min(unidades_faltantes, len(deudas)))]:
+        unidades_asignadas[deudas[indice]] += 1
+
+    return {
+        deuda: float(unidades_asignadas[deuda] * unidad)
+        for deuda in deudas
+    }
+
+def _evaluar_distribucion_granular(*, montos: dict[str, float], pesos: dict[str, float], monto_total: float, unidad: int) -> dict[str, Any]:
+    """
+    Evalúa si una Distribución con Granularidad es Estable.
+
+    Criterios:
+        - MAE: Promedio de los Errores Absolutos / Monto Total <= Máximo.
+        - MRE: Máximo Error Relativo por Deuda <= Máximo. El Denominador se
+          Limita a la Unidad para no Penalizar Deudas Menores que U.
+        - No-Zero: Ninguna Deuda con Peso Positivo queda en 0.
+
+    Args:
+        montos (dict[str, float]): Monto Asignado por Id_Deuda.
+        pesos (dict[str, float]): Peso Efectivo por Id_Deuda.
+        monto_total (float): Monto Total Distribuido.
+        unidad (int): Unidad de Granularidad Evaluada.
+
+    Returns:
+        dict[str, Any]: Métricas Calculadas y Bandera 'cumple'.
+    """
+    deudas_con_peso = [deuda for deuda, peso in pesos.items() if peso > 0]
+    suma_pesos = sum(pesos[deuda] for deuda in deudas_con_peso)
+
+    errores = []
+    for deuda in deudas_con_peso:
+        cuota_ideal = monto_total * pesos[deuda] / suma_pesos if suma_pesos > 0 else 0.0
+        error_absoluto = abs(montos[deuda] - cuota_ideal)
+        denominador_mre = max(cuota_ideal, float(unidad))
+        error_relativo = error_absoluto / denominador_mre if denominador_mre > 0 else 0.0
+        errores.append((error_absoluto, error_relativo))
+
+    if errores and monto_total > 0:
+        mae = sum(error for error, _ in errores) / len(errores) / monto_total
+    else:
+        mae = 0.0
+    mre = max((error_relativo for _, error_relativo in errores), default=0.0)
+    sin_extincion = all(montos[deuda] > 0 for deuda in deudas_con_peso)
+    tolerancia = 1e-12
+
+    return {
+        'cumple': bool(
+            mae <= DISTRIBUCION_MAE_MAXIMO + tolerancia
+            and mre <= DISTRIBUCION_MRE_MAXIMO + tolerancia
+            and sin_extincion
+        ),
+        'mae': mae,
+        'mre': mre,
+        'sin_extincion': sin_extincion,
+    }
+
+def _distribuir_monto_con_granularidad(*, pesos: dict[str, float], monto_total: float) -> Optional[dict[str, Any]]:
+    """
+    Busca la Mayor Unidad de Granularidad que Produce una Distribución Estable.
+
+    Implementa la Búsqueda Adaptativa por Descenso de Granularidad: parte de la
+    Mayor Potencia de 10 que Divide al Monto Total y Desciende en Divisiones de
+    2 y 5 hasta Encontrar una Distribución que Cumpla los Umbrales.
+
+    Args:
+        pesos (dict[str, float]): Peso por Id_Deuda.
+        monto_total (float): Monto Total a Distribuir.
+
+    Returns:
+        Optional[dict[str, Any]]: 'montos' y 'granularidad' si se Encuentra una
+        Unidad Válida; None si Ninguna Unidad >= Unidad Mínima Cumple.
+    """
+    if not pesos or monto_total <= 0:
+        return None
+
+    pesos_efectivos = _normalizar_pesos_para_distribucion(pesos=pesos)
+    unidad_inicial = _potencia_de_diez_divisora(monto=monto_total)
+    unidades = _generar_unidades_descendentes(unidad_inicial=unidad_inicial)
+    for unidad in unidades:
+        montos = _distribuir_hamilton(pesos=pesos_efectivos, monto_total=monto_total, unidad=unidad)
+        evaluacion = _evaluar_distribucion_granular(
+            montos=montos,
+            pesos=pesos_efectivos,
+            monto_total=monto_total,
+            unidad=unidad,
+        )
+        if evaluacion['cumple']:
+            return {'montos': montos, 'granularidad': float(unidad), 'evaluacion': evaluacion}
+    return None
+
 def distribuir_monto_por_deuda(
         *,
     deudas: list[str],
@@ -776,6 +1005,10 @@ def distribuir_monto_por_deuda(
            a Más de un Aliado, el Monto se Distribuye Proporcionalmente al Monto
            Actual de cada Deuda.
         3. Si la Suma de los Pesos es 0, el Monto se Reparte en Partes Iguales.
+        4. Si el Monto Total es Divisible por 1000 y Hay Más de Una Deuda, se Busca
+           la Mayor Granularidad (Potencia de 10) que Mantenga la Distribución
+           dentro de los Umbrales MAE/MRE y sin Extinguir Deudas. Si Ninguna
+           Granularidad >= 1000 es Válida, se Usa la Regla 1 o 2.
 
     Args:
         deudas (list[str]): Ids de las Deudas entre las que se Distribuye el Monto.
@@ -790,11 +1023,12 @@ def distribuir_monto_por_deuda(
             - 'montos' (dict[str, float]): Monto Propuesto por Id_Deuda (Enteros que Suman el Monto Total).
             - 'pesos' (dict[str, float]): Peso Usado por Id_Deuda (Valor en Base o Monto Actual).
             - 'uso_base' (bool): True si se Distribuyó por Valores en Base.
+            - 'granularidad' (float): Unidad de Redondeo Usada (0 si se Usó el Método Actual).
     """
     # Paso 1: Normalizamos las Deudas a Distribuir (Sin Duplicados y Manteniendo el Orden)
     deudas_unicas = list(dict.fromkeys(str(deuda) for deuda in deudas))
     if not deudas_unicas:
-        return {'montos': {}, 'pesos': {}, 'uso_base': False}
+        return {'montos': {}, 'pesos': {}, 'uso_base': False, 'granularidad': 0.0}
 
     # Paso 2: Verificamos si se Puede Usar la Base (Aliado Concreto y Valores para Todas las Deudas)
     valores_base: dict[str, float] = {}
@@ -813,15 +1047,40 @@ def distribuir_monto_por_deuda(
                 monto_actual = 0.0
             pesos[deuda] = max(float(monto_actual), 0.0)
 
-    # Paso 4: Repartimos el Monto Total según los Pesos Definidos
+    # Paso 4: Normalizamos el Monto Total
     monto_total = float(monto_total) if pd.notna(monto_total) else 0.0
+
+    # Paso 5: Verificamos las Condiciones Iniciales de la Distribución con Granularidad
+    # - Con una Sola Deuda se Devuelve el Mismo Valor
+    # - El Monto Total Debe ser Divisible por el Divisor para no Perder Residuos
+    if len(deudas_unicas) == 1:
+        deuda_unica = deudas_unicas[0]
+        return {
+            'montos': {deuda_unica: monto_total},
+            'pesos': pesos,
+            'uso_base': uso_base,
+            'granularidad': 0.0,
+        }
+
+    if _es_multiplo_de(monto=monto_total, divisor=DISTRIBUCION_DIVISOR_GRANULARIDAD):
+        resultado_granular = _distribuir_monto_con_granularidad(pesos=pesos, monto_total=monto_total)
+        if resultado_granular is not None:
+            return {
+                'montos': resultado_granular['montos'],
+                'pesos': pesos,
+                'uso_base': uso_base,
+                'granularidad': resultado_granular['granularidad'],
+            }
+
+    # Paso 6: Distribución Actual (Montos no Divisibles o sin Granularidad Válida)
+    # Repartimos el Monto Total según los Pesos Definidos
     suma_pesos = sum(pesos.values())
     if suma_pesos > 0:
         montos_brutos = {deuda: monto_total * (peso / suma_pesos) for deuda, peso in pesos.items()}
     else:
         montos_brutos = {deuda: monto_total / len(deudas_unicas) for deuda in deudas_unicas}
 
-    # Paso 5: Redondeamos a Enteros y Ajustamos la Diferencia en la Deuda de Mayor Peso
+    # Redondeamos a Enteros y Ajustamos la Diferencia en la Deuda de Mayor Peso
     # (Para que la Suma de los Montos Corresponda Exactamente con el Monto Total)
     montos = {deuda: float(round(monto)) for deuda, monto in montos_brutos.items()}
     diferencia = round(monto_total) - sum(montos.values())
@@ -829,7 +1088,7 @@ def distribuir_monto_por_deuda(
         deuda_ajuste = max(pesos, key=lambda deuda: pesos[deuda])
         montos[deuda_ajuste] += float(diferencia)
 
-    return {'montos': montos, 'pesos': pesos, 'uso_base': uso_base}
+    return {'montos': montos, 'pesos': pesos, 'uso_base': uso_base, 'granularidad': 0.0}
 
 def es_solicitud_sin_responder(solicitud: pd.Series) -> bool:
     """
