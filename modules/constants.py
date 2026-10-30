@@ -188,6 +188,7 @@ COL_MAPPER_LIQ = {
     'Portafolio_Liq': ['Portafolio','Portafolio'],
     'Mes_Liq' : ['Mes'],
     'Año_Liq': ['Año'],
+    'Referencia': ['Referencia','Referencia '],
 }
 
 # --- Constantes de Solicitudes ---

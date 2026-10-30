@@ -386,7 +386,8 @@ class UltimaActualizacionSchema(pa.DataFrameModel):
         coerce = True  # Coerción automática de tipos
 
 class LiquidationsSchema(pa.DataFrameModel):
-    Id_Deuda: str = pa.Field(unique=True)
+    Id_Deuda: str = pa.Field(unique=False)
+    Referencia: str = pa.Field(nullable=False)
     PaB_Liq: float
     Ingreso_Liq: float = pa.Field(nullable=True)
     Negociador_Liq: str

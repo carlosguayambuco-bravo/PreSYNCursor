@@ -850,8 +850,14 @@ def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
     liqsDF = pd.concat(liqsList, ignore_index=True)
 
     # --- Limpieza de Datos ---
-    # Volvemos a Id_Deuda a String
+    # Volvemos a Id_Deuda y Referencia a String
     liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Cargamos los Cambios de Referencia y los aplicamos
+    ref_changes = load_reference_changes()
+    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda r: ref_changes.get(r,r))
+
     # Volvemos Fecha_Liq a Datetiem con dayfirst=True
     liqsDF['Fecha_Liq'] = pd.to_datetime(liqsDF['Fecha_Liq'], errors='coerce',dayfirst=True)
     # Quitamos NaNs de Fecha_liq
