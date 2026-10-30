@@ -227,6 +227,12 @@ with st.expander("Características del Cliente"):
 st.divider()
 st.subheader("Selección de Deudas Activas")
 
+# Ordenamos las Deudas por Banco y Monto_Actual de forma ascendente|descendente
+deudas_activas_df = deudas_activas_df.sort_values(
+    by = ['Banco','Monto_Actual'],
+    ascending = [True,False]
+)
+
 # Mostramos la Selección de Deudas
 deudas_seleccionadas = mostrar_seleccion_deudas(deudas_activas_df=deudas_activas_df) # type: ignore
 
@@ -326,6 +332,9 @@ with colAliado:
 mostrar_bloqueo_bancos(deudas_info_df=deudas_seleccionadas_df, aliado_name=aliado_seleccionado)
 
 st.divider()
+
+# Ordenamos los Datos por Id_Deuda de menor a mayor
+deudas_seleccionadas_df = deudas_seleccionadas_df.sort_values(by='Id_Deuda')
 
 # Mostramos la Selección de los Montos Propuestos por Deuda
 info_completa_deudas = poner_monto_por_deuda(deudas_activas_df=deudas_seleccionadas_df, aliado=aliado_seleccionado) # type: ignore
