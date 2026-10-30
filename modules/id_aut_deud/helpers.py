@@ -263,6 +263,12 @@ def cleanNumeroCredito(nc: Any) -> str:
     for p in '\'!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~´-':
         nc_cleaned = nc_cleaned.replace(p,'')
 
+    # Quitamos 0s a la izquierda temporalmente
+    nc_non_zero = nc_cleaned.lstrip('0')
+    # Verificamos si la longitud es >= 4, para actualizar el original
+    if len(nc_non_zero) >= 4:
+        nc_cleaned = nc_non_zero
+
     # Devolvemos el Resultado
     return nc_cleaned
 

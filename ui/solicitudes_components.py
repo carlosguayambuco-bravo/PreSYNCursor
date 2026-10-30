@@ -1426,6 +1426,7 @@ def construir_respuesta_solicitud_validacion(*, solicitud: pd.Series, modo_edici
         usar_monto_total = st.toggle(
             label="**Usar el Monto de Portafolio**",
             key=key_usar_monto_total,
+            disabled = len(solicitud["Datos_Solicitud"]) <= 1,
             help="Seleccione esta opción para distribuir el monto total propuesto entre las deudas.",
             persist_state="page",
         )
@@ -2132,6 +2133,7 @@ def ajustar_contraoferta_solicitud(*, solicitud: pd.Series) -> None:
             label="**Usar Monto Total**",
             value=True,
             key=key_usar_monto_total_co,
+            disabled = len(deudas_posibles) <= 1,
             help="Marque esta opción para usar el monto total de la contraoferta.",
         )
 

@@ -350,6 +350,7 @@ def poner_monto_por_deuda(deudas_activas_df: DataFrame[DeudasActivasSchema], *, 
         st.toggle(
             "**Distribuir el Monto entre Deudas**",
             key="usar_para_todos",
+            disabled = len(deudas_activas_df_copy) == 1,
             help="Si se selecciona, el Monto Total se distribuirá según el %Total."
         )
 
