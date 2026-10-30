@@ -825,7 +825,67 @@ def load_liquidaciones() -> set[str]:
     # Devolvemos el Set de Deudas Liquidadas
     return liquidaciones_set
 
+# Función Auxiliar para Limpiar el DF de Liquidaciones
+def _clean_liquidaciones(liqsDF: pd.DataFrame) -> DataFrame[LiquidationsSchema]:
+    # --- Limpieza de Datos ---
+    # Volvemos a Id_Deuda y Referencia a String
+    liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
+    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Cargamos los Cambios de Referencia y los aplicamos
+    ref_changes = load_reference_changes()
+    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda r: ref_changes.get(r,r))
+
+    # Volvemos Fecha_Liq a Datetiem con dayfirst=True
+    liqsDF['Fecha_Liq'] = pd.to_datetime(liqsDF['Fecha_Liq'], errors='coerce',dayfirst=True)
+    # Quitamos NaNs de Fecha_liq
+    liqsDF = liqsDF.dropna(subset=['Fecha_Liq','Id_Deuda'])
+    # Volvemos el PaB_Liq, Mes_Liq y Año_Liq a Númerico
+    liqsDF['PaB_Liq'] = liqsDF['PaB_Liq'].apply(cleanNumber)
+    liqsDF['Mes_Liq'] = liqsDF['Mes_Liq'].apply(cleanNumber, default_nan=np.nan)
+    liqsDF['Año_Liq'] = liqsDF['Año_Liq'].apply(cleanNumber, default_nan=np.nan)
+
+    # Obtenemos la Fecha Mínima de Liquidación sin Mes_Liq
+    fecha_min_mec = liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Fecha_Liq'].min()
+    # Imputamos Mes_Liq y Año_Liq con las propiedades de esta fecha
+    liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Mes_Liq'] = fecha_min_mec.month
+    liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Año_Liq'] = fecha_min_mec.year
+
+    # Hacemos Strip a la Columna Negociador_Liq
+    liqsDF['Negociador_Liq'] = liqsDF['Negociador_Liq'].astype(str).str.strip()
+    # Creamos la Columna Periodo_Liq
+    liqsDF["Periodo_Liq"] = liqsDF.apply(
+        lambda r: pd.Timestamp(r['Año_Liq'],r['Mes_Liq'],1), axis=1
+    )
+    # Quitamos las Columnas Año_Liq y Mes_Liq
+    liqsDF = liqsDF.drop(columns=["Año_Liq","Mes_Liq"])
+
+    # Eliminamos Duplicados por Id_Deuda
+    liqsDF = liqsDF.drop_duplicates(subset=['Id_Deuda'],keep='last')
+
+    # Validamos el modelo
+    if liqsDF.empty:
+        return LiquidationsSchema.empty()
+    else:
+        return LiquidationsSchema.validate(liqsDF, lazy=True)
+
 # Función Auxiliar para Obtener las Deudas Liquidadas del MEC
+@st.cache_data(show_spinner="Cargando Liquidaciones del Mes en Curso desde Google Sheets...", ttl=DAY_WAIT)
+def load_liquidaciones_mec() -> DataFrame[LiquidationsSchema]:
+    # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Obtenemos el DF de la Hoja "BD del mes"
+    liqsDF = google_sheets_service.get_sheet_as_dataframe(LIQUIDACIONES_SHEET_ID, 'BD del mes')
+
+    # Limpiamos las Columnas
+    for col, possibleVals in COL_MAPPER_LIQ.items():
+        liqsDF = cleanCols(liqsDF, col, possibleVals)
+
+    # Limpiamos los Datos y devolvemos el DF
+    return _clean_liquidaciones(liqsDF)
+
+# Función Auxiliar para Obtener las Deudas Liquidadas Históricas
 @st.cache_data(show_spinner="Cargando Liquidaciones Históricas desde Google Sheets...", ttl=WEEK_WAIT)
 def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
     # Primero Obtenemos la Spreadsheet de Liquidaciones desde Google Sheets
@@ -849,40 +909,7 @@ def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
     # Concatenamos el DF
     liqsDF = pd.concat(liqsList, ignore_index=True)
 
-    # --- Limpieza de Datos ---
-    # Volvemos a Id_Deuda y Referencia a String
-    liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
-    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
-
-    # Cargamos los Cambios de Referencia y los aplicamos
-    ref_changes = load_reference_changes()
-    liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda r: ref_changes.get(r,r))
-
-    # Volvemos Fecha_Liq a Datetiem con dayfirst=True
-    liqsDF['Fecha_Liq'] = pd.to_datetime(liqsDF['Fecha_Liq'], errors='coerce',dayfirst=True)
-    # Quitamos NaNs de Fecha_liq
-    liqsDF = liqsDF.dropna(subset=['Fecha_Liq','Id_Deuda'])
-    # Volvemos el PaB_Liq, Mes_Liq y Año_Liq a Númerico
-    liqsDF['PaB_Liq'] = liqsDF['PaB_Liq'].apply(cleanNumber)
-    liqsDF['Mes_Liq'] = liqsDF['Mes_Liq'].apply(cleanNumber)
-    liqsDF['Año_Liq'] = liqsDF['Año_Liq'].apply(cleanNumber)
-    # Hacemos Strip a la Columna Negociador_Liq
-    liqsDF['Negociador_Liq'] = liqsDF['Negociador_Liq'].astype(str).str.strip()
-    # Creamos la Columna Periodo_Liq
-    liqsDF["Periodo_Liq"] = liqsDF.apply(
-        lambda r: pd.Timestamp(r['Año_Liq'],r['Mes_Liq'],1), axis=1
-    )
-    # Quitamos las Columnas Año_Liq y Mes_Liq
-    liqsDF = liqsDF.drop(columns=["Año_Liq","Mes_Liq"])
-
-    # Eliminamos Duplicados por Id_Deuda
-    liqsDF = liqsDF.drop_duplicates(subset=['Id_Deuda'],keep='last')
-
-    # Validamos el modelo
-    if liqsDF.empty:
-        return LiquidationsSchema.empty()
-    else:
-        return LiquidationsSchema.validate(liqsDF)
+    return _clean_liquidaciones(liqsDF)
 
 # Función para Guardar el Buscador de Periodo con Cache
 @st.cache_resource
