@@ -321,6 +321,7 @@ ETIQUETA_AMBIGUO = 'AMBIGUO'
 ETIQUETA_ADDENDUM = 'ADDENDUM'
 ETIQUETA_NULO = 'NULO'
 MOTIVO_CASA_COBRO = 'Casa de Cobro'  # Motivo exclusivo de la acotación por Casa de Cobro
+MOTIVO_BANCOS_SELECCIONADOS = 'Bancos Seleccionados'  # Motivo exclusivo de la acotación por Bancos del Aliado
 
 DIF_MONTO_MAX = 1000.0      # Diferencia absoluta máxima aceptada entre montos
 MIN_LEN_TEXTO = 4           # Longitud mínima para aplicar contención / fuzzy / crop

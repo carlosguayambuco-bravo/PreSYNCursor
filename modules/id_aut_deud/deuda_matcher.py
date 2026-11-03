@@ -11,7 +11,8 @@ from thefuzz import fuzz
 import streamlit as st
 # Librerías Locales
 from data.data_models import InputCruceSchema, OutputCruceSchema
-from modules.constants import COLUMNAS_UNIVERSO, DIF_MONTO_MAX, ETIQUETA_ADDENDUM, ETIQUETA_AMBIGUO, ETIQUETA_DUPLICADO, LIMITE_VERIFICACION, MAX_COMB_NOMBRE, MIN_PALABRAS_NOMBRE, MOTIVO_CASA_COBRO, RATIO_FUZZY_BANCO, RATIO_FUZZY_CREDITO, UMBRAL_BLOQUEO
+from modules.bank_normalizer import normalizar_banco
+from modules.constants import COLUMNAS_UNIVERSO, DIF_MONTO_MAX, ETIQUETA_ADDENDUM, ETIQUETA_AMBIGUO, ETIQUETA_DUPLICADO, LIMITE_VERIFICACION, MAX_COMB_NOMBRE, MIN_PALABRAS_NOMBRE, MOTIVO_BANCOS_SELECCIONADOS, MOTIVO_CASA_COBRO, RATIO_FUZZY_BANCO, RATIO_FUZZY_CREDITO, UMBRAL_BLOQUEO
 from modules.id_aut_deud.helpers import *
 
 # --- Funciones de Match por Columna ---
@@ -186,12 +187,38 @@ def _acotar_monto(*,
         mascara[np.asarray(hits, dtype=np.int64)] = True
     return mascara, bool(hits)
 
+# Sub-Función de Acotación por Bancos Seleccionados (unión de los bancos que maneja el aliado)
+def _mascara_bancos_seleccionados(*, bancos: list[str], univ: dict, n: int) -> np.ndarray:
+    mascara = np.zeros(n, dtype=bool)
+    for banco in bancos:
+        if pd.isna(banco):
+            continue
+        # Normalizamos el Banco al Catálogo y luego aplicamos la misma Limpieza del Universo
+        banco_limpio = cleanText(normalizar_banco(str(banco)))
+        if not banco_limpio:
+            continue
+        mascara_banco, _ = _acotar_texto(
+            cand=np.ones(n, dtype=bool),
+            valor=banco_limpio,
+            valores=univ['banco_arr'],
+            exact_index=univ['banco_exact_index'],
+            char_index=univ['banco_char_index'],
+            start2_index=univ['banco_start2_index'],
+            gram_index=univ['banco_gram_index'],
+            umbral_fuzzy=RATIO_FUZZY_BANCO,
+            es_credito=False,
+            n=n,
+        )
+        mascara |= mascara_banco
+    return mascara
+
 # --- Función Principal ---
 
 def match_deudas(*,
         df_buscar: DataFrame[InputCruceSchema],
         df_datos: DataFrame[InputCruceSchema],
-        casa_cobro: Optional[str] = None
+        casa_cobro: Optional[str] = None,
+        bancos_seleccionados: Optional[list[str]] = None
     ) -> DataFrame[OutputCruceSchema]:
     """
     Identifica las deudas (Id_Deuda) del universo 'df_datos' que corresponden a cada
@@ -200,7 +227,8 @@ def match_deudas(*,
     El algoritmo acota el universo de candidatos por cada registro en la secuencia:
         1. Unión por Datos del Cliente (Cédula y Nombre). Aquí se determinan las NULAS.
         2. Contraste con Datos de la Deuda excluyendo el Número de Crédito
-            (Banco, Casa de Cobro simulando el Banco y Monto).
+            (Banco de la base, Bancos Seleccionados del Aliado, Casa de Cobro simulando
+            el Banco y Monto).
         3. Contraste con el Número de Crédito (se determinan AMBIGUAS y ADDENDUM;
             los restantes son prospectos a EXACTO o DUPLICADO).
         4. De los prospectos a EXACTO se identifican los duplicados (2 registros con el
@@ -215,6 +243,9 @@ def match_deudas(*,
             "simulando" que el Banco del universo sea la Casa de Cobro (en ocasiones el dato
             guardado como Banco corresponde directamente a la Casa de Cobro). Esta acotación
             tiene su propio motivo: 'Casa de Cobro'.
+        bancos_seleccionados (Optional[list[str]]): Bancos que maneja el aliado cuando la base
+            no trae una columna de Banco. Se acota el universo a las deudas de cualquiera de
+            estos bancos (unión) y la acotación se registra con el motivo 'Bancos Seleccionados'.
 
     Retorna:
         DataFrame con las columnas (OutputCruceSchema):
@@ -239,6 +270,17 @@ def match_deudas(*,
 
     # Preparación de Datos
     univ = preparar_universo(df_datos=df_datos)
+
+    # Preparación de los Bancos Seleccionados: una única máscara con la unión de los bancos del aliado
+    bancos_sel_mask = None
+    if bancos_seleccionados:
+        bancos_sel_mask = _mascara_bancos_seleccionados(
+            bancos=list(bancos_seleccionados),
+            univ=univ,
+            n=univ['n'],
+        )
+        if not bancos_sel_mask.any():
+            bancos_sel_mask = None
 
     # Aumentamos el Progreso #1
     progress_cruce.progress(1/5, text="Preparando Limpieza de Datos a Coincidir")
@@ -304,7 +346,7 @@ def match_deudas(*,
         # Aumentamos el Progreso en #3
         progress_cruce.progress(3/5, text="Ejecutando Reconocimiento por Características de Deuda")
 
-        # Paso 2: Contraste con Datos de la Deuda (Banco, Casa de Cobro y Monto)
+        # Paso 2: Contraste con Datos de la Deuda (Banco, Bancos Seleccionados, Casa de Cobro y Monto)
         banco_ok = False
         if tiene_banco:
             nuevo_cand, banco_ok = _acotar_texto(
@@ -322,6 +364,14 @@ def match_deudas(*,
             if banco_ok:
                 cand = nuevo_cand
                 motivos.append(COL_BANCO)
+        bancos_ok = False
+        if bancos_sel_mask is not None:
+            # Acotación por los Bancos que maneja el Aliado (unión de bancos seleccionados)
+            nuevo_cand = cand & bancos_sel_mask
+            if nuevo_cand.any():
+                cand = nuevo_cand
+                bancos_ok = True
+                motivos.append(MOTIVO_BANCOS_SELECCIONADOS)
         casa_cobro_ok = False
         if casa_cobro_arr is not None:
             # Acotación por Casa de Cobro "simulando" que el Banco del universo sea la Casa de Cobro
@@ -384,7 +434,7 @@ def match_deudas(*,
             else:
                 # Múltiples Id_Deuda con el mismo Número de Crédito: entra a revisión
                 etiquetas.append(ETIQUETA_DUPLICADO)
-        elif banco_ok or monto_ok or casa_cobro_ok:
+        elif banco_ok or bancos_ok or monto_ok or casa_cobro_ok:
             etiquetas.append(ETIQUETA_AMBIGUO)
         else:
             etiquetas.append(ETIQUETA_ADDENDUM)

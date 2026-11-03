@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from modules.constants import MOTIVO_BANCOS_SELECCIONADOS
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
     _calcular_pago_estructurado,
@@ -209,6 +210,95 @@ class TestMatchDeudas(unittest.TestCase):
         buscar_sin_cliente = pd.DataFrame([{"Id_Cruce": "C1", "Banco": "X"}])
         with self.assertRaises(LookupError):
             self._match(buscar_sin_cliente, datos=self._datos())
+
+
+class TestMatchDeudasBancosSeleccionados(unittest.TestCase):
+    @staticmethod
+    def _datos():
+        return pd.DataFrame([
+            {
+                "Cedula": "123456789",
+                "Nombre_Cliente": "JUAN PEREZ",
+                "Banco": "BANCOLOMBIA",
+                "Monto_Actual": 1000000,
+                "Numero_Credito": "ABC123",
+                "Id_Deuda": "D1",
+            },
+            {
+                "Cedula": "123456789",
+                "Nombre_Cliente": "JUAN PEREZ",
+                "Banco": "BANCO DAVIVIENDA",
+                "Monto_Actual": 2000000,
+                "Numero_Credito": "ABC124",
+                "Id_Deuda": "D2",
+            },
+            {
+                "Cedula": "123456789",
+                "Nombre_Cliente": "JUAN PEREZ",
+                "Banco": "BANCO DE BOGOTA",
+                "Monto_Actual": 3000000,
+                "Numero_Credito": "ABC125",
+                "Id_Deuda": "D3",
+            },
+        ])
+
+    @staticmethod
+    def _buscar(**extra):
+        fila = {
+            "Id_Cruce": "C1",
+            "Cedula": "123456789",
+            "Nombre_Cliente": "PEREZ JUAN",
+        }
+        fila.update(extra)
+        return pd.DataFrame([fila])
+
+    def _match(self, *, bancos=None, buscar=None):
+        with patch("modules.id_aut_deud.deuda_matcher.st.progress") as progress:
+            progress.return_value.progress = MagicMock()
+            return match_deudas(
+                df_buscar=buscar if buscar is not None else self._buscar(),
+                df_datos=self._datos(),
+                bancos_seleccionados=bancos,
+            )
+
+    def test_sin_bancos_seleccionados_es_addendum(self):
+        resultado = self._match()
+        self.assertEqual(resultado.iloc[0]["Etiqueta_Registro"], "ADDENDUM")
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D1", "D2", "D3"])
+        self.assertEqual(resultado.iloc[0]["Motivos_Etiqueta"], "Cedula|Nombre_Cliente")
+
+    def test_un_banco_seleccionado_acota_los_candidatos(self):
+        resultado = self._match(bancos=["Banco Davivienda"])
+        self.assertEqual(resultado.iloc[0]["Etiqueta_Registro"], "AMBIGUO")
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D2"])
+        self.assertIn(MOTIVO_BANCOS_SELECCIONADOS, resultado.iloc[0]["Motivos_Etiqueta"])
+
+    def test_multiples_bancos_seleccionados_aplican_union(self):
+        resultado = self._match(bancos=["Bancolombia", "Banco de Bogotá"])
+        self.assertEqual(resultado.iloc[0]["Etiqueta_Registro"], "AMBIGUO")
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D1", "D3"])
+
+    def test_banco_seleccionado_sin_coincidencia_no_restringe(self):
+        resultado = self._match(bancos=["Banco Falabella"])
+        self.assertEqual(resultado.iloc[0]["Etiqueta_Registro"], "ADDENDUM")
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D1", "D2", "D3"])
+        self.assertNotIn(MOTIVO_BANCOS_SELECCIONADOS, resultado.iloc[0]["Motivos_Etiqueta"])
+
+    def test_bancos_seleccionados_se_combinan_con_el_monto(self):
+        resultado = self._match(
+            bancos=["Bancolombia", "Banco Davivienda"],
+            buscar=self._buscar(Monto_Actual=2000000),
+        )
+        self.assertEqual(resultado.iloc[0]["Etiqueta_Registro"], "AMBIGUO")
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D2"])
+        motivos = resultado.iloc[0]["Motivos_Etiqueta"]
+        self.assertIn(MOTIVO_BANCOS_SELECCIONADOS, motivos)
+        self.assertIn("Monto_Actual", motivos)
+
+    def test_banco_seleccionado_acepta_alias_del_catalogo(self):
+        resultado = self._match(bancos=["Qnt Bancolombia"])
+        self.assertEqual(resultado.iloc[0]["Ids_Candidatos"], ["D1"])
+        self.assertIn(MOTIVO_BANCOS_SELECCIONADOS, resultado.iloc[0]["Motivos_Etiqueta"])
 
 
 class TestPagosYStatusCruce(unittest.TestCase):

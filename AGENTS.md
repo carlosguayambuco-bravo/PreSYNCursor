@@ -484,9 +484,16 @@ Etiquetas:
 Orden de acotación:
 
 1. Cédula / nombre del cliente (determina `NULO`).
-2. Banco, casa de cobro (simulando banco) y monto (determina `AMBIGUO`).
+2. Banco de la base, bancos seleccionados del aliado, casa de cobro (simulando banco) y monto (determina `AMBIGUO`).
 3. Número de crédito (determina `EXACTO`, `DUPLICADO` o `ADDENDUM`).
 4. Resolución de duplicados entre registros `EXACTO`.
+
+Bancos seleccionados:
+
+- Cuando la base del aliado no trae una columna `Banco`, el formulario de `views/agregar_cartera.py` permite seleccionar uno o más bancos de `BANCOS_UNICOS` (`modules/bank_normalizer.py`).
+- `match_deudas(..., bancos_seleccionados=[...])` acota los candidatos a la unión de esos bancos. La acotación se registra con el motivo `Bancos Seleccionados` y, si no hay número de crédito, el registro queda `AMBIGUO` en lugar de `ADDENDUM`.
+- Si ninguno de los bancos seleccionados existe en el universo, la acotación no se aplica y el resto del algoritmo sigue igual.
+- Cambiar la selección de bancos invalida el resultado del cruce ya ejecutado en la sesión.
 
 Normalizaciones importantes:
 

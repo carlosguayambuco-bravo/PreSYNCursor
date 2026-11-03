@@ -14,6 +14,7 @@ from data.data_deleter import eliminar_base_cruce
 from data.data_loader import load_cartera_activa, load_masivas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
 from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
+from modules.bank_normalizer import BANCOS_UNICOS
 from modules.classes import get_cruce_identificaciones_manager
 from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPO_PORTAFOLIO_DISTRIBUCION, TIPO_PORTAFOLIO_INDIVIDUAL, TIPOS_STATUS
 from modules.id_aut_deud.deuda_matcher import match_deudas
@@ -230,6 +231,32 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
 
     st.warning('Asegurate de Seleccionar **TODAS** las Columnas',icon='⚠️')
 
+    # --- 3.0 Bancos del Aliado (solo cuando la Base no trae Columna de Banco) ---
+    bancos_seleccionados: list[str] = []
+    if col_banco == 'Sin Columna':
+        # Se Deduplican los Bancos sin Distinguir Mayúsculas para el Selector
+        opciones_bancos = sorted({banco.casefold(): banco for banco in sorted(BANCOS_UNICOS)}.values())
+        with st.container(border=True):
+            st.markdown("#### **🏦 Bancos que Maneja el Aliado**")
+            bancos_seleccionados = st.multiselect(
+                label="**Bancos del Aliado (Opcional)**",
+                options=opciones_bancos,
+                key="cruce_bancos_aliado_{}".format(base_key),
+                placeholder="Selecciona uno o más bancos",
+                help=(
+                    "La base no tiene una columna de Banco. Selecciona los bancos que maneja el aliado "
+                    "para acotar el cruce a esas deudas y reducir los resultados clasificados como ADDENDUM."
+                ),
+            )
+            if bancos_seleccionados:
+                st.caption(
+                    "✅ Se acotará el cruce a: **{}**".format(", ".join(bancos_seleccionados))
+                )
+            else:
+                st.caption(
+                    "ℹ️ Sin bancos seleccionados, el cruce solo podrá acotar por los demás datos de la deuda."
+                )
+
     st.divider()
 
     # --- 3.1 Filtros de Datos ---
@@ -337,6 +364,15 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
     firma_filtros = tuple((f['columna'], f['tipo'], str(f['valor'])) for f in filtros_config)
     if st.session_state.get(key_firma_filtros) != firma_filtros:
         st.session_state[key_firma_filtros] = firma_filtros
+        st.session_state.pop(key_pkg, None)
+        st.session_state.pop("cruce_sheets_subido_{}".format(base_key), None)
+        st.session_state.pop("cruce_resultado_descarga_{}".format(base_key), None)
+
+    # Si los Bancos del Aliado Cambian, se Invalida el Resultado del Cruce ya Ejecutado
+    key_firma_bancos = "cruce_bancos_firma_{}".format(base_key)
+    firma_bancos = tuple(bancos_seleccionados)
+    if st.session_state.get(key_firma_bancos) != firma_bancos:
+        st.session_state[key_firma_bancos] = firma_bancos
         st.session_state.pop(key_pkg, None)
         st.session_state.pop("cruce_sheets_subido_{}".format(base_key), None)
         st.session_state.pop("cruce_resultado_descarga_{}".format(base_key), None)
@@ -666,7 +702,7 @@ def _mostrar_configuracion_cruce(*, uploaded_file, raw_df: pd.DataFrame, ext: st
                 # Inicializamos el Tiempo de Ejecución
                 start_cruce = time()
                 # Paso 5: Ejecutar el Modelo de Identificación de Deudas
-                resultado = match_deudas(df_buscar=match_input, df_datos=cartera_df, casa_cobro=casa_cobro) # type: ignore
+                resultado = match_deudas(df_buscar=match_input, df_datos=cartera_df, casa_cobro=casa_cobro, bancos_seleccionados=bancos_seleccionados) # type: ignore
                 # Finalizamos el Tiempo de Ejecución
                 end_cruce = time()
 
