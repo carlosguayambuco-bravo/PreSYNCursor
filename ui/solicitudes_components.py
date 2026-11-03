@@ -19,7 +19,7 @@ from modules.acuerdo_pdf_generator.agreement_pdf import generate_payment_agreeme
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.constants import ESTADOS_POSIBLES_LIQUIDACION, ESTADOS_POSIBLES_SOLICITUD, ESTADOS_PREFINALIZAR_SOLICITUD, TIPO_ARCHIVO_ACUERDO_FIRMADO, TIPO_ARCHIVO_SOPORTE_PAGO
 from modules.forms import obtener_nombre_negociador
-from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, obtener_casas_cobro_base, obtener_comparacion_descuentos_solicitud, obtener_estado_liquidacion, obtener_fecha_limite_respuesta_solicitud, obtener_ids_deuda_validos, obtener_link_archivo_drive, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_metricas_cumplimiento_tiempos_respuesta, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_monto_por_deuda, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitud_to_solicitado, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
+from modules.gest_sols import actualizar_aprobacion_necesaria, add_images_to_pdf, add_metadata_to_uploaded_pdf, add_pdfs_to_pdf, cancelar_o_reactivar_solicitud, check_if_acuerdo_pago_uploaded, check_if_validacion_uploaded, convertir_imagenes_a_pdf, crear_plantilla_solicitud_acuerdo_pago, crear_plantilla_solicitud_validacion, es_acuerdo_reasignable, es_solicitud_aprobacion_necesaria, es_solicitud_sin_responder, formatear_descuento_deuda, formatear_monto_deuda, obtener_casas_cobro_base, obtener_comparacion_descuentos_solicitud, obtener_estado_liquidacion, obtener_fecha_limite_respuesta_solicitud, obtener_ids_deuda_validos, obtener_link_archivo_drive, obtener_mascara_aprobacion_necesaria, obtener_mascara_exitosas, obtener_mascara_reasignable, obtener_metricas_cumplimiento_tiempos_respuesta, obtener_promedio_respuestas_dia, obtener_promedio_tiempos_respuesta, obtener_resumen_liquidaciones, obtener_resumen_respuestas_automaticas, obtener_resumen_respuestas_vencidas, obtener_resumen_subidas_faciles, obtener_tipo_aprobacion_necesaria, obtener_tops_negociadores, obtener_valores_bajo_comite, reiniciar_filtros_solicitudes_negociadores, subir_acuerdo_pago_a_google_drive, eliminar_acuerdo_pago_de_google_drive, distribuir_monto_por_deuda, distribuir_resultado_solicitud, redistribuir_resultado_solicitud, obtener_mascara_sin_responder, get_descuento_en_base, get_solicitud_txt, unir_pdfs, update_solicitud_to_solicitado, update_solicitudes_to_solicitado, update_solicitudes_to_vencida, upload_massive_addendums, reiniciar_filtros_solicitudes_ejecutivo, generate_plantilla_serie_acuerdo
 from modules.classes import get_banned_manager
 from utils.helpers_general import cleanNumber, color_a_rgba, formatNumber, getBDDaysDiffFloat_vectorized, getBDDaysDiffFloat, move_business_days
 
@@ -2878,57 +2878,135 @@ def mostrar_detalles_solicitudes_deuda(*, solicitud: pd.Series, disable_inputs: 
                     key="num_cuotas_{}_{}_show_{}".format(solicitud['ID_Solicitud'], d['Id_Deuda'], origen)
                     )
 
-# Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud por Deuda
-def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series) -> None:
-    # Creamos 6 Columnas: Id_Deuda, Banco, Numero_Credito, Monto Solicitado, Monto Respuesta, Cuotas (Si Hay)
-    deudas_info = solicitud["JSON_Respuesta"]
-    hay_cuotas = any(d['Num_Cuotas'] > 1 for d in deudas_info)
-    if hay_cuotas:
-        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta, colCuotas = st.columns([3,3,6,6,6,3], vertical_alignment="top")
-    else:
-        colIdDeuda, colBanco, colNumCredito, colMontoSolicitado, colMontoRespuesta = st.columns([3,3,6,6,6], vertical_alignment="top")
+# Función Auxiliar para Generar una Clave de Widget que Cambie cuando Cambie el Valor Mostrado
+def _clave_detalle_respuesta(key_base: str, valor: Any) -> str:
+    return "{}__{}".format(key_base, abs(hash(str(valor))))
 
-    with colIdDeuda:
-        st.markdown("**Id Deuda:**")
-    with colBanco:
-        st.markdown("**Banco:**")
-    with colNumCredito:
-        st.markdown("**Número Crédito:**")
-    with colMontoSolicitado:
-        st.markdown("**Monto Solicitado:**")
-    with colMontoRespuesta:
-        st.markdown("**Monto Respuesta:**")
+# Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud por Deuda
+def mostrar_detalles_respuesta_deuda(*, solicitud: pd.Series, sufijo: str = '') -> None:
+    # Reunimos la Información de las Deudas de la Solicitud
+    deudas_info = solicitud.get("JSON_Respuesta", [])
+    if not isinstance(deudas_info, list):
+        deudas_info = []
+    hay_cuotas = any(
+        cleanNumber(d.get('Num_Cuotas', 1), default_nan=1) > 1
+        for d in deudas_info
+        if isinstance(d, dict)
+    )
+
+    # Indexamos la Respuesta por Id de Deuda para Comparar contra la Solicitud
+    respuesta_por_deuda = {
+        str(item.get('Id_Deuda', '')).replace('.0', '').strip(): item
+        for item in deudas_info
+        if isinstance(item, dict)
+    }
+
+    # Definimos las Columnas: Id_Deuda, Banco, Numero_Credito, Monto Solicitado, Monto Respuesta, Descuento y Cuotas (Si Hay)
+    proporciones_columnas = [3, 3, 5, 5, 5, 4, 3] if hay_cuotas else [3, 3, 5, 5, 5, 4]
+    encabezados = [
+        "**Id Deuda:**",
+        "**Banco:**",
+        "**Número Crédito:**",
+        "**Monto Solicitado:**",
+        "**Monto Respuesta:**",
+        "**Descuento:**",
+    ]
     if hay_cuotas:
-        with colCuotas: # type: ignore
-            st.markdown("**Cuotas:**")
-    
-    for d in sorted(solicitud["Datos_Solicitud"], lambda d: float(d['Id_Deuda'])):
-        # Definimos el Monto Solicitado Original de la Deuda
-        monto_respuesta = next((cleanNumber(item['Monto_Propuesto']) for item in solicitud["JSON_Respuesta"] if item["Id_Deuda"] == d["Id_Deuda"]), "N/A")
-        with colIdDeuda:
-            st.code(d['Id_Deuda'], language="text")
-        with colBanco:
-            st.code(d['Banco'], language="text")
-        with colNumCredito:
-            st.code(d['Numero_Credito'], language="text")
-        with colMontoSolicitado:
-            st.code(formatNumber(d['Monto_Propuesto']), language="text")
-        with colMontoRespuesta:
-            if monto_respuesta != "N/A":
-                st.code(formatNumber(monto_respuesta), language="text")
+        encabezados.append("**Cuotas:**")
+
+    # Creamos las Columnas del Encabezado
+    columnas_encabezado = st.columns(proporciones_columnas, vertical_alignment="top")
+    for columna, encabezado in zip(columnas_encabezado, encabezados):
+        with columna:
+            st.markdown(encabezado)
+
+    for posicion, d in enumerate(sorted(solicitud["Datos_Solicitud"], key=lambda d: float(d['Id_Deuda']))):
+        # Normalizamos el Id de Deuda y Buscamos su Respuesta (Puede No Existir)
+        id_deuda = str(d['Id_Deuda']).replace('.0', '').strip()
+        respuesta_deuda = respuesta_por_deuda.get(id_deuda, {})
+        valor_respuesta = respuesta_deuda.get('Monto_Propuesto', 0)
+
+        # Formateamos los Montos y el Descuento Otorgado por Deuda
+        monto_solicitado, caption_solicitado = formatear_monto_deuda(d.get('Monto_Propuesto', 0))
+        monto_respuesta, caption_respuesta = formatear_monto_deuda(valor_respuesta)
+        descuento = formatear_descuento_deuda(valor=valor_respuesta, monto_actual=d.get('Monto_Actual', 0))
+
+        # Recreamos las Columnas por Cada Fila para Evitar Desalineaciones entre Filas
+        columnas = st.columns(proporciones_columnas, vertical_alignment="top")
+        key_base = "detalle_respuesta_{}_{}_{}{}".format(solicitud['ID_Solicitud'], id_deuda, posicion, sufijo)
+
+        with columnas[0]:
+            st.text_input(
+                label="Id Deuda",
+                value=id_deuda,
+                disabled=True,
+                label_visibility="collapsed",
+                key=_clave_detalle_respuesta(key_base + "_id", id_deuda),
+            )
+        with columnas[1]:
+            st.text_input(
+                label="Banco",
+                value=str(d.get('Banco', '')),
+                disabled=True,
+                label_visibility="collapsed",
+                key=_clave_detalle_respuesta(key_base + "_banco", d.get('Banco', '')),
+            )
+        with columnas[2]:
+            st.text_input(
+                label="Número Crédito",
+                value=str(d.get('Numero_Credito', '')),
+                disabled=True,
+                label_visibility="collapsed",
+                key=_clave_detalle_respuesta(key_base + "_credito", d.get('Numero_Credito', '')),
+            )
+        with columnas[3]:
+            if caption_solicitado:
+                st.caption(monto_solicitado)
             else:
-                st.code("No Brindado", language="text")
+                st.text_input(
+                    label="Monto Solicitado",
+                    value=monto_solicitado,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key=_clave_detalle_respuesta(key_base + "_monto_solicitado", monto_solicitado),
+                )
+        with columnas[4]:
+            if caption_respuesta:
+                st.caption(monto_respuesta)
+            else:
+                st.text_input(
+                    label="Monto Respuesta",
+                    value=monto_respuesta,
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key=_clave_detalle_respuesta(key_base + "_monto_respuesta", monto_respuesta),
+                )
+        with columnas[5]:
+            st.text_input(
+                label="Descuento",
+                value=descuento,
+                disabled=True,
+                label_visibility="collapsed",
+                key=_clave_detalle_respuesta(key_base + "_descuento", descuento),
+            )
         if hay_cuotas:
-            with colCuotas: # type: ignore
-                st.code(d['Num_Cuotas'], language="text")
+            with columnas[6]:
+                st.text_input(
+                    label="Cuotas",
+                    value=str(d.get('Num_Cuotas', 1)),
+                    disabled=True,
+                    label_visibility="collapsed",
+                    key=_clave_detalle_respuesta(key_base + "_cuotas", d.get('Num_Cuotas', 1)),
+                )
 
 # Función Auxiliar para Mostrar los Valores Otorgados de una Solicitud en Estado 'Bajo Comité'
-def mostrar_valores_bajo_comite(*, solicitud: pd.Series) -> None:
+def mostrar_valores_bajo_comite(*, solicitud: pd.Series, sufijo: str = '') -> None:
     """
     Muestra los Valores Otorgados de una Solicitud en Estado 'Bajo Comité'.
 
     Args:
         solicitud (pd.Series): Información de la solicitud.
+        sufijo (str): Sufijo para Evitar Colisiones entre Widgets de Distintas Vistas.
     """
     # Paso 1: Obtenemos los Valores Otorgados (Si Aplica)
     valores = obtener_valores_bajo_comite(solicitud=solicitud)
@@ -2990,7 +3068,7 @@ def mostrar_valores_bajo_comite(*, solicitud: pd.Series) -> None:
 
     # Paso 4: Mostramos el Detalle por Deuda de los Valores Otorgados
     with st.expander("**💰 Detalles de los Valores por Deuda**", expanded=True):
-        mostrar_detalles_respuesta_deuda(solicitud=solicitud)
+        mostrar_detalles_respuesta_deuda(solicitud=solicitud, sufijo=sufijo)
 
 # Función Auxiliar para Construir una Solicitud a partir de una Modificación
 def construir_solicitud_desde_modificacion(*, solicitud: pd.Series, modificacion: ModificacionSolicitud) -> pd.Series:
@@ -3060,7 +3138,7 @@ def mostrar_modificacion_solicitud(*, solicitud: pd.Series, modificacion: Modifi
         if estado_modificacion in ["Bajo Comité", "Titular Ilocalizable"]:
             st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
             mostrar_subestado_transitorio(solicitud=solicitud_modificacion)
-            mostrar_valores_bajo_comite(solicitud=solicitud_modificacion)
+            mostrar_valores_bajo_comite(solicitud=solicitud_modificacion, sufijo="_mod_{}".format(indice))
 
         elif estado_modificacion != "Exitosa":
             st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
@@ -3128,7 +3206,7 @@ def mostrar_modificacion_solicitud(*, solicitud: pd.Series, modificacion: Modifi
 
             # Mostramos el Detalle por Deuda de la Respuesta de la Modificación
             with st.expander("**💰 Detalles de la Respuesta por Deuda**", expanded=False):
-                mostrar_detalles_respuesta_deuda(solicitud=solicitud_modificacion)
+                mostrar_detalles_respuesta_deuda(solicitud=solicitud_modificacion, sufijo="_mod_{}".format(indice))
 
             st.info("{}".format(comentario_ejecutivo.replace("\n", "\n\n")), icon="💬", title="Comentario del Ejecutivo")
 

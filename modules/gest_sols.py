@@ -252,6 +252,60 @@ def formatear_pab_ideal(*, valor: float, monto_actual: float) -> str:
     descuento = calcular_porcentaje_descuento(valor=valor, monto_actual=monto_actual)
     return r"\${:,.0f} ({:.1%})".format(valor, descuento)
 
+def formatear_monto_deuda(valor: Any) -> tuple[str, bool]:
+    """
+    Formatea el Monto de una Deuda para Mostrarlo en la Respuesta de una Solicitud.
+
+    Si el Valor es un Comentario (Texto no Numérico) se Devuelve el Comentario.
+    Si el Monto es 0 o No Existe se Devuelve 'No Brindado'. Los Comentarios Largos
+    o con Saltos de Línea se Marcan para Renderizarse como Caption y no Ocupar el
+    Espacio de un Input.
+
+    Args:
+        valor (Any): Monto o Comentario de la Deuda.
+
+    Returns:
+        tuple[str, bool]: Texto a Mostrar y si Debe Renderizarse como Caption.
+    """
+    # Paso 1: Detectamos si el Valor es un Comentario (Texto no Numérico)
+    if isinstance(valor, str):
+        comentario = valor.strip()
+        monto = cleanNumber(comentario, default_nan=np.nan)
+        if pd.isna(monto):
+            # Los Valores Vacíos o Nulos se Muestran como 'No Brindado'
+            if not comentario or comentario.lower() in {"nan", "none", "null"}:
+                return "No Brindado", False
+            # Los Comentarios Largos o con Salto de Línea se Muestran como Caption
+            usar_caption = ("\n" in comentario) or (len(comentario) > 50)
+            return comentario, usar_caption
+        valor = monto
+
+    # Paso 2: Si el Monto es 0 o No Existe se Muestra 'No Brindado'
+    monto = _a_numero(valor)
+    if monto <= 0:
+        return "No Brindado", False
+
+    # Paso 3: Formateamos el Monto Limpio
+    return formatNumber(monto), False
+
+def formatear_descuento_deuda(*, valor: Any, monto_actual: Any) -> str:
+    """
+    Formatea el Porcentaje de Descuento Otorgado en la Respuesta de una Deuda.
+
+    Args:
+        valor (Any): Monto Propuesto en la Respuesta.
+        monto_actual (Any): Monto Actual de la Deuda.
+
+    Returns:
+        str: Descuento Formateado (ej. '25.0%') o 'N/A' si el Monto no Existe,
+        es 0, es un Comentario o el Monto Actual no es Válido.
+    """
+    monto = _a_numero(valor)
+    monto_actual = _a_numero(monto_actual)
+    if monto <= 0 or monto_actual <= 0:
+        return "N/A"
+    return "{:.1%}".format(1 - (monto / monto_actual))
+
 def formatear_descuento_base(*,
         casa_cobro: str,
         valor: float,

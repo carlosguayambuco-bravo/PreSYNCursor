@@ -36,6 +36,8 @@ from modules.gest_sols import (
     calcular_porcentaje_descuento,
     distribuir_monto_por_deuda,
     formatear_descuento_base,
+    formatear_descuento_deuda,
+    formatear_monto_deuda,
     formatear_pab_ideal,
     formatear_valor_solicitado,
     obtener_color_comparacion,
@@ -288,6 +290,39 @@ class TestDescuentosYFormato(unittest.TestCase):
                 monto_actual=2000,
             ).startswith("**Directo Base**")
         )
+
+    def test_formatear_monto_deuda(self):
+        self.assertEqual(formatear_monto_deuda(75000), ("75.000", False))
+        self.assertEqual(formatear_monto_deuda("$ 75.000"), ("75.000", False))
+        self.assertEqual(formatear_monto_deuda(0), ("No Brindado", False))
+        self.assertEqual(formatear_monto_deuda(""), ("No Brindado", False))
+        self.assertEqual(formatear_monto_deuda(None), ("No Brindado", False))
+        self.assertEqual(formatear_monto_deuda("nan"), ("No Brindado", False))
+        self.assertEqual(formatear_monto_deuda(np.nan), ("No Brindado", False))
+
+        comentario = "El aliado no brinda descuento sobre esta deuda"
+        self.assertEqual(formatear_monto_deuda(comentario), (comentario, False))
+        self.assertEqual(
+            formatear_monto_deuda("Sin descuento\nDeuda en cobro jurídico"),
+            ("Sin descuento\nDeuda en cobro jurídico", True),
+        )
+        comentario_largo = "El aliado no brinda descuento porque la deuda se encuentra en proceso judicial."
+        self.assertEqual(formatear_monto_deuda(comentario_largo), (comentario_largo, True))
+
+    def test_formatear_descuento_deuda(self):
+        self.assertEqual(
+            formatear_descuento_deuda(valor=75000, monto_actual=100000),
+            "25.0%",
+        )
+        self.assertEqual(
+            formatear_descuento_deuda(valor="$ 75.000", monto_actual="100.000"),
+            "25.0%",
+        )
+        self.assertEqual(formatear_descuento_deuda(valor=0, monto_actual=100000), "N/A")
+        self.assertEqual(formatear_descuento_deuda(valor="Sin descuento", monto_actual=100000), "N/A")
+        self.assertEqual(formatear_descuento_deuda(valor=75000, monto_actual=0), "N/A")
+        self.assertEqual(formatear_descuento_deuda(valor=None, monto_actual=100000), "N/A")
+        self.assertEqual(formatear_descuento_deuda(valor=-100, monto_actual=100000), "N/A")
 
     def test_color_comparacion_por_umbrales(self):
         self.assertEqual(obtener_color_comparacion(valor=90, valor_solicitado=100), "green")
