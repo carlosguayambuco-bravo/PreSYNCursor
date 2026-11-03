@@ -2,7 +2,7 @@
 
 Guía de contexto para agentes de IA y desarrolladores que trabajen en **PreSYNCursor**. Describe cómo está organizado el repositorio, cómo ejecutarlo, qué reglas implementa y cómo extenderlo sin romper los flujos existentes.
 
-> **Regla de oro:** antes de modificar una fórmula, un estado o una regla de cruce, busca si tiene tests en `tests/` y agrega uno si no existe. Este repositorio maneja información financiera y de cartera; un cambio silencioso en un cálculo puede afectar solicitudes reales.
+> **Regla de oro:** antes de modificar una fórmula, un estado o una regla de cruce, busca si tiene tests en `tests/` y agrega uno si no existe. Este repositorio maneja información financiera y de cartera; un cambio silencioso en un cálculo puede afectar solicitudes reales. Adicionalmente, en caso de tener preguntas, SIEMPRE REALIZAR LAS PREGUNTAS ANTES DE LA EJECUCIÓN, para realizar correctamente los cambios requeridos.
 
 ---
 
