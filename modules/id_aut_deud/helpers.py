@@ -717,9 +717,13 @@ def build_pendiente_cruce_df(*,
         )
 
         # Agregar la Fila de Salida
+        # La Cédula es Obligatoria en PendienteCruceSchema. Si el Cruce se Hizo
+        # solo por Nombre, la Cédula llega Nula: se guarda Vacía para no Romper
+        # la Validación (el Cargador también Normaliza Vacíos a '').
+        cedula_salida = cleanCedula(fila.get(COL_CEDULA))
         filas_salida.append({
             COL_ID_CRUCE: id_cruce,
-            COL_CEDULA: fila.get(COL_CEDULA),
+            COL_CEDULA: cedula_salida,
             COL_NOMBRE: fila.get(COL_NOMBRE),
             COL_BANCO: fila.get(COL_BANCO),
             COL_MONTO_ACTUAL: fila.get(COL_MONTO_ACTUAL),
