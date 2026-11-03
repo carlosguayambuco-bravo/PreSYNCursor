@@ -7,13 +7,14 @@ las dependencias externas se reemplazan con mocks o con datos en memoria.
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
 from modules.classes import Aliado, crear_diccionario_aliados, parse_tiempos_respuesta
+import ui.forms_components as forms_components
 from modules.forms import (
     _obtener_nombre_corto_negociador,
     alertar_excedencia_contraprop_max_relativa,
@@ -813,6 +814,51 @@ class TestNormalizacionBancos(unittest.TestCase):
             "b": "Nubank",
             "c": "Banco Desconocido",
         })
+
+
+class TestBloqueoBancosFormulario(unittest.TestCase):
+    @staticmethod
+    def _aliado():
+        return Aliado(
+            nombre="Aliado A",
+            bancos=["Bancolombia"],
+            ejecutivo="",
+            pago_co_obligatorio=False,
+            brinda_descuento_max=False,
+            permiso_cuotas=True,
+            tiempo_horas_respuesta=72,
+            toca_validar_bancos=True,
+        )
+
+    def test_detiene_el_envio_con_banco_no_habilitado(self):
+        fake_st = MagicMock()
+        fake_st.session_state = {"aliados_dict": {"Aliado A": self._aliado()}}
+        fake_st.stop.side_effect = RuntimeError("stop")
+        deudas = pd.DataFrame({"Banco": ["Davivienda"]})
+
+        with patch.object(forms_components, "st", fake_st):
+            with self.assertRaises(RuntimeError):
+                forms_components.mostrar_bloqueo_bancos(
+                    deudas_info_df=deudas,
+                    aliado_name="Aliado A",
+                )
+
+        fake_st.error.assert_called_once()
+        fake_st.stop.assert_called_once()
+
+    def test_permite_el_envio_con_banco_habilitado(self):
+        fake_st = MagicMock()
+        fake_st.session_state = {"aliados_dict": {"Aliado A": self._aliado()}}
+        deudas = pd.DataFrame({"Banco": ["Bancolombia"]})
+
+        with patch.object(forms_components, "st", fake_st):
+            forms_components.mostrar_bloqueo_bancos(
+                deudas_info_df=deudas,
+                aliado_name="Aliado A",
+            )
+
+        fake_st.error.assert_not_called()
+        fake_st.stop.assert_not_called()
 
 
 if __name__ == "__main__":

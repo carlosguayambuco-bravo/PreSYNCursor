@@ -103,20 +103,16 @@ def mostrar_bloqueo_bancos(*,deudas_info_df: pd.DataFrame, aliado_name: str):
         # Verificamos si hay algún banco bloqueado
         bancos_bloqueados = [banco for banco, permitido in verificaciones.items() if not permitido]
         if bancos_bloqueados:
-            st.warning(f"Alerta: Las siguientes deudas tienen solo estos bancos habilitados por el aliado '{aliado_name}': {', '.join(bancos_bloqueados)}. Verifica la subida de las deudas", icon="⚠️")
-            # Ahora mostramos una selección para decidir continuar o no
-            continuar = st.radio(
-                "¿Deseas continuar con la selección de deudas a pesar del bloqueo de bancos?",
-                options=["Sí, continuar", "No, revisar deudas"],
-                key="continuar_bloqueo_bancos",
-                index=None,
-                horizontal=True
+            st.error(
+                "Las siguientes deudas tienen bancos no habilitados por el aliado '{}': {}. "
+                "Corrige la selección de deudas para continuar.".format(
+                    aliado_name,
+                    ', '.join(bancos_bloqueados),
+                ),
+                icon="❌",
             )
-            if not continuar or continuar is None:
-                st.stop()
-            elif continuar == "No, revisar deudas":
-                st.info("Por favor, revisa las deudas seleccionadas y asegúrate de que cumplen con los requisitos del aliado.", icon="ℹ️")
-                st.stop()
+            # El Bloqueo de Bancos es una Restricción Dura: no se Permite Continuar
+            st.stop()
 
 # Función para obtener los candidatos de descuento a partir de las solicitudes exitosas
 def obtener_candidatos_solicitudes_exitosas(*, deudas: list[str]) -> pd.DataFrame:

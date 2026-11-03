@@ -29,6 +29,11 @@ from utils.helpers_general import cleanNumber, formatNumber, getBDDaysDiffFloat_
 
 METADATA_ESPECIALES_DISTRIBUIR = ['Max_Descuento_Otorgado','Addendums','Fecha_Solicitado','Id_Acuerdo_Pago','Modificaciones']
 
+# Estados que no Representan una Respuesta Efectiva del Aliado para las
+# Métricas de SLA y Tiempo de Respuesta (Vencida se Cierra sin Respuesta y
+# Cancelada la Retira el Negociador antes de Gestionarse).
+ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA = ('Vencida', 'Cancelada')
+
 class ResultadoDistribucionMontos(TypedDict):
     """Resultado de Distribuir un Monto Total entre un Conjunto de Deudas"""
     montos: dict[str, float]  # Monto Propuesto por Id_Deuda (Enteros que Suman el Monto Total)
@@ -2105,6 +2110,10 @@ def obtener_promedio_tiempos_respuesta(solicitudes_df: pd.DataFrame, *, simular_
 
     # Paso 2: Crear Columna de Tiempos Respuesta como Diferencia en Días entre Fecha_Respuesta y Timestamp
     solicitudes_aux = solicitudes_df.reset_index(drop=True)
+    if 'Estado_Solicitud' in solicitudes_aux.columns:
+        solicitudes_aux = solicitudes_aux[
+            ~solicitudes_aux['Estado_Solicitud'].isin(ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA)
+        ].reset_index(drop=True)
     solicitudes_aux['Tiempo_Respuesta_Dias'] = getBDDaysDiffFloat_vectorized(
         solicitudes_aux['Fecha_Respuesta'],
         solicitudes_aux['Timestamp']
@@ -2412,6 +2421,8 @@ def obtener_metricas_cumplimiento_tiempos_respuesta(*, solicitudes_df: pd.DataFr
         return resultado_vacio
 
     mask_respondidas = ~obtener_mascara_sin_responder(solicitudes_df)
+    if 'Estado_Solicitud' in solicitudes_df.columns:
+        mask_respondidas &= ~solicitudes_df['Estado_Solicitud'].isin(ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA)
     solicitudes_respondidas = solicitudes_df[mask_respondidas]
     if solicitudes_respondidas.empty:
         return resultado_vacio

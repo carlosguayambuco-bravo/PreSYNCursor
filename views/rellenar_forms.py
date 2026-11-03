@@ -408,6 +408,8 @@ if tipo_solicitud in ['Validación', 'Oferta de Acuerdo'] and aliado_cambiado an
             icon="ℹ️",
             title="Montos mayores **SUELEN SER SIEMPRE RECHAZADOS** con este aliado",
         )
+        # Bloqueamos el Envío: la Contrapropuesta Máxima es una Restricción Dura
+        st.stop()
     else:
         st.success(comentario_alerta, icon="✅", title="Verificación de Contrapropuesta")
 

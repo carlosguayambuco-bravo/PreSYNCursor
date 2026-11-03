@@ -6,37 +6,39 @@ Guía de contexto para agentes de IA y desarrolladores que trabajen en **PreSYNC
 
 ---
 
-## 1. Contexto de negocio 
+## 1. Contexto de negocio
 
-Estamos en una empresa que funciona como una reparadora de crédito, donde basicamente los clientes ingresan al programa con muchas deudas EXCLUSIVAMENTE DE CONSUMO que se encuentran morosas y donde se evalua que efectivamente exista un sobre-endeudamiento. A partir de que el cliente ingresa al programa se realizan negociaciones por las deudas con el fin de pagarlas con un descuento. El ingreso que deja el programa es un %Comisión sobre ese descuento ahorrado.
+Estamos en una empresa que funciona como una reparadora de crédito. Los clientes ingresan al programa con deudas **exclusivamente de consumo**, morosas, y se evalúa que exista un sobreendeudamiento real. A partir del ingreso se negocian las deudas para pagarlas con un descuento; el ingreso del programa es un **% de comisión sobre el descuento ahorrado**.
 
-Desde el Área de Alianzas se busca centralizar la búsqueda de estos descuentos mediante la consolidación de aliados que cuentan con las deudas en su cartera y son capaces de ofrecer un descuento por estas. El objetivo de las alianzas es trabajar en una relación simbiótica donde desde la empresa se contacte el cliente y el aliado tenga que exclusivamente ajustarse a los valores de pago que nosotros brindamos.
+Desde el Área de Alianzas se busca centralizar la búsqueda de esos descuentos mediante la consolidación de aliados que tienen las deudas en su cartera y pueden ofrecer un descuento. La relación es simbiótica: la empresa contacta al cliente y el aliado se ajusta a los valores de pago que nosotros brindamos.
 
-Dentro de los aliados que tenemos hay 2 categorías:
-- **Aliados Formales**: Aliados con un NDA que nos cruzan a inicio de mes una base de los clientes y los descuentos para sus deudas.
-- **Aliados Informales**: Aliados sin documentos oficiales que pueden o no cruzar una base con los clientes pero que siempre estan dispuestos a verificar oportunidades de pago por el valor que ofrecemos.
+Categorías de aliados:
 
-Las alianzas son importantes porque permiten disminuir la carga operativa de tener que llamar a cada cliente y a cada banco con el que el cliente tenga una deuda morosa para averiguar un posible descuento, lo que permite a los negociadores enfocarse en aquellos clientes cuyas Casas de Cobro/Aliados no se cuenta con una alianza formal, maximizando la cantidad de clientes gestionados.
+- **Formales:** tienen NDA y cruzan a inicio de mes una base de clientes y descuentos de sus deudas.
+- **Informales:** no tienen documentos oficiales; pueden o no cruzar una base, pero están dispuestos a verificar oportunidades de pago por el valor que ofrecemos.
+
+La categoría formal/informal se registra en la hoja de aliados, pero **la app no la usa para tomar decisiones** y no forma parte de `AliadosSchema`. Las alianzas reducen la carga operativa de llamar cliente por cliente y banco por banco; los negociadores se enfocan en clientes cuyas casas de cobro no tienen alianza formal.
 
 ### 1.1 Problema que resuelve la aplicación
 
-- ¿Qué proceso manual reemplaza la aplicación?: El App busca evitar las comunicaciones dispersas entre negociadores y ejecutivos centralizando la información y realizando compromisos en termínos de tiempos de respuesta y liquidaciones. Adicionalmente, se permite tener más control acerca de que solicitudes bloquear porque son irrelevantes/imposibles de aceptar por el aliado. Y por último, otorgar una forma más sencilla de llevar un seguimiento a estas solicitudes.
-- ¿Quiénes son los usuarios principales y qué decisión toman con ella?: Los Negociadores usan el App para escalar las propuestas de pago y solicitar los acuerdos para liquidar deudas de los clientes. Los ejecutivos la usan para centralizar la información de las peticiones y tener una facilidad de respuesta adaptada a la operación. Los Admins la usan para realizar seguimiento del uso que se le da a las alianzas y a los cumplimientos de los compromisos pactados.
-- ¿Qué se considera una solicitud exitosa para el negocio?: Una solicitud exitosa quiere decir que la comunicación con el aliado fue exitosa donde se consiguió un descuento (no siempre el solicituda, puede ser mayor o menor) y se entrega el Acuerdo de Pago si aplica.
+- **¿Qué proceso manual reemplaza?** Evita comunicaciones dispersas entre negociadores y ejecutivos, centraliza la información y permite compromisos en términos de tiempos de respuesta y liquidaciones. También da control sobre qué solicitudes bloquear por ser irrelevantes o imposibles de aceptar, y facilita el seguimiento.
+- **¿Quiénes son los usuarios principales?** Los negociadores escalan propuestas de pago y solicitan acuerdos para liquidar deudas. Los ejecutivos centralizan las peticiones y responden según la operación. Los administradores hacen seguimiento al uso de alianzas y al cumplimiento de compromisos.
+- **¿Qué es una solicitud exitosa?** Una comunicación exitosa con el aliado en la que se consiguió **cualquier descuento**, no necesariamente el monto solicitado; si aplica, se entrega el Acuerdo de Pago. La app no valida automáticamente esa condición: el estado `Exitosa` lo marca el usuario con base en la respuesta del aliado.
 
 ### 1.2 Actores y responsabilidades
 
 | Actor | Rol en el negocio | Rol en la app (`admin`, `leader`, `nego`, `executive`) | Responsabilidad |
 |---|---|---|---|
-| Negociador | Contactar a los clientes y proponer propuestas de pago con el cliente al ejecutivo para liquidar la(s) deuda(s) | `nego` | Subir Solicitudes y Liquidar Clientes |
+| Negociador | Contactar a los clientes y proponer propuestas de pago con el cliente al ejecutivo para liquidar la(s) deuda(s) | `nego` | Subir solicitudes, liquidar clientes y aprobar/rechazar solicitudes transitorias (`Bajo Comité` / `Titular Ilocalizable`) |
 | Líder de negociación | Llevar el seguimiento de un equipo de negociadores dando dirección y ayudas | `leader` | Realizar seguimiento a los KPIs de los negociadores |
 | Ejecutivo de alianzas | Ser el contacto intermediador con los aliados | `executive` | Contactar con los aliados, recibir descuentos y acuerdos de pago. También realizar seguimiento a los resultados por aliado |
 | Administrador / gerencia | Verificar el estado actual de la proyección y dar feedback de posibles cuellos de botella | `admin` | Controlar el estado de la operación en todo momento |
-| Casa de cobro / aliado | Ninguno | No accede a la app | Cruzar Bases (si es posible), verificar opciones de pago y enviar acuerdos de pago junto con paz y salvos. |
+| Casa de cobro / aliado | Ninguno dentro de la app | No accede a la app | Cruzar bases (si es posible), verificar opciones de pago y enviar acuerdos de pago junto con paz y salvos |
 
 ### 1.3 Flujo end-to-end
 
-#### 1.3.1 Manejo de Solicitudes
+#### 1.3.1 Manejo de solicitudes
+
 1. El negociador identifica al cliente y sus deudas.
 2. Se selecciona una casa de cobro / aliado y un tipo de solicitud.
 3. Se define el monto propuesto (total y por deuda) y, si aplica, el acuerdo de pago.
@@ -46,61 +48,96 @@ Las alianzas son importantes porque permiten disminuir la carga operativa de ten
 7. Se registra la respuesta, se valida el pago y se generan acuerdos y soportes.
 8. Se hace seguimiento a liquidaciones, vencimientos y reasignaciones.
 
-#### 1.3.2 Manejo de Bases Entregadas por aliados
-1. El Ejecutivo recibe la base entregada por el aliado
-2. El Ejecutivo sube la base y se realiza un pre-cruce con el algoritmo interno
-3. El Ejecutivo cruza manualmente todas las deudas que no cruzaron inicialmente por el algoritmo
-4. El Ejecutivo sube la información al Sheets de `Descuentos en Base`, donde se maneja la info principal
+Si la solicitud cae en `Bajo Comité` o `Titular Ilocalizable`, el **negociador** aprueba o rechaza con base en lo hablado con el cliente. Si aprueba, la solicitud vuelve a la cola del ejecutivo para que la finalice.
+
+Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que comparten las mismas deudas/aliado mediante `Metadata_Solicitud["Id_Respuesta_Autom"]`. Una validación exitosa sin pago total también actualiza sub-solicitudes cuyas deudas son un subconjunto de la respuesta original. El ejecutivo puede editar la respuesta y redistribuir los cambios.
+
+#### 1.3.2 Manejo de bases entregadas por aliados
+
+1. El ejecutivo recibe la base entregada por el aliado.
+2. El ejecutivo sube la base y se realiza un pre-cruce con el algoritmo interno.
+3. El ejecutivo cruza manualmente todas las deudas que no cruzaron inicialmente por el algoritmo.
+4. El ejecutivo sube la información al Sheets de descuentos en base, donde se maneja la información principal.
 
 ### 1.4 Glosario de negocio
 
 | Término | Definición de negocio |
 |---|---|
-| Solicitud | Petición a los ejecutivos de realizar la intermediación con los aliados para conseguir un descuento y/o obtener un acuerdo de pago para liquidar alguna de las deudas del cliente |
-| Aliado / Casa de cobro | Casas de cobro que manejan las deudas de los clientes y con las cuales se tiene un contacto para conseguir descuento |
-| PaB | El monto a pagar por la deuda - Diferente al monto que se debe, ya que casi el 100% de las veces viene con un descuento |
-| PaB Ideal | El cupo aprobado desde el área de crédito para pagar la deuda. No lo tienen todos los clientes, es exclusivo de clientes con buen comportamiento |
-| PaB Propuesta | El PaB que se propone al aliado para pagar la deuda |
-| Descuento en Base | El aliado a veces nos cruza a inicio de mes los descuentos para todos los clientes por sus deudas. A estos descuentos se les conoce como descuentos en Base |
-| Contraoferta | Es realizar una nueva oferta de pago por alguna de las deudas del cliente por un valor menor al que llegó en base o que se respondió en la solicitud |
-| Acuerdo de pago | Un documento que sirve como verificación desde el aliado para poder realizar el pago y liquidar la deuda. Cuando se requiere este documento se sube una solicitud con este tipo. |
-| Validación | Una solicitud para averiguar el descuento por una o más deudas del cliente con el aliado. |
-| Oferta de acuerdo | Es una solicitud combinada entre el acuerdo de pago y la validación. Significa que si se llega al descuento mostrado, enviar directamente el acuerdo de pago, eliminando la necesidad de subir otra solicitud |
-| Addendum | A veces el cliente tiene deudas que no se tienen presentes. Estos son los addendums, y es importante recolectarlos ya que se vuelven una nueva oportunidad de ingreso que no se tenía prevista |
-| Portafolio | El grupo de deudas de un cliente |
-| Liquidación | El pago de la deuda para quedar a paz y salvo con el acreedor de la deuda |
-| Reasignación | Método del área para evitar conglomeración de buenos clientes, donde bajo ciertas reglas entre los asesores se pueden robar los clientes entre sí de modo que la mayoría de clientes liquiden al menos una deuda |
+| Solicitud | Petición a los ejecutivos para intermediar con los aliados, conseguir un descuento y/o obtener un acuerdo de pago para liquidar alguna de las deudas del cliente |
+| Aliado / Casa de cobro | Casa de cobro que maneja las deudas de los clientes y con la que se tiene contacto para conseguir un descuento |
+| Aliado formal / informal | Categoría operativa registrada en la hoja de aliados; la app no la usa para decisiones. Ver sección 1 |
+| PaB | Familia de valores de pago. No es un único campo: ver `PaB_Origen`, `PaB_Propuesta`, `PaB_PL`, `PaB_Portafolio` y `PaB_Ideal_Credito` |
+| `PaB_Origen` | Monto original de la deuda; es la “Deuda Bravo” que se usa como referencia para calcular descuentos |
+| `Monto_Actual` | Monto original de la deuda en la solicitud. En la práctica coincide con el valor de referencia de `PaB_Origen` |
+| `PaB_Propuesta` | Oferta de pago que entrega el aliado en su base (descuento en base). Es el valor que se compara contra `Monto_Propuesto` |
+| `Monto_Propuesto` | Monto de pago que propone el negociador en la solicitud para cada deuda |
+| PaB Ideal / `PaB_Ideal_Credito` | Cupo aprobado desde el área de crédito para pagar una deuda. No todos los clientes lo tienen; es exclusivo de clientes con buen comportamiento |
+| `PaB_PL` | PaB prometido al cliente en su Plan de Liquidación. En el código viene de `payment_to_bank`; si falta, se estima como `PaB_Origen * (1 - 0.15)` |
+| `PaB_Portafolio` | Monto de pago asociado al portafolio completo |
+| `Pricing` | Comisión de éxito (%) que cobra la empresa. En el código viene de `success_commission_percentage`; el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing` |
+| `Ahorro` | Ahorro con el que cuenta el cliente para pagar sus deudas (hoja de SALDOS) |
+| `Por Cobrar` | Monto que el cliente debe a la empresa (hoja TOTAL) |
+| `IVA` | Impuesto de Colombia: 19% |
+| Deuda Bravo | Nombre operativo del monto original de la deuda (`PaB_Origen`) |
+| Descuento en base | Descuento que el aliado cruza a inicio de mes para sus deudas. Se representa con `PaB_Propuesta` |
+| Descuento máximo | Puede referirse a dos cosas: (1) `Brindan Máx. Descuento` en la hoja de aliados, que indica que ya se analizó el máximo y pedir más suele ser rechazado; (2) `Max_Descuento_Otorgado` en una respuesta, que indica que no se puede contraofertar. La app solo advierte en el primer caso y fuerza el flag en `Bajo Comité` |
+| Contraoferta | Nueva oferta de pago por una deuda, menor al valor que llegó en base o al que se respondió en la solicitud |
+| Contrapropuesta máxima relativa | Porcentaje máximo que puede bajarse el pago respecto al valor en base. El código compara `1 - monto_solicitado / monto_en_base` contra este campo |
+| Acuerdo de pago | Documento de verificación del aliado para poder pagar y liquidar la deuda. Se solicita con una solicitud de este tipo |
+| Validación | Solicitud para averiguar el descuento de una o más deudas con el aliado |
+| Oferta de acuerdo | Solicitud combinada entre acuerdo de pago y validación: si se llega al descuento mostrado, se envía directamente el acuerdo de pago sin subir otra solicitud |
+| Addendum | Deuda nueva que el cliente tiene y no estaba en la solicitud original. Se adjunta a la solicitud existente como `Metadata_Solicitud["Addendums"]`; no genera una solicitud nueva |
+| Portafolio | Grupo de deudas de un cliente. Se usa `Distribuir Monto de Portafolio` cuando el aliado entrega un monto total y `Monto Individual de Portafolio` cuando cada deuda trae su propio monto |
+| Liquidación | Pago de la deuda para quedar a paz y salvo con el acreedor. `Liquidado Parcial` = algunas deudas de la respuesta están pagadas; `Liquidado Total` = todas |
+| Reasignación | Mecanismo para evitar la conglomeración de buenos clientes: bajo reglas, un negociador puede tomar un acuerdo vencido de otro para intentar liquidarlo |
+| Directo Base | Modo de búsqueda automática del aliado que cubre todas las deudas y ofrece la menor suma de `PaB_Propuesta`, considerando también solicitudes exitosas |
+| Solicitud espejo / sub-solicitud | Solicitud que comparte la misma respuesta automática (`Id_Respuesta_Autom`) o cuyas deudas son un subconjunto de otra solicitud; se actualiza cuando se distribuye una respuesta |
+| `Pago_Total_Obligatorio` | Si es verdadero, el pago debe aplicarse a todas las deudas de la respuesta. En `Bajo Comité` la UI lo fuerza a verdadero |
+| `Tradicional` | Tipo de pago único, sin cuotas |
+| `Estructurado` | Tipo de pago en cuotas |
+| `Refi` | Tipo de pago por refinanciación |
+| `Crédito` | Tipo de pago que usa el PaB Ideal aprobado por crédito |
+| `Pendientes_IdAutDeud` | Hoja interna donde se guardan los registros del cruce de cartera antes de subirlos a descuentos en base |
 
 ### 1.5 Reglas, excepciones y acuerdos con aliados
 
-- ¿Qué significa exactamente "descuento máximo" para un aliado?: Significa que para ciertos aliados ya se ha realizado un análisis con ellos acerca del descuento máximo, por ende no tiene sentido permitir una solicitud por un descuento mayor.
-- ¿Cuándo se exige pago total obligatorio?: Cuando el aliado lo requiera. Esta a modo de input dado que depende del aliado y del cliente.
-- ¿Qué aliados permiten cuotas y con qué plazos?: la info se encuentra establecida en el Sheets de `Aliados`.
-- ¿Qué bancos están bloqueados por aliado y por qué?: Se bloquean bancos por aliados para robustecer las solicitudes. Si ya sabemos que un aliado trabaja exclusivamente con un Banco X no tiene sentido permitir una solicitud de otro banco.
-- ¿Cuándo una solicitud se considera vencida, cancelada o reasignable?:
-  - *Vencida*: Hay dos criterios que son: Más de 15 días hábiles sin tocar la solicitud o después de marcarla como solicitada (se vuelve irreverente dado que como cambia el mes ya no se puede mantener la misma gestión).
-  - *Cancelada*: La solicitud aún no tiene gestión, pero por algún motivo el negociador quiere cancelarla, y se puede hacer, evitando carga operativa. Esto solo aplica para solicitudes sin responder y sin solicitar
-  - *Reasignable*: Por el momento significa que un acuerdo fue solicitado por un asesor pero no se ha refelejado el pago, por lo que otro asesor puede robar el acuerdo y pagarlo. Esto solo aplica cuando la fecha límite de pago del acuerdo se vence.
-- ¿Qué excepciones requieren aprobación de comité o de titular ilocalizable?: Depende del aliado, pero muchas veces bajo comité significa que se podría obtener el descuento pero el pago es obligatorio. El titular ilocalizable es para que el negociador informe cuando se puede localizar.
-- ¿Cómo se interpreta una contrapropuesta máxima relativa?: En pocas palabras llega un descuento en base por un aliado, y a ese aliado ya se le ha realizado un estudio donde se entiende que la contrapropuesta no puede pasar un X% por encima del que llego en base. Entonces esta solicitud no se debería aceptar teniendo en cuenta que ya se le realizó el estudio al aliado.
+- **“Descuento máximo” de un aliado:** para ciertos aliados ya se hizo un análisis del descuento máximo; no tiene sentido permitir una solicitud por un descuento mayor. En la práctica `Brindan Máx. Descuento` genera una advertencia, no un bloqueo duro.
+- **Pago total obligatorio:** se exige cuando el aliado lo requiera; es un input que depende del aliado y del cliente. Significa aplicar el pago a **todas las deudas** de la respuesta. En `Bajo Comité` el código fuerza `Pago_Total_Obligatorio = True`.
+- **Cuotas:** la información de qué aliados permiten cuotas y con qué plazos está en la hoja de aliados (`AlianzasVigentes`).
+- **Bancos bloqueados:** se bloquean bancos por aliado para robustecer las solicitudes. Si el aliado trabaja exclusivamente con un banco, no tiene sentido permitir otro. Si alguna deuda seleccionada tiene un banco no habilitado, el formulario **detiene el envío** y pide corregir la selección.
+- **Vencida:** se vence a los **15 días hábiles** desde la subida (`Timestamp`) o desde que se marca como `Solicitado` (`Fecha_Solicitado`). La automatización de `automations/` usa 15 días; la introducción del notebook menciona 30 y está desactualizada. `LIMITE_MEC` (día 5) define el mes operativo, aunque hay una migración en curso para dejar de requerirlo.
+- **Cancelada:** la solicitud aún no tiene gestión y el negociador que la subió decide cancelarla; solo aplica en `Sin Tocar`. La app valida que el correo del usuario sea el de la solicitud.
+- **Reasignable:** un acuerdo solicitado por un asesor cuyo pago no se ha reflejado puede ser tomado por otro negociador cuando vence la fecha límite de pago. Aplica a Acuerdos y Ofertas de Acuerdo no liquidados; excluye Validaciones. Cualquier negociador puede tomarlo.
+- **Aprobaciones de comité / titular ilocalizable:** `Estado_Comite` y `Estado_Titular_Ilocalizable` usan `1 = pendiente de aprobación`, `2 = rechazado`, `3 = aprobado pendiente de finalizar`. El **negociador** aprueba o rechaza con base en lo hablado con el cliente; si aprueba, la solicitud vuelve a la cola del ejecutivo para finalizarla. `Bajo Comité` suele implicar pago obligatorio y `Titular Ilocalizable` se usa para informar la situación de localización del titular.
+- **Contrapropuesta máxima relativa:** llega un descuento en base del aliado y ya se hizo un estudio de hasta qué porcentaje se puede mejorar. El código calcula `1 - monto_solicitado / monto_en_base` y **detiene el envío** si supera `Contrapropuesta_Maxima_Relativa`; aplica a Validación/Oferta y cuando el aliado se resolvió por `Directo Base`.
 
 ### 1.6 SLA y métricas
 
-- Tiempo de respuesta comprometido por aliado: Depende de lo establecido en el Sheets de `Aliados`.
-- Días hábiles / festivos aplicables: Colombia (`holidays` paquete, zona `America/Bogota`).
-- Métricas oficiales: #Solicitudes, #Solicitudes Exitosas, %Solicitudes Exitosas, #Deudas Liquidadas, #Clientes Liquidados, %Deudas Liquidadas, %Clientes Liquidados
-- Definición de "cumplimiento" y "efectividad": Cumplimiento hace referencia a los tiempos de respuesta, donde se satisface que lo estipulado en el Google Sheets se cumple. Efectividad se refiere a lo bueno que es un negociador con las solicitudes que son Exitosas, de modo que a más liquidaciones de esas solicitudes se es más efectivo.
+- **Tiempo de respuesta comprometido:** depende de lo establecido en la hoja de aliados (`AlianzasVigentes`).
+- **Días hábiles / festivos:** Colombia (`holidays`), zona `America/Bogota`.
+- **Métricas oficiales:** #Solicitudes, #Solicitudes Exitosas, %Solicitudes Exitosas, #Deudas Liquidadas, #Clientes Liquidados, %Deudas Liquidadas, %Clientes Liquidados.
+- **Fórmulas oficiales acordadas:**
+  - `%Solicitudes Exitosas = solicitudes exitosas / total de solicitudes`.
+  - `%Deudas Liquidadas = deudas liquidadas / deudas de solicitudes exitosas`.
+  - `%Clientes Liquidados = clientes con al menos una deuda liquidada / clientes con solicitud exitosa`.
+  - `Efectividad = solicitudes con al menos una deuda liquidada / solicitudes exitosas`.
+- **Cumplimiento:** satisfacción del tiempo de respuesta del aliado. Se excluyen `Vencida` y `Cancelada` porque no representan una respuesta efectiva; el código ya aplica esta exclusión en las métricas de SLA y en el promedio de tiempos de respuesta.
+- **Efectividad:** qué tan bueno es un negociador con las solicitudes exitosas; a más liquidaciones de esas solicitudes, mayor efectividad.
+- **Nota de implementación:** las fórmulas oficiales se definen sobre solicitudes exitosas. Algunas funciones de reporte todavía parten de todas las solicitudes para contar liquidaciones (`obtener_resumen_liquidaciones`, `obtener_tops_negociadores`) y podrían incluir No Exitosas o Validadas por Fuera. Revisar el filtro antes de usar esos números para decisiones o de cambiar su significado.
+- **Liquidaciones:** la hoja `Liquidaciones` la actualiza un área externa (finanzas/operaciones). Los soportes subidos en la app son evidencia y no cambian por sí solos el estado de liquidación.
 
 ### 1.7 Fuentes de verdad
 
 | Dato | Fuente actual | Dueño | Observaciones |
 |---|---|---|---|
-| Solicitudes | Google Sheets (`Solicitudes_MEC`) | Propio | Es muy importante no borrar información o escribir por éncima de, dado que esto es muy delicado |
+| Solicitudes | Google Sheets (`Solicitudes_MEC`) | Propio | Es muy importante no borrar información ni escribir por encima; es información delicada |
 | Cartera / deudas | Metabase + Google Sheets | MB de la Empresa | Solo hay permiso de lectura, no escritura |
-| Aliados y reglas | Google Sheets (`Aliados`) | Propio | Contiene la info relevante de los aliados con los que se trabaja |
-| Descuentos / masivas | Google Sheets (`Masivas`) | Propio | Lugar principal donde se registran los descuentos que llegan |
-| Liquidaciones | Google Sheets (`Liquidaciones`) | Sheets de la Empresa | Lugar donde se guarda toda la facturación histórica |
-| Acuerdos y soportes | Google Drive | Shared Drive | Lugar para guardar todos los PDFs que se han obtenido |
+| Aliados y reglas | Google Sheets (`AlianzasVigentes`, spreadsheet de Aliados) | Propio | Contiene la información relevante de los aliados y la categoría formal/informal, que la app no usa |
+| Descuentos / masivas | Google Sheets (`Bases mes actual 2024`, spreadsheet de Masivas) | Propio | Lugar principal donde se registran los descuentos que llegan; el nombre de la hoja es legado |
+| Pendientes de cruce | Google Sheets (`Pendientes_IdAutDeud`, spreadsheet de Configs) | Propio | Registros del cruce de cartera antes de subirlos a descuentos en base |
+| Liquidaciones | Google Sheets (`Liquidaciones`) | Sheets de la Empresa | Guarda la facturación histórica; la actualiza un área externa |
+| Acuerdos y soportes | Google Drive | Shared Drive | Guarda los PDFs de acuerdos y soportes de pago |
+| Archivos subidos | Google Sheets (`Archivos_Subidos`) + Drive | Propio | Evidencia de acuerdos firmados y soportes de pago |
 
 ---
 
@@ -289,12 +326,18 @@ La fuente de verdad de permisos es `core/permissions.py`.
 
 ### 6.2 PaB y comparación de descuentos
 
-- `PaB_Origen`: monto original / deuda Bravo.
-- `PaB_Propuesta`: valor de pago propuesto en la base de masivas.
-- `PaB_Ideal_Credito`: valor ideal para pago con crédito.
+- `PaB_Origen`: monto original de la deuda / “Deuda Bravo”. Es la referencia para calcular descuentos.
+- `Monto_Actual`: monto original de la deuda en la solicitud; en la práctica coincide con `PaB_Origen`.
+- `PaB_Propuesta`: oferta de pago que entrega el aliado en su base (descuento en base).
+- `Monto_Propuesto`: monto de pago que propone el negociador para cada deuda.
+- `PaB_Ideal_Credito`: cupo aprobado desde crédito para pagar la deuda; no todos los clientes lo tienen.
+- `PaB_PL`: PaB prometido al cliente en su Plan de Liquidación (`payment_to_bank`). Si falta, se estima como `PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)`.
 - `PaB_Portafolio`: valor de pago del portafolio completo.
 - `PaB_Liq`: valor pagado al banco en una liquidación.
-- Para cada deuda y aliado se elige el **menor `PaB_Propuesta`** como mejor descuento.
+- `Pricing`: comisión de éxito (%) que cobra la empresa (`success_commission_percentage`); el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing`.
+- `Ahorro`: ahorro del cliente para pagar sus deudas (hoja de SALDOS).
+- `Por Cobrar`: monto que el cliente debe a la empresa (hoja TOTAL).
+- Para cada deuda y aliado se elige el **menor `PaB_Propuesta`** como mejor descuento. Si hay varios registros de la misma deuda/aliado, gana el menor monto; el orden de carga no define la prioridad.
 - Los IDs de deuda se normalizan a string y se elimina el sufijo `.0` proveniente de Sheets.
 - Semáforo de comparación (`obtener_color_comparacion`):
   - Verde: `valor <= valor_solicitado`.
@@ -323,9 +366,21 @@ La fuente de verdad de permisos es `core/permissions.py`.
 
   Se limita entre `0.15` y `1`. Si falta el PaB Ideal de alguna deuda, retorna `1` (no viable).
 
+- `descuento_pl` se calcula como `1 - pago_pl / pago_original`, donde `pago_pl` es la suma de `PaB_PL`.
 - `IVA = 1.19` y `DEFAULT_DISCOUNT_PL = 0.15` están en `modules/constants.py`.
+- Si los dos descuentos empatan, el tipo elegido es `Tradicional` porque la comparación usa `<=`.
+
+Tipos de pago (`Tipo_Pago`):
+
+- `Tradicional`: pago único sin cuotas.
+- `Estructurado`: pago en cuotas.
+- `Refi`: refinanciación.
+- `Crédito`: pago con el PaB Ideal aprobado por crédito.
+- En el formulario, si hay cuotas (>1) se ofrecen `Estructurado` y `Refi`; si no hay cuotas, `Tradicional` y `Crédito`. `obtener_descuento_optimo` sugiere `Tradicional` o `Crédito` y elige el menor descuento.
 
 ### 6.4 Distribución de un monto entre deudas
+
+El formulario inicializa el monto total en **70% de la suma de `PaB_Origen`**. Es un valor por defecto editable, no una regla de negocio obligatoria.
 
 `distribuir_monto_por_deuda` en `modules/gest_sols.py`:
 
@@ -345,6 +400,13 @@ Constantes relevantes:
 - `DISTRIBUCION_MAE_MAXIMO = 0.01`
 - `DISTRIBUCION_MRE_MAXIMO = 0.10`
 
+Modos de portafolio:
+
+- `Distribuir Monto de Portafolio`: se usa cuando el aliado entrega un **monto total** por el portafolio; el monto se reparte entre las deudas según su participación.
+- `Monto Individual de Portafolio`: se usa cuando **cada deuda trae su propio monto** en la base; el monto del portafolio es la suma de los pagos individuales.
+- La elección depende de cómo venga la base del aliado, no de una regla fija distinta.
+- `Directo Base` resuelve el aliado automáticamente: busca aliados que cubran todas las deudas en masivas o solicitudes exitosas y elige el de menor suma de `PaB_Propuesta`.
+
 Invariantes que los tests protegen:
 
 - La suma de los montos distribuidos es igual al monto total.
@@ -352,7 +414,7 @@ Invariantes que los tests protegen:
 - Las deudas con peso positivo no se extinguen si existe una granularidad válida.
 - El orden de desempate de Hamilton prioriza mayor residuo, luego mayor peso, luego orden original.
 
-### 6.5 Días hábiles y tiempos de respuesta
+### 6.5 Días hábiles, vencimiento y tiempos de respuesta
 
 - Se usa el calendario de **Colombia** (`holidays`) y la zona `America/Bogota`.
 - `getBDDaysDiffFloat` calcula días hábiles con fracción de día.
@@ -364,6 +426,8 @@ Invariantes que los tests protegen:
   - Si no se puede parsear o está vacío → `72` horas (`TIEMPOS_RESPUESTA_DEFAULT`).
 - `Aliado.obtener_tr_dias()` usa `horas // 24`; para 1 semana son 5 días.
 - La fecha límite de respuesta se guarda en `Metadata_Solicitud["Fecha_Limite_Respuesta"]`; si no existe, se recalcula con el tiempo del aliado y el `Timestamp` de la solicitud.
+- Una solicitud se vence a los **15 días hábiles** desde `Timestamp` o desde `Fecha_Solicitado`, según la automatización de `automations/Vencimiento_Automatico_Solicitudes.ipynb`. La introducción de ese notebook menciona 30 días; el código usa 15 y es la referencia vigente.
+- `LIMITE_MEC` (día 5) define el mes operativo actual. Hay una migración en curso para dejar de requerir ese corte.
 
 ### 6.6 Estados de solicitud
 
@@ -371,7 +435,7 @@ Estados en `modules/constants.py` (`ESTADOS_POSIBLES_SOLICITUD`):
 
 - `Sin Tocar`: aún no gestionada.
 - `Solicitado`: escalada al aliado.
-- `Exitosa`: respondida con éxito.
+- `Exitosa`: respondida con éxito. Se marca cuando se consiguió **cualquier descuento**, no necesariamente el monto solicitado.
 - `No Exitosa`: respondida sin éxito.
 - `Vencida`: no gestionada en el plazo.
 - `Erronea`: datos incorrectos o incompletos.
@@ -381,12 +445,29 @@ Estados en `modules/constants.py` (`ESTADOS_POSIBLES_SOLICITUD`):
 - `Validada por Fuera`: pago/validación por fuera.
 - `Cancelada`: cancelada por el negociador antes de gestionarse.
 
+Aprobaciones transitorias:
+
+| Estado | Valor | Significado | Siguiente paso |
+|---|---|---|---|
+| `Bajo Comité` | `Estado_Comite = 1` | Pendiente de aprobación | El negociador aprueba o rechaza |
+| `Bajo Comité` | `Estado_Comite = 2` | Rechazado | No vuelve a la cola de respuesta |
+| `Bajo Comité` | `Estado_Comite = 3` | Aprobado pendiente de finalizar | Vuelve al ejecutivo para finalizar la respuesta |
+| `Titular Ilocalizable` | `Estado_Titular_Ilocalizable = 1` | Pendiente de aprobación | El negociador aprueba o rechaza |
+| `Titular Ilocalizable` | `Estado_Titular_Ilocalizable = 2` | Rechazado | No vuelve a la cola de respuesta |
+| `Titular Ilocalizable` | `Estado_Titular_Ilocalizable = 3` | Aprobado pendiente de finalizar | Vuelve al ejecutivo para finalizar la respuesta |
+
+La UI de aprobación se muestra en la vista de solicitudes. `actualizar_aprobacion_necesaria` no valida el rol por sí misma; la restricción efectiva depende de la vista y del permiso del usuario.
+
 Reglas clave:
 
 - Una solicitud es "sin responder" si está `Sin Tocar`, `Solicitado`, `Bajo Comité` con `Estado_Comite == 3`, o `Titular Ilocalizable` con `Estado_Titular_Ilocalizable == 3`; además debe ser actual y no estar baneada.
 - Una solicitud requiere aprobación si está `Bajo Comité` con `Estado_Comite == 1`, o `Titular Ilocalizable` con `Estado_Titular_Ilocalizable == 1`.
-- Un acuerdo es reasignable si es `Exitosa`, no es `Validación`, no es histórico, no está liquidado y su `Fecha_Limite_Pago` ya pasó.
-- La liquidación se determina comparando los `Id_Deuda` de `JSON_Respuesta` contra el set de `load_liquidaciones()`.
+- En `Bajo Comité` la UI fuerza `Pago_Total_Obligatorio = True` y `Max_Descuento_Otorgado = True`; el flujo de aprobación lo maneja el negociador desde la vista de solicitudes.
+- Un acuerdo es reasignable si es `Exitosa`, no es `Validación`, no es histórico, no está liquidado y su `Fecha_Limite_Pago` ya pasó. Cualquier negociador puede tomarlo.
+- `Vencida` y `Cancelada` no cuentan como respuestas efectivas para SLA ni para el promedio de tiempos de respuesta. La exclusión vive en `ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA` (`modules/gest_sols.py`).
+- La liquidación se determina comparando los `Id_Deuda` de `JSON_Respuesta` contra el set de `load_liquidaciones()`. `Liquidado Parcial` significa que algunas de las deudas de la respuesta están pagadas; `Liquidado Total`, que todas.
+- `Liquidaciones` es una hoja externa actualizada por finanzas/operaciones. Los soportes de pago subidos en la app son evidencia documental y no cambian el estado por sí solos.
+- Una respuesta exitosa se propaga a solicitudes espejo mediante `Metadata_Solicitud["Id_Respuesta_Autom"]`; una validación exitosa sin `Pago_Total_Obligatorio` también actualiza sub-solicitudes con subconjuntos de deudas. El ejecutivo puede editar la respuesta y redistribuir los cambios.
 
 ### 6.7 Cruce de deudas (`id_aut_deud`)
 
@@ -397,7 +478,7 @@ Etiquetas:
 - `EXACTO`: un único candidato tras aplicar todas las acotaciones.
 - `DUPLICADO`: dos o más registros reclaman el mismo `Id_Deuda`, o hay múltiples candidatos con número de crédito.
 - `AMBIGUO`: hay candidatos por banco, monto o casa de cobro, pero no por número de crédito.
-- `ADDENDUM`: el cliente coincide, pero no hay datos de deuda que permitan acotar.
+- `ADDENDUM`: el cliente coincide, pero no hay datos de deuda que permitan acotar. En la operación se trata como una deuda nueva que se adjunta a la solicitud existente (`Metadata_Solicitud["Addendums"]`), no como una solicitud separada.
 - `NULO`: no hay coincidencia con cédula o nombre.
 
 Orden de acotación:
@@ -420,7 +501,7 @@ Portafolios:
 - `distribuir_montos_portafolio`: reparte el pago de un portafolio entre sus deudas según `Monto_Actual` de cada deuda.
 - `agrupar_montos_portafolio`: operación inversa; suma los pagos individuales para obtener el monto del portafolio.
 - Si el grupo está incompleto (falta `Id_Definitivo`, falta monto o no hay todos los datos), no se distribuye/agrupa para no guardar montos incompletos.
-- Los `ADDENDUM` no se suben a la base del mes.
+- En `preparar_datos_base_mes` los `ADDENDUM` no se suben como deuda nueva a la base del mes; se registran aparte con `upload_massive_addendums` en masivas.
 - Si el cruce se hizo solo por nombre y la base no trae cédula, `build_pendiente_cruce_df` guarda `Cedula` como cadena vacía para que `PendienteCruceSchema` pueda validar la fila. El cargador también normaliza cédulas vacías a `''`.
 
 ---
@@ -429,8 +510,8 @@ Portafolios:
 
 | Archivo | Qué cubre |
 |---|---|
-| `tests/test_calculos.py` | Limpieza y formato de números, días hábiles, aliados y tiempos de respuesta, descuentos, comparación de descuentos, distribución de montos, descuento óptimo, validación de base y normalización de bancos. |
-| `tests/test_reglas_solicitud.py` | Máscaras de solicitudes, aprobaciones, comités, valores bajo comité, liquidaciones, fechas límite, métricas de cumplimiento, promedios, tops de negociadores y resúmenes. |
+| `tests/test_calculos.py` | Limpieza y formato de números, días hábiles, aliados y tiempos de respuesta, descuentos, comparación de descuentos, distribución de montos, descuento óptimo, validación de base, normalización de bancos y bloqueo de bancos en el formulario. |
+| `tests/test_reglas_solicitud.py` | Máscaras de solicitudes, aprobaciones, comités, valores bajo comité, liquidaciones, fechas límite, métricas de cumplimiento, promedios, tops de negociadores y resúmenes. Incluye la exclusión de `Vencida` y `Cancelada` de las métricas de SLA/tiempo de respuesta. |
 | `tests/test_cruce_deudas.py` | Limpieza de cédula/nombre/crédito/banco, etiquetas del matcher, pagos a cuotas, estados de cruce, distribución y agrupación de portafolios, y validación de `build_pendiente_cruce_df` (incluido el cruce por nombre sin cédula). |
 | `tests/test_archivos.py` | Nombres de archivos, metadata de PDFs, esquema de archivos subidos y soportes por deuda. |
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
@@ -480,6 +561,14 @@ Portafolios:
 6. **`co_holidays` se construye con el año actual al importar `utils/helpers_general`.** Los tests usan 2026; si ejecutas en otro año, los festivos de 2026 podrían no estar contemplados en cálculos que crucen años.
 7. **Los textos de negocio usan tildes.** Al comparar estados como `Bajo Comité` o `Validación`, usa el literal exacto. Un `?` o una tilde distinta cambia la máscara.
 8. **Los workflows de GitHub Actions** (`automations/`) ejecutan notebooks con `nbconvert` y credenciales en secrets. No los ejecutes localmente sin revisar qué celdas escriben en Sheets.
+9. **SLA y estados de cierre.** `Vencida` y `Cancelada` se excluyen de SLA y del promedio de respuesta en `ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA`. Si se agrega un estado que tampoco sea una respuesta efectiva, actualiza esa constante y sus tests.
+10. **`LIMITE_MEC` está en migración.** El día 5 todavía define el mes operativo, pero el negocio está migrando a no requerir ese corte. No lo elimines sin revisar `getMesOperativo`, `load_solicitudes_mec` y los reportes.
+11. **Los soportes de pago no liquidan por sí solos.** La fuente de `Estado_Liquidacion` es la hoja externa `Liquidaciones`; los archivos en Drive/`Archivos_Subidos` son evidencia.
+12. **`Addendum` no es una solicitud separada.** Se adjunta a `Metadata_Solicitud["Addendums"]` y se incluye en el acuerdo/respuesta. `ADDENDUM` en el cruce solo indica que el cliente coincide pero la deuda no se pudo acotar.
+13. **`Brindan Máx. Descuento` no bloquea.** La app advierte; el bloqueo duro no está implementado. Si negocio quiere bloquear, hay que cambiar formulario y tests.
+14. **`Pago_Total_Obligatorio` se fuerza en `Bajo Comité`.** La UI lo pone en `True` y deshabilita el toggle; no es una elección libre en ese estado.
+15. **Bloqueos duros del formulario.** El envío se detiene si hay bancos no habilitados o si se excede la contrapropuesta máxima relativa. `Brindan Máx. Descuento` sigue siendo solo una advertencia.
+16. **Conteo de liquidaciones en reportes.** Las fórmulas oficiales se definen sobre solicitudes exitosas, pero `obtener_resumen_liquidaciones` y `obtener_tops_negociadores` todavía pueden contar liquidaciones de solicitudes No Exitosas o Validadas por Fuera. Revisa el filtro antes de usar esos números en decisiones.
 
 ---
 
@@ -493,3 +582,4 @@ Portafolios:
 - [ ] ¿No agregaste secretos, tokens ni IDs sensibles al repositorio?
 - [ ] ¿Mantuviste el estilo de comentarios y nombres del proyecto?
 - [ ] ¿Revisaste el impacto en las vistas que consumen la función modificada?
+- [ ] ¿Si cambiaste reglas de estado/SLA, actualizaste las constantes, los tests y este documento?

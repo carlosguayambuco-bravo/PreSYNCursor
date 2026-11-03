@@ -463,6 +463,44 @@ class TestMetricasSolicitudes(unittest.TestCase):
         self.assertEqual(resultado["peores_aliados"][0]["casa_cobro"], "Aliado A")
         self.assertEqual(resultado["max_solicitudes_aliado"], 2)
 
+    def test_sla_excluye_vencidas_y_canceladas(self):
+        df = pd.concat([
+            self._df_metricas(),
+            pd.DataFrame([
+                {
+                    "ID_Solicitud": "5",
+                    "Estado_Solicitud": "Vencida",
+                    "Es_Historico": False,
+                    "Metadata_Solicitud": {"Fecha_Limite_Respuesta": pd.Timestamp("2026-09-09")},
+                    "Casa_Cobro": "Aliado A",
+                    "Fecha_Respuesta": pd.Timestamp("2026-09-09"),
+                    "Tipo_Solicitud": "Acuerdo de Pago",
+                },
+                {
+                    "ID_Solicitud": "6",
+                    "Estado_Solicitud": "Cancelada",
+                    "Es_Historico": False,
+                    "Metadata_Solicitud": {"Fecha_Limite_Respuesta": pd.Timestamp("2026-09-09")},
+                    "Casa_Cobro": "Aliado A",
+                    "Fecha_Respuesta": pd.Timestamp("2026-09-09"),
+                    "Tipo_Solicitud": "Acuerdo de Pago",
+                },
+            ]),
+        ], ignore_index=True)
+        aliados = {
+            "Aliado A": _aliado("Aliado A", horas=48),
+            "Aliado B": _aliado("Aliado B", horas=24),
+        }
+        resultado = obtener_metricas_cumplimiento_tiempos_respuesta(
+            solicitudes_df=df,
+            aliados_dict=aliados,
+            top_n=2,
+            min_solicitudes=1,
+        )
+        self.assertEqual(resultado["total_respondidas"], 3)
+        self.assertEqual(resultado["total_cumplidas"], 2)
+        self.assertEqual(resultado["cumplimiento_general"], 66.67)
+
     def test_minimo_de_solicitudes_filtra_el_top(self):
         aliados = {
             "Aliado A": _aliado("Aliado A", horas=48),
@@ -490,16 +528,31 @@ class TestMetricasSolicitudes(unittest.TestCase):
                 "Timestamp": pd.Timestamp("2026-09-07"),
                 "Fecha_Respuesta": pd.Timestamp("2026-09-09"),
                 "Tipo_Solicitud": "A",
+                "Estado_Solicitud": "Exitosa",
             },
             {
                 "Timestamp": pd.Timestamp("2026-09-07"),
                 "Fecha_Respuesta": pd.Timestamp("2026-09-08"),
                 "Tipo_Solicitud": "A",
+                "Estado_Solicitud": "No Exitosa",
             },
             {
                 "Timestamp": pd.Timestamp("2026-09-07"),
                 "Fecha_Respuesta": pd.NaT,
                 "Tipo_Solicitud": "B",
+                "Estado_Solicitud": "Sin Tocar",
+            },
+            {
+                "Timestamp": pd.Timestamp("2026-09-07"),
+                "Fecha_Respuesta": pd.Timestamp("2026-09-30"),
+                "Tipo_Solicitud": "A",
+                "Estado_Solicitud": "Vencida",
+            },
+            {
+                "Timestamp": pd.Timestamp("2026-09-07"),
+                "Fecha_Respuesta": pd.Timestamp("2026-09-30"),
+                "Tipo_Solicitud": "A",
+                "Estado_Solicitud": "Cancelada",
             },
         ])
         resultado = obtener_promedio_tiempos_respuesta(df)
