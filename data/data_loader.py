@@ -1813,7 +1813,7 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
 
     # Paso 1: Obtener los Datos de la Consulta SQL para Obtener la Última Actualización
     try:
-        query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids), email=user_email)
+        query = QUERY_LAST_UPDATE.format(debt_ids=','.join(debt_ids))
 
         # Paso 2: Obtener la Última Actualización desde Metabase
         ultima_actualizacion_df = execute_query_cache(query, dbId=12)
@@ -1822,9 +1822,12 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
         if ultima_actualizacion_df.empty and ultima_actualizacion_df.columns.empty:
             return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)
 
+        # Filtramos por email == user_email
+        ultima_actualizacion_df = ultima_actualizacion_df[ultima_actualizacion_df['email'] == user_email]
+
         # Si No Hay Registros, No Existe Actualización en el Último Mes
         if ultima_actualizacion_df.empty:
-            return None
+            return None 
 
         # Paso 3: -- Limpieza de Datos --
         # Volvemos la Columna Ultima_Actualizacion a Timestamp (Quitando Zona Horaria)

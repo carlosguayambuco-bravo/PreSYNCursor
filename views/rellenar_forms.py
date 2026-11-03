@@ -229,7 +229,7 @@ st.subheader("Selección de Deudas Activas")
 
 # Ordenamos las Deudas por Banco y Monto_Actual de forma ascendente|descendente
 deudas_activas_df = deudas_activas_df.sort_values(
-    by = ['Banco','Monto_Actual'],
+    by = ['Banco','PaB_Origen'],
     ascending = [True,False]
 )
 
