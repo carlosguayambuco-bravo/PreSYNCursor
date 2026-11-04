@@ -74,6 +74,7 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | PaB Ideal / `PaB_Ideal_Credito` | Cupo aprobado desde el área de crédito para pagar una deuda. No todos los clientes lo tienen; es exclusivo de clientes con buen comportamiento |
 | `PaB_PL` | PaB prometido al cliente en su Plan de Liquidación. En el código viene de `payment_to_bank`; si falta, se estima como `PaB_Origen * (1 - 0.15)` |
 | `PaB_Portafolio` | Monto de pago asociado al portafolio completo |
+| `Apartado_Neto` | El Ahorro que hace el cliente mes a mes |
 | `Pricing` | Comisión de éxito (%) que cobra la empresa. En el código viene de `success_commission_percentage`; el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing` |
 | `Ahorro` | Ahorro con el que cuenta el cliente para pagar sus deudas (hoja de SALDOS) |
 | `Por Cobrar` | Monto que el cliente debe a la empresa (hoja TOTAL) |
