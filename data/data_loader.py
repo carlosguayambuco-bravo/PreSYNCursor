@@ -13,12 +13,13 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
-from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage
+from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage, mesesDict
 from utils.helpers_sheets import _retry
 
 # Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
@@ -1579,6 +1580,185 @@ def load_data_archivos_subidos() -> DataFrame[ArchivosSubidosSchema]:
 
     # Paso 8: Validar el Esquema
     return ArchivosSubidosSchema.validate(archivos_df, lazy=True)
+
+# --- Carga de la Asignación de Cartera del Mes en Curso ---
+## Funciones Auxiliares
+def obtener_prioridad_archivo(file_name: str):
+    # Verificamos que sea un excel
+    if not file_name.endswith('.xlsx'):
+        return 0
+
+    # 1. Obtener el Mes y el Año (String)
+    raw_month_year = file_name.split('-')[-1]
+    # 2. Separar el mes y el Año
+    month = raw_month_year[:3].lower()
+    year = raw_month_year[3:5]
+    # 3. Convertir los datos en Número
+    month_num = next((m_num for m_num in mesesDict if month in mesesDict[m_num].lower()),1)
+    year_num = int(year) + 2000
+    # 4. Devolver la Prioridad year_num * 13 + month_num
+    return year_num * 13 + month_num
+
+def obtener_prioridad_hoja(sheet_name: str) -> tuple[int,int,int]:
+    try:
+        # 1. Obtener el Mes y el Año
+        month_name, year = sheet_name.split()
+        # 2. Convertir los datos a Números
+        month_num = next((m_num for m_num in mesesDict if month_name.lower() in mesesDict[m_num].lower()),1)
+        year_num = int(year)
+        # 3. Devolver la Prioridad year_num * 13 + month_num
+        return year_num * 13 + month_num, year_num, month_num
+    except:
+        return 0, 0, 0
+
+def _cargar_datos_archivo(file_id: str, required_dfs: int = 1) -> list[pd.DataFrame]:
+    # Traemos el Servicio de Google Drive desde el Session State
+    driveService: GoogleDriveService = st.session_state["google_drive_service"]
+    bytes_io_file = driveService.obtain_file(file_id)
+
+    all_dfs = pd.read_excel(bytes_io_file, sheet_name=None, engine='calamine')
+
+    sheet_priorities = [(sheet_name, obtener_prioridad_hoja(sheet_name)[0]) for sheet_name in all_dfs]
+    sheet_priorities.sort(key=lambda x: x[1], reverse=True)
+
+    read_dfs = []
+    for sh_name, _ in sheet_priorities:
+        _, year, month = obtener_prioridad_hoja(sh_name)
+        if all_dfs[sh_name].empty or year == 0:
+            continue
+
+        if len(read_dfs) >= required_dfs:
+            break
+
+        df_sheet = all_dfs[sh_name].copy()
+        df_sheet['Fecha_Cartera'] = pd.Timestamp(year=year, month=month, day=1)
+        read_dfs.append(df_sheet)
+
+    return read_dfs
+
+# Función Auxiliar para Obtener el DataFrame de Asignación desde Google Drive
+def _obtener_df_asignacion() -> pd.DataFrame:
+    # Paso 1: Obtener el Servicio de Google Drive
+    driveService: GoogleDriveService = st.session_state["google_drive_service"]
+
+    # Paso 2: Obtener la Lista de Archivos en la Carpeta de Asignación
+    files_list = driveService.list_folder_contents(
+        st.secrets["google_drive"]["folder_asignaciones"]
+    )
+
+    # Paso 3: Filtrar los Archivos Excel y Ordenarlos por Prioridad
+    excel_files = [
+        (file['id'], file['name'], obtener_prioridad_archivo(file['name']))
+        for file in files_list if file['name'].endswith('.xlsx')
+    ]
+    excel_files.sort(key=lambda x: x[2], reverse=True)
+
+    # Paso 4: Intentar Cargar los Datos del Archivo con Mayor Prioridad
+    for file_id, file_name, _ in excel_files:
+        try:
+            dfs = _cargar_datos_archivo(file_id, required_dfs=1)
+            if dfs:
+                return dfs[0]
+        except Exception as e:
+            st.warning(f"Error al cargar el archivo '{file_name}': {e}")
+
+    # Si no se pudo cargar ningún archivo, devolvemos un DataFrame vacío
+    return pd.DataFrame()
+
+def _imputar_pab_pl(asignacion_df: pd.DataFrame, maskNanPL: pd.Series, maskZeroOrigen: pd.Series) -> pd.DataFrame:
+    # Para esto agrupamos quitando sin PL por Banco y calculamos el Descuento Promedio
+    # Luego aplicamos ese descuento a los NaNs
+    # Paso 1: Aplicar la Agrupación quitando sin PL y con Origen = 0
+    plImputer = asignacion_df[~(maskNanPL | maskZeroOrigen)].groupby('Banco')[['PaB_Origen','PaB_PL']].sum().reset_index()
+    # Paso 2: Calcular el Descuento Promedio
+    plImputer['Desc'] = 1 - (plImputer['PaB_PL']/plImputer['PaB_Origen'])
+    # Paso 3: Convertir el Resultado a un Diccionario
+    plImputer = dict(zip(plImputer['Banco'], plImputer['Desc']))
+    # Paso 4: Convertir a defaultdict con 0.3
+    plImputer = defaultdict(lambda: 0.3, plImputer)
+    # Paso 4: Aplicar la Imputación
+    asignacion_df.loc[maskNanPL, 'PaB_PL'] = asignacion_df.loc[maskNanPL, 'PaB_Origen'] * (1 - asignacion_df.loc[maskNanPL,'Banco'].map(plImputer))
+    asignacion_df.loc[maskNanPL, 'Descuento_PL'] = asignacion_df.loc[maskNanPL,'Banco'].map(plImputer)
+
+    return asignacion_df
+
+# Función Auxiliar para Limpiar y Validar el DataFrame de Asignación
+def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionSchema]:
+    # Paso 1: Limpiar las Columnas del DataFrame
+    for col, possibleVals in COL_MAPPER_ASIGNACION.items():
+        asignacion_df[col] = cleanCols(asignacion_df, col, possibleVals)
+
+    # Paso 2: Formateo de Datos
+    # Volvemos Referencia e Id_Deuda a String
+    for col in ['Referencia', 'Id_Deuda']:
+        asignacion_df[col] = asignacion_df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+    
+    # Cargamos los Cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    asignacion_df['Referencia'] = asignacion_df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
+    # Volvemos las Columnas Necesarias a Númerico
+    for col in [
+        'PaB_Origen', 'PaB_PL','Pricing','Meses_en_Programa','Mora_Deuda',
+        'Apartado_Mensual','Comision_Mensual','Descuento_Esperado','Meses_Sin_Contacto'
+    ]:
+        asignacion_df[col] = pd.to_numeric(asignacion_df[col], errors='coerce')
+        # Imputamos con 0 si no es PaB_PL o Pricing o Meses_Sin_Contacto
+        if col not in ['PaB_PL','Pricing','Meses_Sin_Contacto']:
+            imputeNans(asignacion_df, col=col, value=0)
+
+    # Imputamos Pricing con 0.15
+    imputeNans(asignacion_df, col='Pricing', value=0.15)
+    # Imputamos Meses_Sin_Contacto con 6
+    imputeNans(asignacion_df, col='Meses_Sin_Contacto', value=6)
+
+    # Creamos la Columna de Descuento_PL como: 1 - (PaB_PL / PaB_Origen); Si el PaB_Origen es 0, se imputa con 1
+    # Inicializamos Descuento_PL con 1
+    asignacion_df['Descuento_PL'] = 1 - (asignacion_df['PaB_PL'] / asignacion_df['PaB_Origen'])
+    maskZeroOrigen = (asignacion_df['PaB_Origen'] == 0)
+    asignacion_df.loc[maskZeroOrigen, 'Descuento_PL'] = 1
+    maskNanPL = asignacion_df['PaB_PL'].isna()
+    asignacion_df.loc[maskNanPL, 'Descuento_PL'] = np.nan
+
+    # Imputamos PaB_PL
+    asignacion_df = _imputar_pab_pl(asignacion_df, maskNanPL=maskNanPL, maskZeroOrigen=maskZeroOrigen)
+
+    # Al Nommbre del Cliente aplicamos .title() si no es NaN
+    asignacion_df['Nombre_Cliente'] = asignacion_df['Nombre_Cliente'].apply(lambda s: s.title() if pd.notna(s) else "")
+
+    # Mappeamos Mora_Estructurado y Mora_Credito
+    asignacion_df['Mora_Estructurado'] = asignacion_df['Mora_Estructurado'].apply(lambda x: MAP_MORA_ESTRUCTURADO.get(x, 0))
+    asignacion_df['Mora_Credito'] = asignacion_df['Mora_Credito'].apply(lambda x: MAP_MORA_CREDITO.get(x, 0))
+
+    # Calculamos Columna Ingreso_Esperado como: PaB_Origen * Descuento_Esperado * Pricing # Sin IVA con Mínimo de 0
+    asignacion_df['Ingreso_Esperado'] = (asignacion_df['PaB_Origen'] * asignacion_df['Descuento_Esperado'] * asignacion_df['Pricing']).clip(lower=0)
+
+    # Creamos la Columna Apartado_Neto como Apartado_Mensual - Comision_Mensual con Mínimo de 0
+    asignacion_df['Apartado_Neto'] = (asignacion_df['Apartado_Mensual'] - asignacion_df['Comision_Mensual']).clip(lower=0)
+    # Eliminamos las Columnas de Comision_Mensual, PaB_PL y Apartado_Mensual (ya no son necesarias)
+    asignacion_df = asignacion_df.drop(columns=['Comision_Mensual', 'PaB_PL', 'Apartado_Mensual'])
+
+    # Volvemos Meses_en_Programa, Meses_Sin_Contacto y Mora_Deuda a int
+    for col in ['Meses_en_Programa', 'Meses_Sin_Contacto', 'Mora_Deuda']:
+        asignacion_df[col] = asignacion_df[col].astype(int)
+
+    # Imputamos Negociador con "Sin Negociador Asignado"
+    imputeNans(asignacion_df, col='Negociador', value="Sin Negociador Asignado")
+
+    # Por último, validamos el esquema
+    return AsignacionSchema.validate(asignacion_df, lazy=True)
+
+# Función Principal para Cargar la Asignación de Cartera desde Google Drive
+@st.cache_data(show_spinner="Cargando Asignación de Cartera...", ttl=3*DAY_WAIT, show_time=True)
+def load_asignacion_cartera() -> DataFrame[AsignacionSchema]:
+    # Paso 1: Obtener el DataFrame de Asignación desde Google Drive
+    asignacion_df = _obtener_df_asignacion()
+
+    # Paso 2: Limpiar y Validar el DataFrame
+    asignacion_df = _limpiar_df_asignacion(asignacion_df)
+
+    # Paso 3: Devolver el DF Limpio y Validado
+    return asignacion_df
 
 # --- Queries a MetaBase ---
 

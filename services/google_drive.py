@@ -55,6 +55,29 @@ class GoogleDriveService:
         """Escapa un valor para usarlo dentro de una consulta de Google Drive."""
         return str(value).replace("\\", "\\\\").replace("'", "\\'")
 
+    def obtain_file(self, file_id: str) -> Optional[BytesIO]:
+        """
+        Obtiene un archivo de Google Drive.
+
+        Args:
+            file_id (str): ID del archivo en Google Drive.
+
+        Returns:
+            Optional[BytesIO]: Contenido del archivo en BytesIO, o None si ocurrió un error.
+        """
+        try:
+            request = self.service.files().get_media(fileId=file_id, supportsAllDrives=True)
+            file_bytes = BytesIO()
+            downloader = MediaIoBaseUpload(file_bytes, mimetype='application/octet-stream', resumable=True)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return file_bytes
+        except Exception as e:
+            print(f"Error al obtener el archivo de Google Drive: {e}")
+            st.error(f"Error al obtener el archivo de Google Drive: {e}", icon="❌")
+            return None
+
     def find_folder(self, *, folder_name: str, parent_id: str) -> Optional[str]:
         """
         Busca una carpeta por nombre dentro de un padre específico.

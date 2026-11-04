@@ -413,3 +413,25 @@ class LiquidationsSchema(pa.DataFrameModel):
     Tipo_Liq: str = pa.Field(isin=['Tradicional','Credito'])
     Fecha_Liq: pa.dtypes.Timestamp
     Periodo_Liq: pa.dtypes.Timestamp
+
+class AsignacionSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de asignación de Cartera
+    """
+    Referencia: str
+    Nombre_Cliente: str
+    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    PaB_Origen: float
+    Negociador: str
+    Descuento_Esperado: float
+    Ingreso_Esperado: float
+    Apartado_Neto: float
+    Pricing: float = pa.Field(isin=[0.15,0.2,0.25])
+    Meses_en_Programa: int
+    Mora_Deuda: int
+    Estado_Deuda: str = pa.Field(nullable=True)  # Puede ser nulo
+    Sub_Estado_Deuda: str = pa.Field(nullable=True)  # Puede ser nulo
+    Descuento_PL: float
+    Mora_Estructurado: int
+    Mora_Credito: int
+    Meses_Sin_Contacto: int

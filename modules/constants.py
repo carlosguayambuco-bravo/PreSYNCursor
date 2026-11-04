@@ -211,6 +211,39 @@ COL_MAPPER_LIQ = {
     'Referencia': ['Referencia','Referencia '],
 }
 
+COL_MAPPER_ASIGNACION = {
+    'Referencia': ['Referencia'],
+    'Id_Deuda': ['Id deuda'],
+    'Nombre_Cliente': ['Nombre Cliente','Nombre del cliente'],
+    'Negociador': ['Negociador'],
+    'Meses_en_Programa': ['Meses en el Programa','Meses en el Programa'],
+    'Comision_Mensual': ['Comisión Mensual', 'Comision Mensual'],
+    'Apartado_Mensual': ['Apartado Mensual','Apartado Mensual'],
+    'Meses_Sin_Contacto': ['ultimo contacto'],
+    'Pricing': ['CE','Pricing'],
+    'Mora_Estructurado': ['Mora Estructurado','Mora estructurado','Mora_estructurado'],
+    'Mora_Credito': ['Mora Crédito','Mora_credito','Mora Crédito','MORA_CREDITO'],
+    'Banco': ['BANCOS_ESTANDAR','Banco'],
+    'PaB_Origen': ['Deuda Bravo','Deuda Resuelve','Deuda Resuelve'],
+    'PaB_PL': ['PaB PL','PaB PL','PB_PL'],
+    'Mora_Deuda': ['Meses de atraso'],
+    'Descuento_Esperado': ['Descuento','Descuento Esperado'],
+    'Sub_Estado_Deuda': ['sub_estado_deuda'],
+    'Estado_Deuda': ['estado_deuda','Estado Deuda'],
+    'Fecha_Cartera': ['Fecha_Cartera'],
+}
+
+MAP_MORA_ESTRUCTURADO = {
+  'No tiene estructurado': 0,
+  'No': 1,
+  'Sí': 2,
+}
+
+MAP_MORA_CREDITO = {
+  'No': 0,
+  'Sí': 1,
+}
+
 # --- Constantes de Solicitudes ---
 
 SOLICITUDES_ID_DELAY = 4601872 # El extra que se le suma al ID de la Solicitud para que no se repita con el ID de la Deuda
