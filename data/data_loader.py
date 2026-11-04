@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -1514,6 +1514,50 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
         return ActualizacionesSchema.empty()
     return ActualizacionesSchema.validate(actsDF, lazy=True)
 
+# Función Auxiliar para Cargar los Prospectos de Tradicional y sus probabilidades de Liquidación
+@st.cache_data(show_spinner="Cargando Prospectos de Tradicional...", ttl=3*DAY_WAIT)
+def load_prospectos_tradicional() -> DataFrame[ProspectosTradicionalSchema]:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Obtenemos los Datos de la Hoja "Prosp_MEC_D_Liq" y de la Hoja "Mec_Probs"
+    prosp_df = google_sheets_service.get_sheet_as_dataframe(PROSPECTOS_TRADICIONAL_SHEET_ID, 'Prosp_MEC_D_Liq')
+    probs_df = google_sheets_service.get_sheet_as_dataframe(PROSPECTOS_TRADICIONAL_SHEET_ID, 'Mec_Probs')
+
+    # Cargamos los Cambios de Referencia
+    refChangesDict = load_reference_changes()
+
+    # Volvemos las Columnas Id_Deuda y Referencia a String
+    for df in [prosp_df, probs_df]:
+        for col in ['Id_Deuda', 'Referencia']:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda s: str(s).replace('.0','').strip() if pd.notna(s) else '')
+        # Aplicamos los Cambios de Referencia
+        if 'Referencia' in df.columns:
+            df['Referencia'] = df['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+
+    # Al df de prospectos dejamos solo columnas Id_Deuda y Prospecto Liq
+    prosp_df = prosp_df[['Id_Deuda', 'Prospecto Liq']].copy()
+    # Renombramos Prospecto Liq a Prospecto
+    prosp_df = prosp_df.rename(columns={'Prospecto Liq': 'Prospecto'})
+
+    # Al DF de Probabilidades volvemos las Columnas que empiecen con Prob_Liq a Númerico
+    for col in probs_df.columns:
+        if col.startswith('Prob_Liq'):
+            probs_df[col] = pd.to_numeric(probs_df[col], errors='coerce')
+            imputeNans(probs_df, col=col, value=0.0)
+
+    # En el DF de Probabilidades dejamos Referencia, Id_Deuda y las Columnas de Prob_Liq
+    prob_cols = [col for col in probs_df.columns if col.startswith('Prob_Liq')]
+    probs_df = probs_df[['Referencia', 'Id_Deuda'] + prob_cols].copy()
+
+    # Unimos los dos DataFrames por Id_Deuda
+    merged_df = pd.merge(prosp_df, probs_df, how='left', on=['Id_Deuda'])
+
+    # Devolvemos el DF validado
+    if merged_df.empty:
+        return ProspectosTradicionalSchema.empty()
+    return ProspectosTradicionalSchema.validate(merged_df, lazy=True)
 
 # --> Carga de Archivos Subidos (Acuerdos Firmados y Soportes de Pago)
 @st.cache_data(show_spinner="Cargando Archivos Subidos desde Google Sheets...", ttl=MIN_10_WAIT)
@@ -1736,7 +1780,7 @@ def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionS
     # Creamos la Columna Apartado_Neto como Apartado_Mensual - Comision_Mensual con Mínimo de 0
     asignacion_df['Apartado_Neto'] = (asignacion_df['Apartado_Mensual'] - asignacion_df['Comision_Mensual']).clip(lower=0)
     # Eliminamos las Columnas de Comision_Mensual, PaB_PL y Apartado_Mensual (ya no son necesarias)
-    asignacion_df = asignacion_df.drop(columns=['Comision_Mensual', 'PaB_PL', 'Apartado_Mensual'])
+    asignacion_df = asignacion_df.drop(columns=['Comision_Mensual', 'PaB_PL', 'Apartado_Mensual','Fecha_Cartera'])
 
     # Volvemos Meses_en_Programa, Meses_Sin_Contacto y Mora_Deuda a int
     for col in ['Meses_en_Programa', 'Meses_Sin_Contacto', 'Mora_Deuda']:

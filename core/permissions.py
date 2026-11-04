@@ -36,6 +36,11 @@ AGREGAR_CARTERA = Permit(
     description="Permite agregar carteras a Alianzas.",
     user_roles_allowed=['admin', 'executive'],
 )
+CALCULAR_OPPS = Permit(
+    name="calcular_opps",
+    description="Permite calcular oportunidades de Alianzas.",
+    user_roles_allowed=['admin', 'leader','nego']
+)
 GESTIONAR_SOLICITUDES = Permit(
     name="gestionar_solicitudes",
     description="Permite gestionar solicitudes de Alianzas dando Respuestas.",
@@ -66,6 +71,7 @@ GESTIONAR_CACHE = Permit(
 PERMISSIONS_DICT = {
     "subida_formulario": SUBIDA_FORMULARIO,
     "agregar_cartera": AGREGAR_CARTERA,
+    "calcular_opps": CALCULAR_OPPS,
     "gestionar_solicitudes": GESTIONAR_SOLICITUDES,
     "ver_mis_solicitudes": VER_MIS_SOLICITUDES,
     "ver_cartera_total": VER_CARTERA_TOTAL,
@@ -84,6 +90,7 @@ DEFAULT_PERMISSIONS = {
 PAGES_ROUTE_MAPPING = {
     "subida_formulario": {"page": "views/rellenar_forms.py", "title": "Subir Solicitud", "icon": "📝"},
     "agregar_cartera": {"page": "views/agregar_cartera.py", "title": "Agregar Cartera", "icon": "💼"},
+    "calcular_opps": {"page": "views/calculadora_opps.py", "title": "Calculadora de Oportunidades", "icon": "🧮"},
     "gestionar_solicitudes": {"page": "views/gestionar_solicitudes.py", "title": "Gestionar Solicitudes", "icon": "🛠️"},
     "ver_mis_solicitudes": {"page": "views/ver_solicitudes.py", "title": "Ver Mis Solicitudes", "icon": "📋"},
     "ver_cartera_total": {"page": "views/ver_cartera_total.py", "title": "Ver Cartera Total", "icon": "💸"},

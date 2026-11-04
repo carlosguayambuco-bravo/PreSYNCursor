@@ -435,3 +435,14 @@ class AsignacionSchema(pa.DataFrameModel):
     Mora_Estructurado: int
     Mora_Credito: int
     Meses_Sin_Contacto: int
+
+class ProspectosTradicionalSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos de prospectos de Tradicional.
+    """
+    Referencia: str
+    Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
+    Prospecto: str = pa.Field(str_matches=r"Trad \d")
+    Prob_Liq: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación entre 0 y 1
+    Prob_Liq_Cred: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación por Crédito entre 0 y 1
+    Prob_Liq_Trad: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación por Tradicional entre 0 y 1
