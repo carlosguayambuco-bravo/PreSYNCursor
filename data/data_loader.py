@@ -1491,6 +1491,8 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     # Volvemos Fecha_Act a Datetime quitando "'"
     actsDF['Fecha_Act'] = actsDF['Fecha_Act'].astype(str).str.replace("'","",regex=False)
     actsDF["Fecha_Act"] = pd.to_datetime(actsDF["Fecha_Act"],errors="coerce",dayfirst=False)
+    # Quitamos 5 Horas a Fecha_Act para que quede en Hora Local de Bogotá
+    actsDF["Fecha_Act"] = actsDF["Fecha_Act"] - pd.Timedelta(hours=5)
     # Dejamos Etiqueta_Act como string
     actsDF["Etiqueta_Act"] = actsDF["Etiqueta_Act"].astype(str)
 
