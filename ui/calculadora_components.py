@@ -4,6 +4,7 @@
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_client_balances
+from modules.gest_sols import obtener_valor_pab_ideal
 from modules.oportunidades import obtener_asignacion_para_referencia, obtener_pricing_para_referencia, obtener_prospecto_credito_para_referencia, obtener_prospecto_tradicional_para_deuda, obtener_prospecto_tradicional_para_referencia, obtener_referencias_habilitadas, obtener_ultima_actualizacion_deuda
 from utils.helpers_general import formatNumber
 
@@ -119,8 +120,36 @@ def mostrar_datos_por_deuda_referencia(referencia: str) -> list[str]:
 
     return deudas_seleccionadas
 
+# Función para mostrar alertas de PaB Ideal
+def mostrar_alertas_pab_ideal(deudas: list[str]):
+    # Primero inicializamos si ya se generó una alerta
+    debtsIncumplir = []
+    # Ahora iteramos por cada deuda
+    with st.expander("⛔ Verificación de PaB Ideal desde Crédito", expanded=False):
+        for d in deudas:
+            pab_ideal = obtener_valor_pab_ideal(debt=d)
+            if pab_ideal == 0:
+                st.error("La Deuda <{}> NO CUENTA CON **PAB IDEAL**".format(d), icon="❌")
+                debtsIncumplir += [d]
+            else:
+                st.success("Deuda <{}> tiene PaB Ideal de $ {:,.0f}".format(d,pab_ideal), icon = "✅")
+
+    if debtsIncumplir:
+        st.error(
+            title="**SIN PAB IDEAL PARA TODAS LAS DEUDAS**",
+            body="Las Deudas **{}** no tienen PaB ideal de crédito por lo que no se pueden analizar por este medio".format(
+                ' - '.join(debtsIncumplir)
+            ),
+            icon="🚧"
+        )
+        st.stop()
+
+# Función para Mostrar las oportunidades
+def mostrar_oportunidades_referencia(*,referencia: str, debts_selected: list[str]):
+    pass
+
 # Función para mostrar la calculadora individual
-def mostrar_calculadora_individual():
+def mostrar_calculadora_individual(): 
     st.subheader("😁 Calculadora Individual por Referencia")
 
     # Mostramos un Selector de la Referencia, con otras 3 columnas para ahorro Neto, Pricing y Prospectos
@@ -178,3 +207,34 @@ def mostrar_calculadora_individual():
 
     # Mostramos los Datos de Selección de Deudas
     debts_selected = mostrar_datos_por_deuda_referencia(ref_escogida)
+
+    # Escoger el Tipo de Análisis: Por Crédito o Tradicional
+    tipo_analisis = st.radio(
+        label="**🧮 Tipo de Análisis a Realizar**",
+        options=[
+            "**Por Tradicional**",
+            "**Por Crédito**"
+        ],
+        captions=[
+            "El Análisis se realiza con el Ahorro del Cliente",
+            "El Análisis se realiza con el PAB Ideal que otorga Crédito",
+        ],
+        horizontal=True,
+        key="select_analysis_calc_ind",
+        index=1 if "parcial" in prosp_cred.lower() else (0 if prosp_cred == "Tradicional" else None),
+        disabled= (prosp_cred == "Tradicional") or ("parcial" in prosp_cred.lower()),
+    )
+
+    if tipo_analisis is None:
+        st.stop()
+
+    opp_credito = (not ("Tradicional" in tipo_analisis))
+
+    # En caso de ser Crédito, debe de existir un PaB Ideal, de lo contrario se muestra una alerta
+    if opp_credito:
+        mostrar_alertas_pab_ideal(debts_selected)
+
+    # Se crean 2 Columnas: Columna de Gráfica + Slider y Columna de Detalles
+    colGrande, colDetalles = st.columns([4,1], vertical_alignment="center")
+
+    mostrar_oportunidades_referencia(referencia = ref_escogida, deudas = debts_selected)

@@ -108,3 +108,78 @@ def obtener_ultima_actualizacion_deuda(id_deuda: str, fecha_min: pd.TimedeltaInd
         Origen_Act=ultima_act["Origen_Act"]
     )
     return string_ultima_act
+
+# --- Cálculo de Oportunidades (Funciones para calcular Oportunidades) ---
+## -- Opps por Referencia
+### - Depósito Extra
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Crédito
+def oportunidad_dep_extra_credito(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Tradicional
+def oportunidad_dep_extra_tradicional(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario según el Tipo de Análisis
+def oportunidad_dep_extra_tradicional(*,referencia: str, deudas: list[str], es_opp_cred: bool):
+    if es_opp_cred:
+        return oportunidad_dep_extra_credito(referencia=referencia, deudas=deudas)
+    else:
+        return oportunidad_dep_extra_tradicional(referencia=referencia, deudas=deudas)
+
+### - ContraOfertas Viables
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Crédito
+def oportunidad_contraofertas_credito(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Tradicional
+def oportunidad_contraofertas_tradicional(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario según el Tipo de Análisis
+def oportunidad_contraofertas_tradicional(*,referencia: str, deudas: list[str], es_opp_cred: bool):
+    if es_opp_cred:
+        return oportunidad_contraofertas_credito(referencia=referencia, deudas=deudas)
+    else:
+        return oportunidad_contraofertas_tradicional(referencia=referencia, deudas=deudas)
+
+### - Acuerdos para Robo
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Crédito
+def oportunidad_acuerdos_robo_credito(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Tradicional
+def oportunidad_acuerdos_robo_tradicional(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario según el Tipo de Análisis
+def oportunidad_acuerdos_robo_tradicional(*,referencia: str, deudas: list[str], es_opp_cred: bool):
+    if es_opp_cred:
+        return oportunidad_acuerdos_robo_credito(referencia=referencia, deudas=deudas)
+    else:
+        return oportunidad_acuerdos_robo_tradicional(referencia=referencia, deudas=deudas)
+
+### - Liquidaciones Instantáneas
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Crédito
+def oportunidad_liq_insta_credito(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario para Tradicional
+def oportunidad_liq_insta_tradicional(*,referencia: str, deudas: list[str]) -> float:
+    pass
+
+# Función Auxiliar para Obtener el Depósito Extra Necesario según el Tipo de Análisis
+def oportunidad_liq_insta_tradicional(*,referencia: str, deudas: list[str], es_opp_cred: bool):
+    if es_opp_cred:
+        return oportunidad_liq_insta_credito(referencia=referencia, deudas=deudas)
+    else:
+        return oportunidad_liq_insta_tradicional(referencia=referencia, deudas=deudas)
+
+### - IA Liquidadora
+# Función Auxiliar para Obtener el Depósito Extra Necesario según el Tipo de Análisis
+def oportunidad_liq_insta_tradicional(*,referencia: str, deudas: list[str], es_opp_cred: bool):
+    pass
