@@ -446,3 +446,13 @@ class ProspectosTradicionalSchema(pa.DataFrameModel):
     Prob_Liq: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación entre 0 y 1
     Prob_Liq_Cred: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación por Crédito entre 0 y 1
     Prob_Liq_Trad: float = pa.Field(ge=0, le=1)  # Probabilidad de Liquidación por Tradicional entre 0 y 1
+
+class PipelineCreditoSchema(pa.DataFrameModel):
+    """
+    Esquema para validar la estructura de los datos del Pipeline de Crédito
+    """
+    Referencia: str
+    Fecha_Subida: pa.dtypes.Timestamp
+    Status_Credito: str
+    Rechazo_Credito: bool
+    No_Opta_Credito: bool

@@ -5,7 +5,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_client_balances
 from modules.gest_sols import obtener_valor_pab_ideal
-from modules.oportunidades import obtener_asignacion_para_referencia, obtener_pricing_para_referencia, obtener_prospecto_credito_para_referencia, obtener_prospecto_tradicional_para_deuda, obtener_prospecto_tradicional_para_referencia, obtener_referencias_habilitadas, obtener_ultima_actualizacion_deuda
+from modules.oportunidades import obtener_asignacion_para_referencia, obtener_estado_actual_credito, obtener_estado_liquidacion_deudas, obtener_pricing_para_referencia, obtener_prospecto_credito_para_referencia, obtener_prospecto_tradicional_para_deuda, obtener_prospecto_tradicional_para_referencia, obtener_referencias_habilitadas, obtener_ultima_actualizacion_deuda
 from utils.helpers_general import formatNumber
 
 # Función Auxiliar para Reiniciar la Selección de las Deudas
@@ -120,8 +120,40 @@ def mostrar_datos_por_deuda_referencia(referencia: str) -> list[str]:
 
     return deudas_seleccionadas
 
-# Función para mostrar alertas de PaB Ideal
-def mostrar_alertas_pab_ideal(deudas: list[str]):
+# Función para mostrar alertas de liquidación de deudas
+def mostrar_alertas_liquidacion(*,deudas: list[str]):
+    # Primero Obtenemos los estados de liquidación para cada deuda
+    estados_liq = obtener_estado_liquidacion_deudas(deudas=deudas)
+    # Ahora Iteramos y construimos el str con los baadges
+    st.caption("✅Verificando que las deudas no esten liquidadas")
+    str_badge = ""
+    for idx, (d, is_liq) in enumerate(estados_liq.items(),start=1):
+
+        str_badge += ":{color}-badge[ID: {debt_id} - **{liq_state}**]".format(
+            color = "red" if is_liq else "green",
+            debt_id = d,
+            liq_state = "LIQUIDADA" if is_liq else "Sin Liq"
+        )
+
+        if idx % 5 == 0:
+            if str_badge:
+                st.markdown(str_badge)
+                str_badge = ""
+
+    # Mostramos si alguna falta
+    if str_badge:
+        st.markdown(str_badge)
+
+    # Detenemos el App si hay alguna liquidada
+    if any(estados_liq.values()):
+        st.error("No puedes calcular datos para deudas liquidadas {}".format(
+            "-".join([d for d, is_liq in estados_liq.items() if is_liq])
+        ),icon="❌")
+        st.stop()
+    
+
+# Función para mostrar alertas relacionadas con el cálculo por Crédito
+def mostrar_alertas_credito(*, referencia: str, deudas: list[str]):
     # Primero inicializamos si ya se generó una alerta
     debtsIncumplir = []
     # Ahora iteramos por cada deuda
@@ -143,6 +175,44 @@ def mostrar_alertas_pab_ideal(deudas: list[str]):
             icon="🚧"
         )
         st.stop()
+    # Siguiente: Verificamos el Rechazo de Crédito
+    status, rechazo, no_opp = obtener_estado_actual_credito(referencia)
+
+    # Creamos 3 Columnas para Mostrar estos Datos
+    colReferencia, colCred, colAlerta = st.columns([1,3,2])
+
+    with colReferencia:
+        st.metric(
+            label="**Referencia**",
+            value=referencia,
+            delta=None
+        )
+
+    with colCred:
+        str_cred = ":{color_status}-badge[{dato_status}]".format(
+            color_status = "green" if status == "CERRADO" else ("gray" if not (rechazo or no_opp) else "red"),
+            dato_status = status
+        )
+        # Agregamos detalle según rechazo o no_opp
+        if rechazo:
+            str_cred += " :{color_status}-badge[{dato_status}]".format(
+                color_status = "yellow", dato_status = "⚠️CRÉDITO RECHAZADO"
+            )
+        if no_opp:
+            str_cred += " :{color_status}-badge[{dato_status}]".format(
+                color_status = "red", dato_status = "❌NO OPTA A CRÉDITO"
+            )
+        # Mostramos el Detalle
+        st.markdown(str_cred)
+
+    with colAlerta:
+        if no_opp:
+            st.error("Cliente no es Apto para Crédito", icon="❌")
+            st.stop()
+        elif rechazo:
+            st.warning("Cliente ya había rechazado el crédito, aunque puede Salir 👍", icon="🚧")
+        else:
+            st.success("Cliente pasa precauciones de Crédito", icon="✅")
 
 # Función para Mostrar las oportunidades
 def mostrar_oportunidades_referencia(*,referencia: str, debts_selected: list[str]):
@@ -208,6 +278,9 @@ def mostrar_calculadora_individual():
     # Mostramos los Datos de Selección de Deudas
     debts_selected = mostrar_datos_por_deuda_referencia(ref_escogida)
 
+    # Mostramos la alerta de las deudas
+    mostrar_alertas_liquidacion(deudas = debts_selected)
+
     # Escoger el Tipo de Análisis: Por Crédito o Tradicional
     tipo_analisis = st.radio(
         label="**🧮 Tipo de Análisis a Realizar**",
@@ -232,9 +305,9 @@ def mostrar_calculadora_individual():
 
     # En caso de ser Crédito, debe de existir un PaB Ideal, de lo contrario se muestra una alerta
     if opp_credito:
-        mostrar_alertas_pab_ideal(debts_selected)
+        mostrar_alertas_credito(referencia=ref_escogida,deudas=debts_selected)
 
-    # Se crean 2 Columnas: Columna de Gráfica + Slider y Columna de Detalles
-    colGrande, colDetalles = st.columns([4,1], vertical_alignment="center")
+    # Se crean 2 Columnas: Columna de Sliders y Columna de Detalles
+    colGrande, colDetalles = st.columns([4,1], vertical_alignment="center", gap="xsmall")
 
     mostrar_oportunidades_referencia(referencia = ref_escogida, deudas = debts_selected)

@@ -1,7 +1,7 @@
 # **Cálculo de Oportunidades**
 Las oportunidades son cálculos que se realizan de forma interna con el fin de mostrar con facilidad los clientes que son más liquidables.
 
-Esta información se saca teniendo en cuenta que las etiquetas que se consideran con un descuento correcto son: **CAMBIO DE PAB, ACUERDO, DEPOSITO**. Cualquier otra etiqueta se toma como descuento 0% (esto solo aplica para el cálculo masivo, para cálculo individual se asume que las deudas escogidas son el portafolio).
+Esta información se saca teniendo en cuenta que las etiquetas que se consideran con un descuento correcto son: **CAMBIO DE PAB, ACUERDO, DEPOSITO y ACTUALIZADO_ALIANZAS (Masivas)**. Cualquier otra etiqueta se toma como descuento 0% (esto solo aplica para el cálculo masivo, para cálculo individual se asume que las deudas escogidas son el portafolio).
 
 Para tener en cuenta los portafolios, se va a tener en cuenta que las actualizaciones posteriores sean 45s o antes entre sí. En caso de no haber actualizaciones se toma de forma individual exceptuando los bancos **Banco de Occidente, Banco Popular, Itaú y BBVA Colombia**.
 

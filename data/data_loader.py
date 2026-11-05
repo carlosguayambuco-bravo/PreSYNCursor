@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PipelineCreditoSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, ESTADOS_NO_OPP_CREDITO, ESTADOS_NO_QUIERE_CREDITO, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PIPELINE_CREDITO_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VENCIMIENTO_ACTS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -1627,6 +1627,44 @@ def load_data_archivos_subidos() -> DataFrame[ArchivosSubidosSchema]:
     # Paso 8: Validar el Esquema
     return ArchivosSubidosSchema.validate(archivos_df, lazy=True)
 
+# Función Auxiliar para Obtener los Datos del Pipeline de Crédito
+@st.cache_data(show_spinner="Cargando Pipeline de Crédito desde Google Sheets...", ttl=HOUR_WAIT)
+def load_pipeline_credito() -> DataFrame[PipelineCreditoSchema]:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Obtenemos los Datos de la Hoja "Pipeline"
+    pipecredDF = google_sheets_service.get_sheet_as_dataframe(PIPELINE_CREDITO_SHEET_ID, 'Pipeline')
+
+    # Paso 3: Limpiamos los Datos
+    # Renombramos Columnas
+    pipecredDF = pipecredDF.rename(columns={
+        "Fecha de Subida": "Fecha_Subida",
+        "Status": "Status_Credito"
+    })
+    # Dejamos solo las Columnas Necesarias
+    pipecredDF = pipecredDF[['Referencia','Fecha_Subida','Status']]
+    # Volvemos la Columna Referencia a String
+    pipecredDF['Referencia'] = pipecredDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+    # Cargamos los cambios de Referencia y los Aplicamos
+    refChangesDict = load_reference_changes()
+    pipecredDF['Referencia'] = pipecredDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
+    # Volvemos la Columna Fecha_Subida a Datetime con dayfirst=True
+    pipecredDF['Fecha_Subida'] = pd.to_datetime(pipecredDF['Fecha_Subida'],errors="coerce",dayfirst=True)
+    # Ordenamos por Fecha_Subida y Eliminamos Registros por Referencia dejando el Último Registro
+    pipecredDF = pipecredDF.sort_values(by='Fecha_Subida')
+    pipecredDF = pipecredDF.drop_duplicates(subset=['Referencia'], keep='last')
+
+    # Creamos las Columnas Rechazo_Credito y No_Opta_Credito
+    pipecredDF['Rechazo_Credito'] = pipecredDF['Status_Credito'].isin(ESTADOS_NO_QUIERE_CREDITO)
+    pipecredDF['No_Opta_Credito'] = pipecredDF['Status_Credito'].isin(ESTADOS_NO_OPP_CREDITO)
+
+    # 4. Validamos y Devolvemos el DF
+    if pipecredDF.empty:
+        return PipelineCreditoSchema.empty()
+    else:
+        return PipelineCreditoSchema.validate(pipecredDF, lazy=True)
+
 # --- Carga de la Asignación de Cartera del Mes en Curso ---
 ## Funciones Auxiliares
 def obtener_prioridad_archivo(file_name: str):
@@ -2067,6 +2105,38 @@ def obtener_ultima_actualizacion_deudas(*,debt_ids: list[str], user_email: str) 
     except:
         # Si la Consulta a Metabase Falla, Buscamos en el Backup de Google Sheets
         return obtener_ultima_actualizacion_deudas_backup(debt_ids=debt_ids, user_email=user_email)
+
+# Función Auxiliar para obtener la fecha de expiración de un acuerdo de Pago 
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando la expiración de Acuerdos de Pago")
+def obtener_fecha_expiracion_acuerdo(*, debt_ids: list[str], end: str) -> Optional[pd.Timestamp]:
+    # Paso 1: Crear la Query
+    query_expire = QUERY_VENCIMIENTO_ACTS.format(
+        debt_ids=','.join(debt_ids)
+    )
+    # Paso 2: Ejecutar la Query
+    try:
+        # Obtenemos los Datos
+        expiracion_df = execute_query_cache(query_expire, dbId=12)
+        # 1era Verificación: DF no es vacío
+        if expiracion_df.empty or expiracion_df.columns.empty:
+            return None
+        # 2da Verificación: Filtramos por el end y la etiqueta acuerdo y con fecha de expiracion
+        expiracion_df = expiracion_df[
+            (expiracion_df['Correo_Act'] == end) & 
+            (expiracion_df['Etiqueta_Act'] == 'agreement') &
+            (expiracion_df['Fecha_Expiracion'].notna())
+        ]
+        # Una vez más verificamos si está vacío (esta vez es por falta de datos)
+        if expiracion_df.empty:
+            return pd.NaT
+        # Ahora vamos a obtener la máxima fecha de expiración
+        # Primero Convertimos Fecha_Expiracion a Datetime
+        expiracion_df['Fecha_Expiracion'] = pd.to_datetime(expiracion_df['Fecha_Expiracion'],errors='coerce',dayfirst=False)
+        # Ahora devolvemos la Fecha Máxima
+        return expiracion_df['Fecha_Expiracion'].max()
+    except:
+        # Ante cualquier error, devolvemos None
+        return None
 
 # Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
 @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")

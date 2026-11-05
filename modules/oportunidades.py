@@ -4,7 +4,7 @@
 import pandas as pd
 import streamlit as st
 # Librerías Locales
-from data.data_loader import load_actualizacines_negos, load_asignacion_cartera, load_headcount_negociacion, load_prospectos_credito, load_prospectos_tradicional
+from data.data_loader import load_actualizacines_negos, load_asignacion_cartera, load_headcount_negociacion, load_liquidaciones, load_pipeline_credito, load_prospectos_credito, load_prospectos_tradicional
 from utils.helpers_general import replaceNaN
 
 # Función Auxiliar para Obtener las Referencias habilitadas para calcular de forma individual
@@ -108,6 +108,46 @@ def obtener_ultima_actualizacion_deuda(id_deuda: str, fecha_min: pd.TimedeltaInd
         Origen_Act=ultima_act["Origen_Act"]
     )
     return string_ultima_act
+
+# Función Auxiliar para obtener el estado actual de un cliente en Crédito
+def obtener_estado_actual_credito(*,referencia: str) -> tuple[str,bool,bool]:
+    """Función para obtener el Estado actual del cliente en el Pipeline de Crédito
+
+    Args:
+        referencia (str): La Referencia a Analizar
+
+    Returns:
+        tuple[
+        str,: Estado actual de Crédito
+        bool,: Booleano para definir si ya rechazó el crédito
+        bool: Booleano para definir si no Opta a Crédito
+    ]
+    """    
+    # Paso 1: Obtener el DF del Pipeline de Crédito
+    pipecredDF = load_pipeline_credito()
+    # Paso 2: Filtrar por la Referencia
+    pipecred_ref = pipecredDF[pipecredDF['Referencia'] == referencia]
+    # Paso 3: Devolver los Estados
+    if pipecred_ref.empty:
+        return "🫠No se ha convertido en Opp de Crédito", False, False
+    else:
+        ref_row = pipecred_ref.iloc[0]
+        return ref_row['Status_Credito'], ref_row['Rechazo_Credito'], ref_row['No_Opta_Credito']
+
+# Función Auxiliar para Obtener los Estados de Liquidación de las Deudas
+def obtener_estado_liquidacion_deudas(*, deudas: list[str]) -> dict[str,bool]:
+    """Función para obtener el estado de liquidación a modo de booleano para deudas
+
+    Args:
+        deudas (list[str]): Lista de los Id de Deuda
+
+    Returns:
+        dict[str,bool]: Diccionario con Llave el Id de Deuda y valor si esta liquidada
+    """    
+    # Paso 1: Cargar las Liquidaciones
+    liqsSet = load_liquidaciones()
+    # Paso 2: Devolver el estado para cada deuda
+    return {d: d in liqsSet for d in deudas}
 
 # --- Cálculo de Oportunidades (Funciones para calcular Oportunidades) ---
 ## -- Opps por Referencia

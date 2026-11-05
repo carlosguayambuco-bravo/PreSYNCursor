@@ -74,11 +74,14 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | PaB Ideal / `PaB_Ideal_Credito` | Cupo aprobado desde el área de crédito para pagar una deuda. No todos los clientes lo tienen; es exclusivo de clientes con buen comportamiento |
 | `PaB_PL` | PaB prometido al cliente en su Plan de Liquidación. En el código viene de `payment_to_bank`; si falta, se estima como `PaB_Origen * (1 - 0.15)` |
 | `PaB_Portafolio` | Monto de pago asociado al portafolio completo |
+| `PaB_Actualizado` | Monto de pago asociado a una actualización con Etiqueta "CAMBIO DE PAB o ACUERDO o DEPOSITO o ACTUALIZADO_ALIANZAS". En caso de no aplicar se deja el `PaB\_Origen` |
 | `Apartado_Neto` | El Ahorro que hace el cliente mes a mes |
 | `Pricing` | Comisión de éxito (%) que cobra la empresa. En el código viene de `success_commission_percentage`; el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing` |
 | `Ahorro` | Ahorro con el que cuenta el cliente para pagar sus deudas (hoja de SALDOS) |
 | `Por Cobrar` | Monto que el cliente debe a la empresa (hoja TOTAL) |
 | `IVA` | Impuesto de Colombia: 19% |
+| `Descuento Esperado` | El descuento calculado con base en los descuentos históricos para esa deuda teniendo en cuenta el banco (viene de un Modelo de ML) |
+| `Ingreso Esperado` | El Ingreso que se espera obtener con base en el Descuento Esperado |
 | Deuda Bravo | Nombre operativo del monto original de la deuda (`PaB_Origen`) |
 | Descuento en base | Descuento que el aliado cruza a inicio de mes para sus deudas. Se representa con `PaB_Propuesta` |
 | Descuento máximo | Puede referirse a dos cosas: (1) `Brindan Máx. Descuento` en la hoja de aliados, que indica que ya se analizó el máximo y pedir más suele ser rechazado; (2) `Max_Descuento_Otorgado` en una respuesta, que indica que no se puede contraofertar. La app solo advierte en el primer caso y fuerza el flag en `Bajo Comité` |
@@ -99,6 +102,10 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | `Refi` | Tipo de pago por refinanciación |
 | `Crédito` | Tipo de pago que usa el PaB Ideal aprobado por crédito |
 | `Pendientes_IdAutDeud` | Hoja interna donde se guardan los registros del cruce de cartera antes de subirlos a descuentos en base |
+| `Prospectos de Crédito / Batch` | Clientes con buen comportamiento de ahorro que son aptos para crédito. Se clasifican en: Batch 1, Batch 2, ..., Batch 4 y Cr Parcial (ES POR CLIENTES) |
+| `Prospectos de Tradicional` | Deudas con más alta probabilidad de liquidación según un modelo de ML (ES POR DEUDAS). Se clasifican como Trad 1-4 (no se tienen en cuenta los Cr Parcial dado que ya tienen un crédito y por ende no aplican para liquidación por tradicional)|
+| `Actualizaciones` | Gestiones que se le realizan a las deudas de los clientes, con diferentes categorias según el tipo de gestión |
+| `Mes en Curso (MEC)` | Mes operativo actual. Se saca de la fecha en `Fecha_Cartera` de del df de `Asignación de Cartera` |
 
 ### 1.5 Reglas, excepciones y acuerdos con aliados
 
@@ -132,13 +139,18 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | Dato | Fuente actual | Dueño | Observaciones |
 |---|---|---|---|
 | Solicitudes | Google Sheets (`Solicitudes_MEC`) | Propio | Es muy importante no borrar información ni escribir por encima; es información delicada |
-| Cartera / deudas | Metabase + Google Sheets | MB de la Empresa | Solo hay permiso de lectura, no escritura |
+| Cartera / deudas / actualizaciones | Metabase | MB de la Empresa | Solo hay permiso de lectura, no escritura. Las Actualizaciones tienen como Backup un Sheets |
 | Aliados y reglas | Google Sheets (`AlianzasVigentes`, spreadsheet de Aliados) | Propio | Contiene la información relevante de los aliados y la categoría formal/informal, que la app no usa |
 | Descuentos / masivas | Google Sheets (`Bases mes actual 2024`, spreadsheet de Masivas) | Propio | Lugar principal donde se registran los descuentos que llegan; el nombre de la hoja es legado |
 | Pendientes de cruce | Google Sheets (`Pendientes_IdAutDeud`, spreadsheet de Configs) | Propio | Registros del cruce de cartera antes de subirlos a descuentos en base |
 | Liquidaciones | Google Sheets (`Liquidaciones`) | Sheets de la Empresa | Guarda la facturación histórica; la actualiza un área externa |
 | Acuerdos y soportes | Google Drive | Shared Drive | Guarda los PDFs de acuerdos y soportes de pago |
+| Actualizaciones | Google Sheets `Actualizaciones` | Propio | Backup de las Actualizaciones de Metabase |
 | Archivos subidos | Google Sheets (`Archivos_Subidos`) + Drive | Propio | Evidencia de acuerdos firmados y soportes de pago |
+| Prospectos de Crédito | Google Sheets `Prospectos de Crédito` | Del Área de Crédito | Solo se toma la hoja del mes en curso (la más reciente) |
+| Prospectos de Tradicional | Google Sheets `Prosp_MEC_D_Liq` | Propio | Solo se toma la hoja del mes en curso |
+| Pipeline de Crédito | Google Sheets `Pipeline Crédito` | Del área de crédito | Flujo de los procesos de crédito con el cliente. NO SE DEBE EDITAR |
+| Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. NO SE DEBE EDITAR |
 
 ---
 

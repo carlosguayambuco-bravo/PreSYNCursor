@@ -171,6 +171,21 @@ SELECT
 FROM credit_repair_debts AS bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
+# Query de dbId = 12
+QUERY_VENCIMIENTO_ACTS = '''
+SELECT
+    bda.debt_id AS "Id_Deuda",
+    bda.expiration AS "Fecha_Expiracion",
+    bda.end AS "Correo_Act",
+    bda.type AS "Etiqueta_Act",
+    bda.inserted_at - INTERVAL \'5 hours\' AS "Fecha_Act"
+FROM
+    credit_repair_debt_activities AS bda
+WHERE
+    bda.debt_id IN ({debt_ids})
+    AND bda.updated_at >= CURRENT_TIMESTAMP - INTERVAL \'1 month\'
+'''
+
 # Query de dbId = 50
 QUERY_INFO_BASICA_POR_DEUDA = """
 SELECT
@@ -325,6 +340,10 @@ CCS_CREDITO = [
 
 CORREOS_NO_RELEVANTES = ['humbertoch@gobravo.io','nmcaro@gobravo.io']
 
+# -- Estados de Crédito
+ESTADOS_NO_OPP_CREDITO = ["NO_PERFILA","NO_VIABLE_MEC","DTO_INSUFICIENTE"]
+ESTADOS_NO_QUIERE_CREDITO = ["NO_LE_INTERESA"]
+
 # -- Ids de Spreadsheets de Sheets
 SOLICITUDES_SHEET_ID = '1tlHeLPJgIlRw3-_yv8lG4_w07n44o6KUxwxS1jmhjLk'
 SALDOS_SHEET_ID = '1mvxPdnyp5ip_0Lqyf6qy09BAtX323PF2Yc5-qGoukeU'
@@ -339,6 +358,7 @@ CONFIGS_SHEET_ID = '1_8M4GQf-n4_0gCWFfPCpUSebdmuSrVbiyQBdNzry6io'
 CARTERA_ACTIVA_SHEET_ID = '1NRM51v9ENd4IOShbstNa8nNohiFWDsmx18RxsD4LB-8'
 ACTUALIZACIONES_SHEET_ID = '1O8OHuVhgwhLw8XYEBf1uBzLYrxQ45rPiZecHOnAa1Go'
 PROSPECTOS_TRADICIONAL_SHEET_ID = "1lIfUXupnXC3CCCFDY3wbzTEhPmBiFmkvv37XSmVpee0"
+PIPELINE_CREDITO_SHEET_ID = "1ZL_nuSa2jGOzbNu407jSctcuOH3gjoI12DwjJ_mu1z0"
 
 # --- Configuraciones del Cruce de Deudas ---
 # --- Constantes del Algoritmo ---
