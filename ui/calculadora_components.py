@@ -6,9 +6,28 @@ import numpy as np
 import streamlit as st
 # Librerías Locales
 from data.data_loader import load_client_balances
-from modules.constants import IVA
+from modules.constants import (
+    COLORES_OPORTUNIDADES,
+    DESCRIPCION_OPORTUNIDADES,
+    ICONOS_OPORTUNIDADES,
+    IVA,
+    OPORTUNIDADES,
+)
 from modules.gest_sols import obtener_valor_pab_ideal
-from modules.oportunidades import obtener_asignacion_para_referencia, obtener_estado_actual_credito, obtener_estado_liquidacion_deudas, obtener_pricing_para_referencia, obtener_prospecto_credito_para_referencia, obtener_prospecto_tradicional_para_deuda, obtener_prospecto_tradicional_para_referencia, obtener_referencias_habilitadas, obtener_ultima_actualizacion_deuda
+from modules.oportunidades import (
+    calcular_oportunidades_referencia,
+    evaluar_viabilidad_cliente,
+    obtener_asignacion_para_referencia,
+    obtener_estado_actual_credito,
+    obtener_estado_liquidacion_deudas,
+    obtener_pab_actualizado_deuda,
+    obtener_pricing_para_referencia,
+    obtener_prospecto_credito_para_referencia,
+    obtener_prospecto_tradicional_para_deuda,
+    obtener_prospecto_tradicional_para_referencia,
+    obtener_referencias_habilitadas,
+    obtener_ultima_actualizacion_deuda,
+)
 from ui.forms_components import mostrar_componente_feedback
 from utils.helpers_general import cleanNumber, formatNumber
 
@@ -172,8 +191,8 @@ def mostrar_alertas_credito(*, referencia: str, deudas: list[str]):
 
     if debtsIncumplir:
         st.error(
-            title="**SIN PAB IDEAL PARA TODAS LAS DEUDAS**",
-            body="Las Deudas **{}** no tienen PaB ideal de crédito por lo que no se pueden analizar por este medio".format(
+            "**SIN PAB IDEAL PARA TODAS LAS DEUDAS**\n\n"
+            "Las Deudas **{}** no tienen PaB ideal de crédito por lo que no se pueden analizar por este medio".format(
                 ' - '.join(debtsIncumplir)
             ),
             icon="🚧"
@@ -218,25 +237,80 @@ def mostrar_alertas_credito(*, referencia: str, deudas: list[str]):
         else:
             st.success("Cliente pasa precauciones de Crédito", icon="✅")
 
+# Función Auxiliar para Formatear el Valor de una Oportunidad
+def _formatear_valor_oportunidad(*, oportunidad: dict) -> str:
+    valor = oportunidad.get("valor", 0)
+    tipo_valor = oportunidad.get("tipo_valor", "texto")
+    if tipo_valor == "monto":
+        return "$ {}".format(formatNumber(valor))
+    if tipo_valor == "porcentaje":
+        return "{:.1%}".format(valor)
+    return str(valor)
+
 # Función para Mostrar las oportunidades
-def mostrar_oportunidades_referencia(*,referencia: str, debts_selected: list[str]):
-    # La idea aquí sera mostrar st.badges con cada Oportunidad que aplique a la izquierda
-    # A la derecha mostrar los detalles de cada oportunidad
+def mostrar_oportunidades_referencia(
+    *,
+    referencia: str,
+    debts_selected: list[str],
+    es_opp_cred: bool,
+    ahorro: Optional[float],
+    porcobrar: Optional[float],
+    deposito_extra: float,
+):
+    """Muestra las oportunidades aplicables de una Referencia.
 
-    # Toca crear función de calcular oportunidades donde: Devuelva diciconario con nombre de oportunidad y valor
-    # opps_cliente = calcular_opps_cliente(referencia=referencia, deudas = debts_selected)
+    Args:
+        referencia (str): Referencia analizada.
+        debts_selected (list[str]): Deudas seleccionadas.
+        es_opp_cred (bool): True si el análisis es por Crédito.
+        ahorro (Optional[float]): Ahorro simulado.
+        porcobrar (Optional[float]): Por Cobrar simulado.
+        deposito_extra (float): Depósito Extra simulado.
+    """
+    # Primero calculamos todas las oportunidades de la Referencia
+    with st.spinner("Calculando oportunidades..."):
+        opps_cliente = calcular_oportunidades_referencia(
+            referencia=referencia,
+            deudas=debts_selected,
+            es_opp_cred=es_opp_cred,
+            ahorro=ahorro,
+            porcobrar=porcobrar,
+            deposito_extra=deposito_extra,
+        )
+    oportunidades_aplicables = [
+        oportunidad for oportunidad in OPORTUNIDADES
+        if opps_cliente.get(oportunidad, {}).get("aplica", False)
+    ]
 
-    # Dejo el esquema para llenar
-    colRef, colDetalle = st.columns([1,3],vertical_alignment="top", border=True)
+    # Mostramos un resumen de los insumos usados en el cálculo
+    st.caption(
+        "Análisis: **{}** | Ahorro: **$ {:,.0f}** | Por Cobrar: **$ {:,.0f}** | Depósito Extra: **$ {:,.0f}**".format(
+            "Crédito" if es_opp_cred else "Tradicional",
+            ahorro or 0,
+            porcobrar or 0,
+            deposito_extra or 0,
+        )
+    )
+
+    # Mostramos los badges de las oportunidades a la izquierda y el detalle a la derecha
+    colRef, colDetalle = st.columns([1, 3], vertical_alignment="top", border=True)
     with colRef:
         st.metric(
             label="**Referencia**",
             value=referencia
         )
-        # st.markdown ( color-badge[opp] for opp in opps_cliente) if opps_cliente else st.error("Sin Oportunidades")
-    
+        if oportunidades_aplicables:
+            for oportunidad in oportunidades_aplicables:
+                st.badge(
+                    oportunidad,
+                    color=COLORES_OPORTUNIDADES[oportunidad],
+                    icon=ICONOS_OPORTUNIDADES[oportunidad],
+                )
+        else:
+            st.error("Sin Oportunidades", icon="❌")
+
     with colDetalle:
-        colHNombre, colHDescripcion, colHValor = st.columns([1,3,2],vertical_alignment="top")
+        colHNombre, colHDescripcion, colHValor = st.columns([1, 3, 2], vertical_alignment="top")
         with colHNombre:
             st.markdown("##### **🧮 Oportunidad**")
         with colHDescripcion:
@@ -244,78 +318,220 @@ def mostrar_oportunidades_referencia(*,referencia: str, debts_selected: list[str
         with colHValor:
             st.markdown("##### **🔅 Valor**")
 
-        # for opp in opps_cliente: HAY QUE AGREGAR LOS VALORES EN LAS CONSTANTES
-        #     colNombre, colDescripcion, colValor = st.columns([1,3,2],vertical_alignment="top")
+        if not oportunidades_aplicables:
+            st.info("No se detectaron oportunidades con los datos actuales.", icon="ℹ️")
+            return
 
-        #     with colNombre:
-        #         st.badge(opp, color=COLORES_OPORTUNIDADES[opp], icon=ICONOS_OPORTUNIDADES[opp])
-        #     with colDescripcion:
-        #         st.markdown(DESCRIPCION_OPORTUNIDADES[opp])
-        #     with colValor:
-        #         st.markdown(opps_cliente[opp])
+        for oportunidad in oportunidades_aplicables:
+            resultado = opps_cliente[oportunidad]
+            colNombre, colDescripcion, colValor = st.columns([1, 3, 2], vertical_alignment="top")
+
+            with colNombre:
+                st.badge(
+                    oportunidad,
+                    color=COLORES_OPORTUNIDADES[oportunidad],
+                    icon=ICONOS_OPORTUNIDADES[oportunidad],
+                )
+            with colDescripcion:
+                st.markdown(DESCRIPCION_OPORTUNIDADES[oportunidad])
+            with colValor:
+                st.markdown("**{}**".format(_formatear_valor_oportunidad(oportunidad=resultado)))
+                if resultado.get("detalle"):
+                    st.caption(resultado["detalle"])
+
+# Funciones Auxiliares para Sincronizar los Controles de una Deuda
+def _formatear_pab_texto(pab: float) -> str:
+    """Formatea un PaB para mostrarlo en un text_input."""
+    return "{:,.0f}".format(pab)
+
+def _formatear_descuento_texto(descuento: float) -> str:
+    """Formatea un descuento decimal como porcentaje para un text_input."""
+    return "{:.1f}".format(descuento * 100)
+
+def _calcular_pab_desde_descuento(*, pab_origen: float, descuento_pct: float) -> float:
+    """Calcula el PaB a partir de un descuento porcentual."""
+    descuento_pct = min(max(float(descuento_pct), 0.0), 100.0)
+    return max(0.0, pab_origen * (1 - descuento_pct / 100.0))
+
+def _calcular_descuento_desde_pab(*, pab_origen: float, pab: float) -> float:
+    """Calcula el descuento decimal a partir de un PaB."""
+    if pab_origen <= 0:
+        return 0.0
+    return min(max(1 - (pab / pab_origen), 0.0), 1.0)
+
+def _paso_slider_pab(pab_origen: float) -> float:
+    """Define un paso razonable para el slider de PaB según el monto."""
+    if pab_origen >= 10_000_000:
+        return 100_000.0
+    if pab_origen >= 1_000_000:
+        return 10_000.0
+    if pab_origen >= 100_000:
+        return 1_000.0
+    if pab_origen >= 10_000:
+        return 100.0
+    return 1.0
+
+def _sincronizar_desde_slider_descuento(*, clave: str, pab_origen: float):
+    """Sincroniza los controles cuando cambia el slider de descuento."""
+    descuento_pct = float(st.session_state.get(f"calc_ind_disc_slider_{clave}", 0.0))
+    pab = _calcular_pab_desde_descuento(pab_origen=pab_origen, descuento_pct=descuento_pct)
+    st.session_state[f"calc_ind_pab_{clave}"] = pab
+    st.session_state[f"calc_ind_pab_slider_{clave}"] = pab
+    st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
+    st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento_pct / 100.0)
+
+def _sincronizar_desde_slider_pab(*, clave: str, pab_origen: float):
+    """Sincroniza los controles cuando cambia el slider de PaB."""
+    pab = float(st.session_state.get(f"calc_ind_pab_slider_{clave}", 0.0))
+    pab = min(max(pab, 0.0), pab_origen)
+    descuento = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab)
+    st.session_state[f"calc_ind_pab_{clave}"] = pab
+    st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento * 100
+    st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento)
+    st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
+
+def _sincronizar_desde_texto_descuento(*, clave: str, pab_origen: float):
+    """Sincroniza los controles cuando cambia el text_input de descuento."""
+    texto = st.session_state.get(f"calc_ind_disc_text_{clave}", "0")
+    descuento_pct = cleanNumber(texto, default_nan=np.nan)
+    if np.isnan(descuento_pct):
+        pab_actual = float(st.session_state.get(f"calc_ind_pab_{clave}", pab_origen))
+        descuento_pct = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab_actual) * 100
+    descuento_pct = min(max(float(descuento_pct), 0.0), 100.0)
+    pab = _calcular_pab_desde_descuento(pab_origen=pab_origen, descuento_pct=descuento_pct)
+    st.session_state[f"calc_ind_pab_{clave}"] = pab
+    st.session_state[f"calc_ind_pab_slider_{clave}"] = pab
+    st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento_pct
+    st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
+    st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento_pct / 100.0)
+
+def _sincronizar_desde_texto_pab(*, clave: str, pab_origen: float):
+    """Sincroniza los controles cuando cambia el text_input de PaB."""
+    texto = st.session_state.get(f"calc_ind_pab_text_{clave}", "0")
+    pab = cleanNumber(texto, default_nan=np.nan)
+    if np.isnan(pab):
+        pab = float(st.session_state.get(f"calc_ind_pab_{clave}", pab_origen))
+    pab = min(max(float(pab), 0.0), pab_origen)
+    descuento = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab)
+    st.session_state[f"calc_ind_pab_{clave}"] = pab
+    st.session_state[f"calc_ind_pab_slider_{clave}"] = pab
+    st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento * 100
+    st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento)
+    st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
 
 # Función Auxiliar para Mostrar la Selección de una Deuda
-def mostrar_seleccion_deuda(*,deuda: str, init_pab: Optional[float]) -> float:
-    """Función para mostrar la selección de una deuda
-    Basicamente debe mostrar el ID, el valor de la deuda
-    Sliders con Descuento y PaB, Ingreso Manual de Descuento y PaB, el Descuento Final, PaB Final y el ingreso que dejaría
+def mostrar_seleccion_deuda(
+    *,
+    deuda: str,
+    pab_origen: float,
+    init_pab: Optional[float],
+    pricing: float,
+    modo: str,
+) -> float:
+    """Función para mostrar la selección de una deuda.
+
+    Muestra el ID, el DUM (PaB_Origen), sliders sincronizados de Descuento y
+    PaB, inputs manuales de Descuento y PaB, y el ingreso que dejaría la deuda.
 
     Args:
-        deuda (str): El Id de la Deuda Seleccionada
-        init_pab (Optional[float]): El PaB con Descuento inicial a tomar
+        deuda (str): El Id de la Deuda Seleccionada.
+        pab_origen (float): El PaB_Origen (DUM) de la deuda.
+        init_pab (Optional[float]): El PaB inicial a tomar.
+        pricing (float): El Pricing de la Referencia.
+        modo (str): "tradicional" o "credito"; se usa para aislar el estado.
 
     Returns:
-        float: El Pago por la Deuda
-    """ 
-    # Primero Inicializamos los Estados de Cálculo de la Deuda
-    # Aquí se deben inicializar los valores y calcular para atrás según el último cambio
+        float: El Pago por la Deuda.
+    """
+    # Paso 1: Validar el PaB_Origen
+    pab_origen = max(float(pab_origen), 0.0)
+    if pab_origen <= 0:
+        st.warning("La deuda <{}> no tiene un PaB_Origen válido.".format(deuda), icon="⚠️")
+        return 0.0
 
-    # Luego Creamos las Columnas
-    colIdDum, colSliders, colManual, colDiscPayment, colIngreso = st.columns([1,3,1,1,1], vertical_alignment="center")
+    # Paso 2: Inicializar el estado de la deuda
+    clave = "{}_{}".format(modo, deuda)
+    init_pab = pab_origen if init_pab is None else min(max(float(init_pab), 0.0), pab_origen)
+    key_init = f"calc_ind_init_{clave}"
+    if st.session_state.get(key_init) != init_pab:
+        descuento_inicial = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=init_pab)
+        st.session_state[key_init] = init_pab
+        st.session_state[f"calc_ind_pab_{clave}"] = init_pab
+        st.session_state[f"calc_ind_disc_{clave}"] = descuento_inicial
+        st.session_state[f"calc_ind_pab_slider_{clave}"] = init_pab
+        st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento_inicial * 100
+        st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(init_pab)
+        st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento_inicial)
+
+    # Paso 3: Leer el estado final y crear las columnas
+    pab_final = float(st.session_state[f"calc_ind_pab_{clave}"])
+    descuento_final = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab_final)
+    ingreso = max((pab_origen - pab_final) * float(pricing), 0.0)
+
+    colIdDum, colSliders, colManual, colDiscPayment, colIngreso = st.columns(
+        [1, 3, 1, 1, 1], vertical_alignment="center"
+    )
 
     with colIdDum:
         st.metric(
             label="🆔Id Deuda",
             value=deuda
         )
-        # st.caption("✅DUM: **" + formatNumber(dum_deuda) + "**")
-    
+        st.caption("DUM: **$ {}**".format(formatNumber(pab_origen)))
+
     with colSliders:
         st.slider(
-            label="**Descuento**"
+            label="**Descuento (%)**",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+            key=f"calc_ind_disc_slider_{clave}",
+            on_change=_sincronizar_desde_slider_descuento,
+            kwargs={"clave": clave, "pab_origen": pab_origen},
         )
         st.slider(
-            label="PaB"
+            label="**PaB ($)**",
+            min_value=0.0,
+            max_value=float(pab_origen),
+            step=min(_paso_slider_pab(pab_origen), max(pab_origen, 1.0)),
+            key=f"calc_ind_pab_slider_{clave}",
+            on_change=_sincronizar_desde_slider_pab,
+            kwargs={"clave": clave, "pab_origen": pab_origen},
         )
 
     with colManual:
         st.text_input(
-            label="**Descuento**"
+            label="**Descuento (%)**",
+            key=f"calc_ind_disc_text_{clave}",
+            on_change=_sincronizar_desde_texto_descuento,
+            kwargs={"clave": clave, "pab_origen": pab_origen},
         )
         st.text_input(
-            label="**PaB**"
+            label="**PaB ($)**",
+            key=f"calc_ind_pab_text_{clave}",
+            on_change=_sincronizar_desde_texto_pab,
+            kwargs={"clave": clave, "pab_origen": pab_origen},
         )
 
-        # Se limpian los datos con cleanNumber
-    
     with colDiscPayment:
-        # 
         st.metric(
-            label="**✅ %Descuento**"
+            label="**✅ %Descuento**",
+            value="{:.1%}".format(descuento_final)
         )
         st.metric(
-            label="**💵 PaB**"
+            label="**💵 PaB**",
+            value="$ {}".format(formatNumber(pab_final))
         )
 
-    # with colIngreso:
-        # st.metric(
-        #     label="😁Ingreso",
-        #     value=f"{ingreso:,.2f}",
-        #     delta = f"${ingreso * (1+IVA):,.2f} con IVA"
-        # )
-    
-    # Por último devolvemos el PaB
-    # return pab_deuda
+    with colIngreso:
+        st.metric(
+            label="**😁 Ingreso**",
+            value="$ {}".format(formatNumber(ingreso)),
+            delta="$ {} con IVA".format(formatNumber(ingreso * IVA)),
+        )
+
+    # Por último devolvemos el PaB final
+    return pab_final
 
 # Función para mostrar la calculadora individual
 def mostrar_calculadora_individual(): 
@@ -330,7 +546,10 @@ def mostrar_calculadora_individual():
             "**😁 Referencia a Analizar**",
             options=refs_habilitadas,
             index=None,
-            help="Selecciona la Referencia que deseas analizar. Solo se muestran las Referencias habilitadas para tu usuario.",
+            help=(
+                "Selecciona la Referencia que deseas analizar. "
+                "Solo se muestran las Referencias habilitadas para tu usuario."
+            ),
             key="selectbox_referencia_calc_ind"
         )
         st.caption("Si no te sale la Ref es porque no estuvó asignada :(")
@@ -357,7 +576,7 @@ def mostrar_calculadora_individual():
         pricing_ref = obtener_pricing_para_referencia(ref_escogida)
         st.metric(
             label="💲 Pricing",
-            value=f"${pricing_ref:,.0%}",
+            value=f"{pricing_ref:,.0%}",
             delta="Pricing" if pricing_ref > 0.15 else "Tradicional",
             delta_color="normal"
         )
@@ -371,7 +590,7 @@ def mostrar_calculadora_individual():
             f"Batch: **{prosp_cred}**", color="green" if prosp_cred != "Tradicional" else "gray"
         )
         st.badge(
-            f"Prospecto Tradicional: **{prosp_trad}**", color="blue" if prosp_cred != "N/A" else "gray"
+            f"Prospecto Tradicional: **{prosp_trad}**", color="blue" if prosp_trad != "N/A" else "gray"
         )
 
     # Mostramos los Datos de Selección de Deudas
@@ -429,8 +648,8 @@ def mostrar_calculadora_individual():
         if np.isnan(cleanedVal):
             st.error("No se puede convertir el valor {} a Númerico".format(st.session_state[key]))
             cleanedVal = 0
-        # Actualizamos la llave
-        st.session_state[key] = formatNumber(cleanedVal)
+        # Actualizamos la llave (sin el ajuste de 999/001 de formatNumber)
+        st.session_state[key] = "{:,.0f}".format(cleanedVal)
 
         # Agregamos los Valores a la Configuración
         name_input = key[:key.index("_input")]
@@ -453,46 +672,130 @@ def mostrar_calculadora_individual():
             key = f"dep_extra_input_{ref_escogida}_calc_opps"
         )
 
+    # Limpiamos los inputs numéricos para usarlos en los cálculos
+    def _limpiar_input_numerico(valor, default):
+        numero = cleanNumber(valor, default_nan=np.nan)
+        if np.isnan(numero):
+            st.error("No se puede convertir el valor {} a Númerico".format(valor))
+            return float(default)
+        return float(numero)
+
+    ahorro_val = _limpiar_input_numerico(ahorro_input, ahorro)
+    porcobrar_val = _limpiar_input_numerico(porcobrar_input, porcobrar)
+    dep_extra_val = _limpiar_input_numerico(dep_extra_input, 0.0)
+
+    # Actualizamos las Configuraciones con los valores finales de los inputs
+    configs.update({
+        "ahorro": ahorro_val,
+        "porcobrar": porcobrar_val,
+        "dep_extra": dep_extra_val,
+        "Tipo_Analisis": "Crédito" if opp_credito else "Tradicional",
+    })
+
+    # Traemos el PaB_Origen de cada deuda seleccionada
+    datos_ref = obtener_asignacion_para_referencia(ref_escogida).copy()
+    mapa_pab_origen = {
+        str(row["Id_Deuda"]).replace(".0", "").strip(): float(row["PaB_Origen"])
+        for _, row in datos_ref.iterrows()
+    }
+
     # Se crean 2 Columnas: Columna de Detalles de Deudas y Columna de Resultados
-    colDetallesDeudas, colResultados = st.columns([4,1], vertical_alignment="center", gap="xsmall")
+    colDetallesDeudas, colResultados = st.columns([4, 1], vertical_alignment="center", gap="xsmall")
 
     pab_deudas = {}
+    pab_ideal_deudas = {}
 
     with colDetallesDeudas:
         for d in debts_selected:
             with st.container(border=True):
-                pab_deudas[d] = mostrar_seleccion_deuda(deuda=d)
+                pab_origen_deuda = float(mapa_pab_origen.get(str(d), 0.0))
+                if opp_credito:
+                    init_pab = obtener_valor_pab_ideal(debt=d)
+                    pab_ideal_deudas[d] = init_pab
+                else:
+                    init_pab = obtener_pab_actualizado_deuda(d, pab_origen=pab_origen_deuda)
+                    pab_ideal_deudas[d] = 0.0
+
+                pab_deudas[d] = mostrar_seleccion_deuda(
+                    deuda=d,
+                    pab_origen=pab_origen_deuda,
+                    init_pab=init_pab,
+                    pricing=pricing_ref,
+                    modo="credito" if opp_credito else "tradicional",
+                )
+
+    # Calculamos los totales y la viabilidad del cliente
+    dum_total = sum(
+        float(mapa_pab_origen.get(str(d), 0.0)) for d in debts_selected
+    )
+    pab_total = sum(pab_deudas.values())
+    ingreso_total = sum(
+        max(
+            (float(mapa_pab_origen.get(str(d), 0.0)) - pab_deudas[d]) * pricing_ref,
+            0.0,
+        )
+        for d in debts_selected
+    )
+    pab_ideal_total = sum(pab_ideal_deudas.values())
+    viabilidad = evaluar_viabilidad_cliente(
+        pab_total=pab_total,
+        pab_ideal_total=pab_ideal_total,
+        ingreso_total=ingreso_total,
+        ahorro=ahorro_val,
+        por_cobrar=porcobrar_val,
+        deposito_extra=dep_extra_val,
+        es_opp_cred=opp_credito,
+    )
 
     with colResultados:
-        # Mostramos Dum Total, PaB, Ingreso ,Pago Total del Cliente y si es Viable
+        # Mostramos Dum Total, PaB, Ingreso, Pago Total del Cliente y si es Viable
         st.metric(
-            label="**💰 DUM Total**"
+            label="**💰 DUM Total**",
+            value="$ {}".format(formatNumber(dum_total)),
         )
         st.metric(
-            label="**💵 PaB**"
+            label="**💵 PaB**",
+            value="$ {}".format(formatNumber(pab_total)),
         )
         st.metric(
             label="**😁 Ingreso**",
-            delta = "{:,.2f} con IVA"
+            value="$ {}".format(formatNumber(ingreso_total)),
+            delta="$ {} con IVA".format(formatNumber(ingreso_total * IVA)),
         )
         st.metric(
-            label="**ℹ️ Pago Total**"
-            #value = sum(pab_deudas.values()) + ingreso*(1+IVA)
+            label="**ℹ️ Pago Total**",
+            value="$ {}".format(formatNumber(viabilidad["pago_total"])),
+            help="Incluye comisión con IVA y los $20.000 adicionales.",
         )
         st.metric(
             label="**❔Es Viable**",
-            # value="Viable 😁" if 
-            # es_viable_cliente(
-            # referencia=ref_escogida, 
-            # pab_deudas = pab_deudas, 
-            # ahorro_neto = ahorro_input + dep_extra_input - porcobrar_input) 
-            # else "❌ No Viable"
+            value="Viable 😁" if viabilidad["viable"] else "❌ No Viable",
         )
-        # Para Calcular la viabilidad del cliente hay que ver si es opp de liq instantanea dado el nuevo ahorro,por cobrar y deposito extra
+        st.caption("Tradicional: {} | Crédito: {}".format(
+            "✅" if viabilidad["viable_tradicional"] else "❌",
+            ("✅" if viabilidad["viable_credito"] else "❌") if opp_credito else "N/A",
+        ))
+
+    # Agregamos los resultados a las Configuraciones
+    configs.update({
+        "Pab_Deudas": pab_deudas,
+        "Pab_Total": pab_total,
+        "DUM_Total": dum_total,
+        "Ingreso_Total": ingreso_total,
+        "Pago_Total": viabilidad["pago_total"],
+        "Es_Viable": viabilidad["viable"],
+    })
 
     st.divider()
     # Mostramos las Oportunidades de la Referencia
-    mostrar_oportunidades_referencia(referencia = ref_escogida, deudas = debts_selected)
+    mostrar_oportunidades_referencia(
+        referencia=ref_escogida,
+        debts_selected=debts_selected,
+        es_opp_cred=opp_credito,
+        ahorro=ahorro_val,
+        porcobrar=porcobrar_val,
+        deposito_extra=dep_extra_val,
+    )
 
     st.divider()
     # Mostramos Componente de Feedback

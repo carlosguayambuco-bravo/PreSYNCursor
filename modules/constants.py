@@ -7,6 +7,69 @@ from typing import Literal
 IVA = 1.19
 MINIMO_RATIO_FUZZY = 75
 
+# --- Configuración de Oportunidades ---
+# Monto adicional que se suma a los depósitos por restricciones de dónde se guarda el ahorro
+MONTO_ADICIONAL_DEPOSITO = 20_000
+# Umbrales de la oportunidad de Depósito Extra
+UMBRAL_DEPOSITO_EXTRA_APARTADOS = 3
+UMBRAL_DEPOSITO_EXTRA_MONTO = 1_000_000
+# Umbrales de la oportunidad de ContraOferta Viable
+UMBRAL_CONTRACOFERTA_MAXIMA = 0.95
+MARGEN_DESCUENTO_ESPERADO = 0.2
+# Umbral de probabilidad para la oportunidad de IA Liquidadora
+UMBRAL_PROB_LIQ_IA = 0.5
+# Etiquetas de Actualización con las que se confía para calcular el Descuento Actual
+ETIQUETAS_ACT_CONFIABLES = [
+    'CAMBIO DE PAB',
+    'ACUERDO',
+    'DEPOSITO',
+    'ACTUALIZADO_ALIANZAS',
+]
+# Nombres, colores, iconos y descripciones de las Oportunidades
+OPORTUNIDADES = [
+    'Depósito Extra',
+    'ContraOferta Viable',
+    'Liquidación Instantánea',
+    'Acuerdo para Robo',
+    'IA Liquidadora',
+]
+COLORES_OPORTUNIDADES = {
+    'Depósito Extra': 'blue',
+    'ContraOferta Viable': 'orange',
+    'Liquidación Instantánea': 'green',
+    'Acuerdo para Robo': 'red',
+    'IA Liquidadora': 'violet',
+}
+ICONOS_OPORTUNIDADES = {
+    'Depósito Extra': '📈',
+    'ContraOferta Viable': '🤝',
+    'Liquidación Instantánea': '⚡',
+    'Acuerdo para Robo': '🏴',
+    'IA Liquidadora': '🤖',
+}
+DESCRIPCION_OPORTUNIDADES = {
+    'Depósito Extra': (
+        "El cliente requiere un depósito adicional para completar el pago. "
+        "Se mide en apartados netos o hasta 1M COP."
+    ),
+    'ContraOferta Viable': (
+        "Existe un descuento que permite pagar las deudas y la comisión "
+        "con el ahorro o el cupo de crédito."
+    ),
+    'Liquidación Instantánea': (
+        "El descuento actual ya es suficiente para liquidar sin necesidad "
+        "de un nuevo acuerdo."
+    ),
+    'Acuerdo para Robo': (
+        "Acuerdo de pago vencido, no liquidado y sin gestión posterior; "
+        "se puede retomar."
+    ),
+    'IA Liquidadora': (
+        "La deuda tiene probabilidad de liquidación >= 50% según el modelo "
+        "de Prospectos de Tradicional."
+    ),
+}
+
 # --- Configuraciones de Streamlit ---
 MIN_10_WAIT = 600 # En Segundos
 HOUR_WAIT = 3600 # En Segundos

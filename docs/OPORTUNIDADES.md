@@ -15,3 +15,5 @@ Para esto se cuenta con las siguientes oportunidades que establecen diferentes f
 > **Liquidación Instantánea**: Clientes que con el Descuento Actual pasen el PAB Ideal de Crédito o cuenten con el dinero suficiente para pagar la/las deudas.
 
 > **IA Liquidadora**: El Modelo interno de IA para la liquidación de clientes (1 de cada 3 se paga) prioriza los clientes que se tengan en cartera
+
+> **Estado de implementación:** la Calculadora Individual por Referencia ya implementa estas oportunidades y permite simular Ahorro, Por Cobrar y Depósito Extra. La Calculadora Masiva sigue pendiente.

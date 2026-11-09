@@ -7,7 +7,19 @@ Particularmente para Crédito, es importante que el cliente sea optimo (esto seg
 
 De la misma forma, no es posible calcular oportunidades para deudas ya liquidadas, ya que las oportunidades se calculan con el fin de generar una liquidación.
 
-> **Nota de implementación:** `PaB_Actualizado` ya existe en `ActualizacionesSchema` y se carga desde la columna `payment_to_bank` de la hoja de Actualizaciones. Las fórmulas de este documento siguen siendo la especificación de negocio; las funciones de `modules/oportunidades.py` están pendientes de implementación. El loader actual toma el primer número de `payment_to_bank` y lo divide entre 100, por lo que hay que validar la unidad (centavos/porcentaje) antes de usar estas fórmulas.
+> **Nota de implementación:** `PaB_Actualizado` ya existe en `ActualizacionesSchema` y se carga desde la columna `payment_to_bank` de la hoja de Actualizaciones. El loader toma el primer número de `payment_to_bank` y lo divide entre 100: la fuente viene en **centavos** y el resultado queda en **COP**. Las fórmulas de este documento ya están implementadas en `modules/oportunidades.py` y cubiertas por `tests/test_oportunidades.py`.
+
+> **Nota de la calculadora individual:** los inputs editables de Ahorro, Por Cobrar y Depósito Extra se usan para simular el escenario. Las oportunidades se recalculan con esos valores; el Depósito Extra simulado se suma al ahorro/cupo para recalcular la ContraOferta y se resta del depósito necesario para evaluar la Liquidación Instantánea. Las deudas seleccionadas se asumen como el portafolio analizado.
+
+## **Descuento Actual y `PaB_Actualizado`**
+El `Descuento Actual` se calcula como:
+
+$$Descuento \: Actual = 1 - \frac{SUM(PaB\_Actualizado)}{SUM(PaB\_Origen)}$$
+
+Para obtener `PaB_Actualizado`:
+1. Se toma la actualización más reciente de la deuda.
+2. Solo se confía en las etiquetas **CAMBIO DE PAB**, **ACUERDO**, **DEPOSITO** y **ACTUALIZADO_ALIANZAS**. Si la actualización más reciente tiene otra etiqueta, se usa `PaB_Origen` (Descuento Actual = 0).
+3. Para **ACTUALIZADO_ALIANZAS** se cruza el último descuento en base (masivas) con la última solicitud exitosa. Si ambas fuentes tienen fecha, prevalece la más reciente; si no hay fechas comparables, se usa el valor de la fila de actualización.
 
 ## **Depósito Extra**
 Un depósito extra hace referencia a una solicitud al cliente de conseguir un dinero adicional con el fin de liquidar una o más deudas. Estos depósitos se suelen medir en `Apartados Netos` del cliente con el fin de tener una medida estándar entre los 
@@ -29,6 +41,8 @@ Una vez establecidos los cálculos la regla de que sea oportunidad consiste en q
 - $\frac{Deposito\_Extra}{Apartado\_Neto} \leq 3$
 - $Deposito\_Extra \leq 1,000,000 COP$
 En caso de que el Apartado_Neto sea 0, solo aplica la segunda condición, ya que implica que no hay dinero extra a futuro con el cuál se pueda contar.
+
+> **Agregación de `Apartado_Neto`:** es un dato del cliente que se repite por deuda en la Asignación. Para no sobrecontarlo, se toma un único valor del conjunto (el máximo de las filas seleccionadas), no la suma.
 
 ## **ContraOferta Viable**
 Una ContraOferta viable hace referencia a pedir un monto por todas las deudas de modo que se cumpla el cupo de crédito o que el cliente con el ahorro pueda realizar el pago por las deudas y la comisión.
@@ -56,22 +70,26 @@ La Liquidación Instantánea hace referencia a que un cliente ya cuenta con un d
 Para aprovechar los cálculos que se realizan de las otras oportunidades (mas exactamente de la ContraOferta Viable), con base en esos cálculos se define la liquidación instantánea.
 
 La definición es:
-- $Descuento \: Actual \leq ContraOferta \: Viable$
+- $Descuento \: Actual \geq ContraOferta \: Viable$
 - $Descuento \: Actual \neq 0$
-Con que se cumplan estas 2 condiciones (con descuento y menor al necesario) ya se considera una oportunidad de liquidación instantánea.
+Con que se cumplan estas 2 condiciones (con descuento y con un descuento actual igual o mejor que el necesario) ya se considera una oportunidad de liquidación instantánea. También aplica cuando el Depósito Extra calculado es menor a 0 (no se requiere depósito).
+
+> **Corrección de la fórmula:** la versión anterior de este documento decía `Descuento Actual <= ContraOferta Viable`. La condición correcta es `>=`: un descuento actual mayor significa que el pago es menor y, por tanto, ya cabe en el cupo de crédito o en el ahorro.
 
 ## **Acuerdo para Robo**
-La Oportunidad de Acuerdo para Robo consiste en acuerdos de pago que ya vencieron su fecha de pago y aún no han sido liquidados. Esto solo aplica para acuerdos de pago del MEC, donde en el MEC se tenga una actualización con Etiqueta **ACUERDO**.
+La Oportunidad de Acuerdo para Robo consiste en acuerdos de pago que ya vencieron su fecha de pago, no han sido liquidados y no tienen una gestión posterior. Esto solo aplica para acuerdos de pago del MEC, donde en el MEC se tenga una actualización con Etiqueta **ACUERDO**.
+
+Se considera que **no hay gestión posterior** cuando no existe ninguna actualización de la deuda con `Fecha_Act` posterior a la fila que registró el **ACUERDO**. Si existe cualquier actualización posterior (llamada, pago, cambio de PAB, etc.), la deuda deja de ser oportunidad de robo.
 
 Para esto se requiere la fecha de vencimiento del acuerdo, que puede ser obtenida en 2 lugares:
 - **Acuerdo de Alianzas**: Acuerdo solicitado durante el MEC en alianzas que tiene respuesta exitosa. La fecha de vencimiento es la columna `Fecha_Limite_Pago` del DF de Solicitudes.
 - **Acuerdo Externo**: Acuerdo conseguido por fuera. La fecha de vencimiento se consigue desde metabase.
 
 El flujo para conseguir la fecha es:
-1. Verificar si existe en Alianzas
+1. Verificar si existe en Alianzas. Si existe y está vencido, es oportunidad; si existe y está vigente, no se consulta Metabase.
 2. Si no existe, verificar fecha en Meta
-    - Si no hay fecha en Meta pero el resto de los datos se obtiene, se considera para robo
-    - Si ocurrió un error al traer los datos de meta mejor dejar como que no es oportunidad para evitar problemas a futuro.
+    - Si no hay fecha en Meta pero el resto de los datos se obtiene, se considera para robo (se reporta como "Sin fecha")
+    - Si ocurrió un error al traer los datos de meta, no se considera oportunidad para evitar problemas a futuro.
 
 La unión con Alianzas y Metabase se hace **por deuda** (`Id_Deuda`), no por referencia, porque no todas las deudas del cliente tienen un acuerdo de pago en curso.
 
@@ -79,3 +97,5 @@ La unión con Alianzas y Metabase se hace **por deuda** (`Id_Deuda`), no por ref
 La oportunidad de IA Liquidadora es única en su categoría ya que no requiere ningún cálculo. Esto dado que proviene de los `Prospectos de Tradicional`, que son el resultado de un modelo de probabilidad de liquidación.
 
 Ahora, si bien existe la categoría de prospecto de liquidación, se considera como oportunidad de liquidación si cuenta con una probabilidad >= 50%. Simplemente se dá mas impulso a aquellos que cuentan con categoría.
+
+Para varias deudas seleccionadas, basta con que **al menos una** tenga `Prob_Liq >= 0.5` para que la Referencia tenga la oportunidad. El detalle muestra las deudas que cumplen y su probabilidad.
