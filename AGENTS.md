@@ -118,6 +118,10 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 - **Reasignable:** un acuerdo solicitado por un asesor cuyo pago no se ha reflejado puede ser tomado por otro negociador cuando vence la fecha límite de pago. Aplica a Acuerdos y Ofertas de Acuerdo no liquidados; excluye Validaciones. Cualquier negociador puede tomarlo.
 - **Aprobaciones de comité / titular ilocalizable:** `Estado_Comite` y `Estado_Titular_Ilocalizable` usan `1 = pendiente de aprobación`, `2 = rechazado`, `3 = aprobado pendiente de finalizar`. El **negociador** aprueba o rechaza con base en lo hablado con el cliente; si aprueba, la solicitud vuelve a la cola del ejecutivo para finalizarla. `Bajo Comité` suele implicar pago obligatorio y `Titular Ilocalizable` se usa para informar la situación de localización del titular.
 - **Contrapropuesta máxima relativa:** llega un descuento en base del aliado y ya se hizo un estudio de hasta qué porcentaje se puede mejorar. El código calcula `1 - monto_solicitado / monto_en_base` y **detiene el envío** si supera `Contrapropuesta_Maxima_Relativa`; aplica a Validación/Oferta y cuando el aliado se resolvió por `Directo Base`.
+- **Descuento Actual**: Consiste en el descuento actual con el cual cuenta la deuda. Para esto existe la siguiente regla: De las actualizaciones solo se confia en las siguientes etiquetas: *CAMBIO DE PAB*,*ACUERDO*,*DEPOSITO* y *ACTUALIZADO_ALIANZAS*. En el caso de actualizado alianzas se busca el último descuento en base y/o la última solicitud exitosa de la deuda.
+- **Búsqueda de Portafolios**: Para definir las deudas que se necesitan agrupar por portafolios existen 2 reglas:
+1. **Con Actualización**: En este caso, se toman todas las deudas del cliente con una actualización y se verifica si están en un período de actualización entre ellas de ~1 min max. Todas las deudas que cumplan este criterio se consideran en portafolio.
+2. **Sin Actualizaciones**: Si no existen actualizaciones, se agrupan las deudas sin actualizaciones por los bancos exclusvimante mostrados en la constante   *BANCOS_PORTAFOLIO*.
 
 ### 1.6 SLA y métricas
 

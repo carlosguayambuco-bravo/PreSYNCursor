@@ -1,6 +1,7 @@
 # Estándar usando Pep8
 # Librerías de Python
 from typing import Any, Optional, TypedDict
+from time import sleep
 # Librerías de Terceros
 from pandera.typing import DataFrame
 import pandas as pd
@@ -8,6 +9,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import load_current_month_solicitudes
 from data.data_models import DeudasActivasSchema
+from data.data_uploader import send_feedback
 from modules.classes import Aliado
 from modules.forms import mostrar_como_subir_solicitud_aliados_diferentes, obtener_descuento_base, validar_descuento_base, obtener_descuento_optimo, verificar_bloqueo_bancos
 from modules.gest_sols import distribuir_monto_por_deuda
@@ -700,3 +702,48 @@ def mostrar_dialogo_alerta_saldo(*,
         ):
             st.session_state['confirmar_envio_saldo_bajo'] = False
             st.rerun()
+
+# Función Auxiliar para mostrar un Componente de Feedback
+def mostrar_componente_feedback(*,origin: str, configs: dict):
+    """Función para mostrar un pequeño componente que sirva para dar feedback de la configuración interna del app
+
+    Args:
+        origin (str): El origen del Feedback
+        configs (dict): Las Configuraciones que se usaron al momento de dar el Feedback
+    """
+    # Creamos el Expander
+    with st.expander("**♻️ Dar FeedBack del App**", expanded=False):
+        # Hay 2 Opciones a Mostrar: Like o Dislike ,Espacio para Comentario y Botón de Envío
+        colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="center", border=True)
+
+        with colGusto:
+            gusto_fb = st.feedback(
+                "thumbs",
+                key=origin+"_feedback_gusto",
+                )
+
+        with colComentario:
+            comentario_fb = st.text_area(
+                label="**👌Recomendaciones o 😒Quejas o 😁Felictaciones**",
+                key=origin+"_feedback_comentario",
+            )
+
+        # Ajustamos el Comentario a "Sin Comentario"
+        comentario_fb = comentario_fb or "Sin Comentario"
+
+        # Creamos el Botón de envío
+        with colEnviar:
+            enviar_fb = st.button(
+                label="**➿Enviar Feedback**",
+                type="primary",
+                width="stretch",
+                disabled= (gusto_fb is None),
+                key = origin+"_feedback_envio"
+            )
+
+        # Enviamos el Feedback
+        if enviar_fb:
+            if send_feedback(origin=origin, configs=configs, result=(gusto_fb == 1), commentary=comentario_fb):
+                st.toast("Feedback Enviado con Éxito, Gracias :D",icon="♻️")
+                sleep(1.5)
+                st.rerun()

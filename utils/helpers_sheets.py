@@ -12,6 +12,7 @@ from gspread_dataframe import get_as_dataframe, set_with_dataframe
 import gspread
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 # Párametros de Configuración
 MAX_RETRIES = 10
@@ -419,7 +420,7 @@ def applyChanges(
         # Asegurar que todo se convierta a tipos nativos de Python (o string) antes de enviar
         rows_new = []
         for _id in ids_new:
-            row_values = py_by_id.loc[_id, cols].tolist()
+            row_values = py_by_id.loc[_id, cols].tolist() # type: ignore
             # Convertir cada elemento a string si persiste el error, o usar .item()
             sanitized_row = ["" if pd.isna(x) or x in [np.inf, -np.inf] else (x.item() if hasattr(x, 'item') else x) for x in row_values]
             rows_new.append(sanitized_row)
@@ -580,45 +581,82 @@ def convert_data_to_string(obj: Any) -> str:
         return str(obj).replace('\'','"')
 
 # Función Auxiliar para Eliminar Filas
+
+# Función Auxiliar para Eliminar Filas
 def deleteRows(
     worksheet: gspread.Worksheet,
     rows_to_delete: list[int],
-)-> bool:
-    """Elimina filas de forma masiva agrupando filas adyacentes
+) -> bool:
+    """
+    Elimina múltiples filas mediante una única llamada batch_update
+    a Google Sheets API.
 
-    Args:
-        worksheet (gspread.Worksheet): La Hoja de la cual se desean eliminar las Filas
-        rows_to_delete (list[int]): La Lista de índices de las filas que se desean eliminar (1-indexed)
+    - Elimina filas adyacentes mediante bloques.
+    - Elimina bloques de abajo hacia arriba.
+    - Utiliza _retry para manejar errores temporales del API.
+    - Los números de fila recibidos son base 1 (formato Google Sheets).
+    """
+    try:
+        if not rows_to_delete:
+            return True
 
-    Returns:
-        bool: True si la Actualización funciona, de lo contrario False
-    """    
-    
-    if not rows_to_delete:
+        # 1. Eliminar duplicados y ordenar de mayor a menor
+        unique_rows = sorted(set(rows_to_delete), reverse=True)
+
+        if unique_rows[-1] < 1:
+            raise ValueError("Los números de fila deben ser mayores o iguales a 1.")
+
+        total_rows = len(unique_rows)
+
+        # 2. Agrupar filas adyacentes
+        batches = []
+
+        start_row = end_row = unique_rows[0]
+
+        for row in unique_rows[1:]:
+
+            if row == start_row - 1:
+                # La fila es adyacente a la anterior
+                start_row = row
+
+            else:
+                # Finalizar bloque anterior
+                batches.append((start_row, end_row))
+
+                # Iniciar nuevo bloque
+                start_row = end_row = row
+
+        # Agregar último bloque
+        batches.append((start_row, end_row))
+
+        total_batches = len(batches)
+
+        # 3. Construir todas las operaciones DeleteDimension
+        requests = []
+
+        for start_row, end_row in batches:
+
+            requests.append({
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "dimension": "ROWS",
+
+                        # Google Sheets API utiliza índices base 0
+                        # y endIndex es exclusivo.
+                        "startIndex": start_row - 1,
+                        "endIndex": end_row
+                    }
+                }
+            })
+
+        _retry(
+            lambda: worksheet.spreadsheet.batch_update({
+                "requests": requests
+            })
+        )
+
         return True
-
-    # 1. Remove duplicates and sort in descending order
-    unique_rows = sorted(list(set(rows_to_delete)), reverse=True)
-    total_rows = len(unique_rows)
-
-    # 2. Group adjacent numbers into structured batches upfront
-    batches = []
-    for _, g in groupby(enumerate(unique_rows), lambda ix: ix[0] + ix[1]):
-        group = list(map(itemgetter(1), g))
-        end_row = group[0]
-        start_row = group[-1]
-        length = end_row - start_row + 1
-        batches.append((start_row, end_row, length))
-
-    total_batches = len(batches)
-
-    # 3. Batch delete each block from bottom to top
-    for _, (start_row, end_row, length) in enumerate(batches, start=1):
-
-        try:
-            _retry(lambda: worksheet.delete_rows(start_index=start_row, end_index=end_row))
-            continue
-        except APIError:
-            return False
-
-    return True
+    except Exception as e:
+        st.error("Error a Eliminar Filas: {}".format(e))
+        return False

@@ -7,6 +7,7 @@ from urllib import response
 # Librerías de Terceros
 from gspread.exceptions import WorksheetNotFound
 import gspread
+from pandera import Bool
 from pandera.typing import DataFrame
 import numpy as np
 import pandas as pd
@@ -664,3 +665,43 @@ def upload_base_mes_info(
             "**'Subido Alianzas'**.".format(len(df_nuevos), len(df_existentes)),
         )
     return exito
+
+# Función para Enviar feedback
+def send_feedback(*, origin: str, configs: dict, result: bool, commentary: str) -> bool:
+    """Función para subir el Feedback a google Sheets
+
+    Args:
+        origin (str): El Origen del Feedback
+        configs (dict): Los paramétros usados durante el envío del Feedback
+        result (bool): Tipo de Feedback (Positivo o Negativo)
+        commentary (str): Comentario del Feedback
+
+    Returns:
+        bool: Booleano para determinar si se subió o no la info
+    """
+    # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+
+    # Abrimos la Hoja "Feedback" de las Configuraciones
+    feedback_ws = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Feedback')
+
+    # Ahora vamos a Crear el DF de Subida
+    subida_info = {
+        "Fecha": pd.Timestamp.now("America/Bogota").strftime("%Y-%m-%d %X"),
+        "Usuario": st.session_state.get("user_email","not_found"),
+        "Positivo": result,
+        "Origen": origin,
+        "Comentario": commentary,
+        "Configuraciones": convert_data_to_string(configs),
+    }
+
+    subida_df = pd.DataFrame([subida_info])
+
+    # Agregamos los Datos
+    try:
+        appendDataFrameToEnd(feedback_ws, subida_df, "Feedback Sent")
+        return True
+    except Exception as e:
+        st.error("Error al Subir Feedback, Intentar de Nuevo",icon="❌")
+        st.caption(str(e))
+        return False

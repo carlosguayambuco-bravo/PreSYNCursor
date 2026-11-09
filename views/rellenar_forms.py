@@ -9,7 +9,7 @@ import pandas as pd
 from data.data_loader import load_addendums, load_app_config, load_client_balances, load_liquidaciones, load_masivas, load_prospectos_credito, obtener_deudas_activas_con_retry, obtener_referencia_por_deuda, obtener_ultima_actualizacion_deudas
 from data.data_uploader import upload_form_response_to_google_sheets
 from modules.forms import cumple_condicion_actualizacion_deudas, alertar_excedencia_contraprop_max_relativa
-from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_bloqueo_bancos, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
+from ui.forms_components import mostrar_alertas_masivas_deudas, mostrar_bloqueo_bancos, mostrar_componente_feedback, mostrar_dialogo_alerta_saldo, mostrar_monto_recomendado, mostrar_resumen_solicitud, mostrar_seleccion_deudas, poner_monto_por_deuda, resolver_aliado_directo_base
 from utils.helpers_general import cleanNumber, getBDDaysDiffFloat, move_business_days
 
 # Carga de Información Necesaria para el Formulario
@@ -586,12 +586,12 @@ if solicitud_subida_exitosa:
     st.divider()
 
     # Obtenemos el Ejecutivo que Gestionará la Solicitud y Separamos Nombres y Apellidos
-    partes_ejecutivo = str(info_solicitud_subida.get('ejecutivo') or '').split()
+    partes_ejecutivo = str(info_solicitud_subida.get('ejecutivo') or '').split() # type: ignore
     nombres_ejecutivo = ' '.join(partes_ejecutivo[:2]) or 'Sin Asignar'
     apellidos_ejecutivo = ' '.join(partes_ejecutivo[2:]) or None
 
     # Obtenemos la Fecha Límite de Respuesta y los Días Hábiles Faltantes hasta el Final del Día
-    fecha_limite_respuesta = pd.Timestamp(info_solicitud_subida['fecha_limite_respuesta'])
+    fecha_limite_respuesta = pd.Timestamp(info_solicitud_subida['fecha_limite_respuesta']) # type: ignore
     fecha_limite_fin_dia = fecha_limite_respuesta.replace(hour=23, minute=59, second=59)
     dias_habiles_faltantes = getBDDaysDiffFloat(
         pd.Timestamp.now('America/Bogota').tz_localize(None),
@@ -633,4 +633,15 @@ if solicitud_subida_exitosa:
         ),
         title="😁 Cuando puedes validar por fuera",
         icon="ℹ️",
+    )
+
+    # Agregamos Muestra de Feedback
+    mostrar_componente_feedback(
+        origin="llenado_forms",
+        configs={
+            "Referencia": referencia_cliente,
+            "Deudas": '-'.join(deudas_info.keys()),
+            "Aliado": aliado_seleccionado,
+            "Tipo_Solicitud": tipo_solicitud,
+        }
     )
