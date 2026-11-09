@@ -781,6 +781,7 @@ Portafolios:
 26. **Ruta de la documentación.** `views/calculadora_opps.py` resuelve `docs/OPORTUNIDADES.md` desde `__file__`; si mueves la carpeta `docs/`, actualiza esa ruta.
 27. **`PERMITIR_CALCULO_NO_ASIGNADO` es un override de pruebas.** Si está activo, cualquier rol ve todas las Referencias. No lo dejes activo en producción.
 28. **El feedback no se lee desde la app.** Se escribe en la hoja `Feedback` de Configs con `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Si cambias el esquema, actualiza `send_feedback` y la documentación.
+29. **El App comparte el cliente OAuth con el MCP de Google Workspace.** Si el MCP ya concedió scopes adicionales, Google devuelve el conjunto completo en el token y `oauthlib` lanza `Warning: Scope has changed...`. `core/auth_scopes.py` configura `OAUTHLIB_RELAX_TOKEN_SCOPE=1` y `core/auth.py` valida que los scopes propios del App estén presentes. No quites esa configuración ni cambies `SCOPES` sin probar el login con la skill activa. La solución definitiva (cliente/proyecto OAuth separado) requiere acceso a GCP; hoy no está disponible.
 
 ---
 

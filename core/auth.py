@@ -24,6 +24,11 @@ except ImportError:  # Sin el paquete, las cookies solo se leen de la petición 
     stx_cookie_manager = None
 
 # Librerías Locales
+from core.auth_scopes import (
+    configure_oauthlib_for_shared_client,
+    missing_scopes,
+    normalize_scope_list,
+)
 from core.users import User
 from data.data_loader import load_headcount_negociacion
 from views.error_page import error_page_view
@@ -35,6 +40,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",  # Grants access to read and write files created or opened by the app
     "https://www.googleapis.com/auth/gmail.send",  # Grants access to send emails on behalf of the user
 ]
+
+# El App comparte el client_id con el MCP de Google Workspace. Si el MCP ya
+# concedió scopes adicionales, Google devuelve el conjunto completo en el
+# token y oauthlib lo rechaza como "Scope has changed". Se relaja esa
+# validación y, más adelante, se exige que los scopes propios del App estén
+# presentes antes de aceptar la sesión.
+configure_oauthlib_for_shared_client()
 
 # --- Configuración de la persistencia de credenciales ---
 # Las credenciales de Google se persisten en dos capas:
@@ -710,8 +722,22 @@ def _handle_oauth_callback(params) -> None:
         flow.code_verifier = code_verifier  # Set the code_verifier for PKCE
         flow.fetch_token(code=code)
 
+        # Google puede incluir scopes adicionales ya concedidos al client_id
+        # compartido (por ejemplo, por el MCP de Google Workspace). Se valida
+        # que los permisos propios del App estén presentes antes de continuar.
+        oauth_credentials = flow.credentials
+        granted_scopes = normalize_scope_list(oauth_credentials.granted_scopes)
+        scopes_faltantes = missing_scopes(granted_scopes, SCOPES)
+        if scopes_faltantes:
+            raise ValueError(
+                "No se otorgaron todos los permisos necesarios para usar la "
+                "aplicación. Faltan: "
+                f"{', '.join(scopes_faltantes)}. "
+                "Vuelve a iniciar sesión y acepta todos los permisos."
+            )
+
         # Guardamos las credenciales de OAuth en el session state.
-        credentials_data = _credentials_to_dict(flow.credentials)
+        credentials_data = _credentials_to_dict(oauth_credentials)
         _set_session_credentials(credentials_data)
 
         # Clear URL parameters to keep address bar clean
