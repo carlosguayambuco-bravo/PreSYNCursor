@@ -6,11 +6,11 @@ Esta información se saca teniendo en cuenta que las etiquetas que se consideran
 Para tener en cuenta los portafolios, se va a tener en cuenta que las actualizaciones posteriores sean 45s o menos entre sí (ventana configurable con `VENTANA_PORTAFOLIO_SEGUNDOS`). En caso de no haber actualizaciones se toma de forma individual exceptuando los bancos **Banco de Occidente, Banco Popular, Itaú y BBVA Colombia**.
 
 Para esto se cuenta con las siguientes oportunidades que establecen diferentes formas de dar a entender que una o más deudas son liquidables:
-> **Depósito Extra**: En caso que un cliente requiera *3 Apartados Netos o menos, o 1M COP o menos* se considera como una oportunidad para pedir depósito extra.
+> **Depósito Extra**: En caso que un cliente requiera *3 Apartados Netos o menos, o 1M COP o menos* se considera como una oportunidad para pedir depósito extra. Si `Apartado_Neto` es 0, solo aplica la condición de 1M COP.
 
-> **ContraOferta Viable**: Teniendo en cuenta el ahorro del cliente o el pab ideal de credito se calcula el *descuento necesario para pagar la(s) deuda(s)*. Esta oportunidad tiene su propio apartado para ver como ajustar los descuentos y el ingreso que se puede generar. **NO APLICAN CLIENTES YA LIQUIDABLES**
+> **ContraOferta Viable**: Teniendo en cuenta el ahorro del cliente o el pab ideal de credito se calcula el *descuento necesario para pagar la(s) deuda(s)*. Esta oportunidad tiene su propio apartado para ver como ajustar los descuentos y el ingreso que se puede generar. **NO APLICAN CLIENTES YA LIQUIDABLES**. Para varias deudas, el `Descuento Esperado` se pondera por `PaB_Origen`.
 
-> **Acuerdos para Robo**: Acuerdos Vencidos que no cuenten con una gestión posterior con el cliente.
+> **Acuerdos para Robo**: Acuerdos Vencidos que no cuenten con una gestión posterior con el cliente. La unión con Alianzas/Metabase es por deuda (`Id_Deuda`).
 
 > **Liquidación Instantánea**: Clientes que con el Descuento Actual pasen el PAB Ideal de Crédito o cuenten con el dinero suficiente para pagar la/las deudas.
 

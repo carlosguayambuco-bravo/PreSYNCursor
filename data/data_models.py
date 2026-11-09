@@ -391,6 +391,7 @@ class ActualizacionesSchema(pa.DataFrameModel):
     Etiqueta_Act: str
     Referencia: str
     Fecha_Act: pa.dtypes.Timestamp
+    PaB_Actualizado: float
     Nombre: str
 
 class UltimaActualizacionSchema(pa.DataFrameModel):
@@ -436,7 +437,6 @@ class AsignacionSchema(pa.DataFrameModel):
     Mora_Estructurado: int
     Mora_Credito: int
     Meses_Sin_Contacto: int
-    Fecha_Cartera: pa.dtypes.Timestamp
 
 class ProspectosTradicionalSchema(pa.DataFrameModel):
     """

@@ -10,9 +10,9 @@ from data.data_loader import (
     obtener_prioridad_archivo,
     obtener_prioridad_hoja,
     _parse_mes_anio_desde_nombre_archivo,
-    load_mes_operativo_asignacion,
+    load_mes_operativo_liquidaciones,
 )
-from data.data_models import AsignacionSchema
+from data.data_models import ActualizacionesSchema, AsignacionSchema
 from modules.oportunidades import (
     obtener_referencias_habilitadas,
     obtener_ultima_actualizacion_deuda,
@@ -43,10 +43,14 @@ class TestPrioridadAsignacion(unittest.TestCase):
         self.assertEqual(obtener_prioridad_hoja("Octubre-2025"), (0, 0, 0))
         self.assertEqual(obtener_prioridad_hoja("Octubre"), (0, 0, 0))
 
-    def test_asignacion_schema_incluye_fecha_cartera_y_banco(self):
+    def test_asignacion_schema_incluye_banco(self):
         columnas = list(AsignacionSchema.to_schema().columns)
-        self.assertIn("Fecha_Cartera", columnas)
         self.assertIn("Banco", columnas)
+        self.assertNotIn("Fecha_Cartera", columnas)
+
+    def test_actualizaciones_schema_incluye_pab_actualizado(self):
+        columnas = list(ActualizacionesSchema.to_schema().columns)
+        self.assertIn("PaB_Actualizado", columnas)
 
 
 class TestReferenciasHabilitadas(unittest.TestCase):
@@ -171,42 +175,42 @@ class TestUltimaActualizacionDeuda(unittest.TestCase):
         self.assertEqual(resultado, "N/A")
 
 
-class TestMesOperativoAsignacion(unittest.TestCase):
-    def _fake_st(self, files: list[dict]):
-        fake_st = MagicMock()
-        fake_st.session_state = {"google_drive_service": MagicMock()}
-        fake_st.session_state["google_drive_service"].list_folder_contents.return_value = files
-        fake_st.secrets = {"google_drive": {"folder_asignaciones": "folder-id"}}
-        return fake_st
+class TestMesOperativoLiquidaciones(unittest.TestCase):
+    def _liquidaciones(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "Id_Deuda": ["D1", "D2"],
+                "Fecha_Liq": [
+                    pd.Timestamp("2025-10-15 10:00:00"),
+                    pd.Timestamp("2025-10-03 09:00:00"),
+                ],
+            }
+        )
 
-    def test_usa_el_archivo_mas_reciente(self):
-        files = [
-            {"id": "1", "name": "Asignacion-Oct25.xlsx"},
-            {"id": "2", "name": "Asignacion-Feb26.xlsx"},
-        ]
-        fake_st = self._fake_st(files)
-        with patch("data.data_loader.st", fake_st):
-            mes_operativo = load_mes_operativo_asignacion.__wrapped__()
-
-        self.assertEqual(mes_operativo, pd.Timestamp("2026-02-01"))
-
-    def test_sin_archivos_cae_al_fallback(self):
-        fake_st = self._fake_st([])
-        fallback = pd.Timestamp("2026-01-01")
-        with patch("data.data_loader.st", fake_st), patch(
-            "data.data_loader.getMesOperativo", return_value=fallback
+    def test_toma_el_primer_dia_del_mes_de_la_fecha_minima(self):
+        with patch(
+            "data.data_loader.load_liquidaciones_mec", return_value=self._liquidaciones()
         ):
-            mes_operativo = load_mes_operativo_asignacion.__wrapped__()
+            mes_operativo = load_mes_operativo_liquidaciones.__wrapped__()
+
+        self.assertEqual(mes_operativo, pd.Timestamp("2025-10-01"))
+
+    def test_sin_liquidaciones_cae_al_fallback(self):
+        fallback = pd.Timestamp("2026-01-01")
+        with patch(
+            "data.data_loader.load_liquidaciones_mec", return_value=pd.DataFrame()
+        ), patch("data.data_loader.getMesOperativo", return_value=fallback):
+            mes_operativo = load_mes_operativo_liquidaciones.__wrapped__()
 
         self.assertEqual(mes_operativo, fallback)
 
-    def test_nombre_invalido_cae_al_fallback(self):
-        fake_st = self._fake_st([{"id": "1", "name": "Asignacion.xlsx"}])
+    def test_fecha_nula_cae_al_fallback(self):
         fallback = pd.Timestamp("2026-01-01")
-        with patch("data.data_loader.st", fake_st), patch(
-            "data.data_loader.getMesOperativo", return_value=fallback
-        ):
-            mes_operativo = load_mes_operativo_asignacion.__wrapped__()
+        liqs = pd.DataFrame({"Id_Deuda": ["D1"], "Fecha_Liq": [pd.NaT]})
+        with patch(
+            "data.data_loader.load_liquidaciones_mec", return_value=liqs
+        ), patch("data.data_loader.getMesOperativo", return_value=fallback):
+            mes_operativo = load_mes_operativo_liquidaciones.__wrapped__()
 
         self.assertEqual(mes_operativo, fallback)
 

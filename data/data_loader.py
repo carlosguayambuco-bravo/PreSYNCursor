@@ -19,7 +19,7 @@ from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIV
 from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
-from utils.helpers_general import cleanCols, cleanNumber, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage, mesesDict
+from utils.helpers_general import cleanCols, cleanNumber, cleanText, imputeNans, getMesOperativo, getSheetMonthNumber, parsePercentage, mesesDict
 from utils.helpers_sheets import _retry
 
 # Función Auxiliar para Obtener el Mapeo de IDs de Solicitud a Filas de Google Sheets
@@ -886,6 +886,34 @@ def load_liquidaciones_mec() -> DataFrame[LiquidationsSchema]:
     # Limpiamos los Datos y devolvemos el DF
     return _clean_liquidaciones(liqsDF)
 
+# Función Auxiliar para Obtener el Mes Operativo desde las Liquidaciones del MEC
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Obteniendo el Mes Operativo desde las Liquidaciones...")
+def load_mes_operativo_liquidaciones() -> pd.Timestamp:
+    """
+    Obtiene el primer día del Mes Operativo (MEC) a partir de las liquidaciones
+    del mes en curso.
+
+    Regla: ``Fecha_Liq.min().normalize().replace(day=1)``. Si no hay liquidaciones o la
+    fecha no es válida, cae de vuelta a ``getMesOperativo()``.
+
+    Returns:
+        pd.Timestamp: Primer día del mes operativo.
+    """
+    try:
+        liqs_df = load_liquidaciones_mec()
+
+        if liqs_df.empty:
+            return getMesOperativo()
+
+        fecha_min = liqs_df['Fecha_Liq'].dropna().min()
+        if pd.isna(fecha_min):
+            return getMesOperativo()
+
+        return pd.Timestamp(fecha_min).normalize().replace(day=1)
+    except Exception:
+        # Si falla la lectura de Liquidaciones, mantenemos el cálculo anterior
+        return getMesOperativo()
+
 # Función Auxiliar para Obtener las Deudas Liquidadas Históricas
 @st.cache_data(show_spinner="Cargando Liquidaciones Históricas desde Google Sheets...", ttl=WEEK_WAIT)
 def load_liquidaciones_hist() -> DataFrame[LiquidationsSchema]:
@@ -1467,7 +1495,7 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
     # Paso 2: Definir el Nombre de la Hoja a Abrir
-    mes_operativo = load_mes_operativo_asignacion()
+    mes_operativo = load_mes_operativo_liquidaciones()
     hojaName = 'act {}'.format(mes_operativo.year)
 
     # Paso 3: Obtener los Datos
@@ -1480,12 +1508,13 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
         "debt_id": "Id_Deuda",
         "inserted_at": "Fecha_Act",
         "bank_reference": "Referencia",
-        "Status_Act": "Etiqueta_Act"
+        "Status_Act": "Etiqueta_Act",
+        "payment_to_bank": "PaB_Actualizado",
     })
     # Quitamos Datos con NaNs
     actsDF = actsDF.dropna()
     # Dejamos solo las Columnas Necesarias
-    actsDF = actsDF[["Correo","Id_Deuda","Fecha_Act","Referencia","Etiqueta_Act"]]
+    actsDF = actsDF[["Correo","Id_Deuda","Fecha_Act","Referencia","Etiqueta_Act","PaB_Actualizado"]]
     # Volvemos las Columnas Id_Deuda y Referencia a String
     actsDF["Id_Deuda"] = actsDF["Id_Deuda"].apply(lambda s: str(s).replace('.0','').strip())
     actsDF["Referencia"] = actsDF["Referencia"].apply(lambda s: str(s).replace('.0','').strip())
@@ -1494,8 +1523,19 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     actsDF["Fecha_Act"] = pd.to_datetime(actsDF["Fecha_Act"],errors="coerce",dayfirst=False)
     # Quitamos 5 Horas a Fecha_Act para que quede en Hora Local de Bogotá
     actsDF["Fecha_Act"] = actsDF["Fecha_Act"] - pd.Timedelta(hours=5)
-    # Dejamos Etiqueta_Act como string
-    actsDF["Etiqueta_Act"] = actsDF["Etiqueta_Act"].astype(str)
+    # Dejamos Etiqueta_Act como string y limpiamos tildes
+    actsDF["Etiqueta_Act"] = actsDF["Etiqueta_Act"].astype(str).apply(cleanText)
+    # Extraemos el PaB_Actualizado
+    actsDF['PaB_Actualizado'] = (
+        actsDF['PaB_Actualizado']
+        .astype(str)
+        .str.extract(r"(?P<pab>\d+(?:[.,]\d+)?)")["pab"]
+        .str.replace(",", ".", regex=False)
+    )
+    # Lo Volvemos a Númerico y dividimos entre 100
+    actsDF['PaB_Actualizado'] = pd.to_numeric(actsDF['PaB_Actualizado'], errors='coerce') / 100
+    # Quitamos filas sin PaB_Actualizado para cumplir el esquema
+    actsDF = actsDF.dropna(subset=['PaB_Actualizado'])
 
     # Quitamos datos donde el correo no sea relevante
     actsDF = actsDF[~actsDF['Correo'].isin(CORREOS_NO_RELEVANTES)]
@@ -1810,46 +1850,6 @@ def _obtener_df_asignacion() -> pd.DataFrame:
     # Si no se pudo cargar ningún archivo, devolvemos un DataFrame vacío
     return pd.DataFrame()
 
-# Función Auxiliar para Obtener el Mes Operativo sin Cargar Toda la Cartera
-@st.cache_data(ttl=5*DAY_WAIT, show_spinner="Obteniendo el Mes Operativo desde la Asignación...")
-def load_mes_operativo_asignacion() -> pd.Timestamp:
-    """
-    Obtiene el primer día del Mes Operativo (MEC) a partir del archivo de
-    Asignación de Cartera más reciente de Google Drive.
-
-    Solo usa el nombre del archivo; no descarga ni procesa la cartera completa.
-    Si no se puede determinar, cae de vuelta al cálculo por ``LIMITE_MEC``.
-
-    Returns:
-        pd.Timestamp: Primer día del mes operativo.
-    """
-    try:
-        driveService: GoogleDriveService = st.session_state["google_drive_service"]
-        files_list = driveService.list_folder_contents(
-            st.secrets["google_drive"]["folder_asignaciones"]
-        )
-
-        excel_files = [
-            (file["name"], obtener_prioridad_archivo(file["name"]))
-            for file in files_list
-            if str(file.get("name", "")).lower().endswith(".xlsx")
-        ]
-        excel_files = [item for item in excel_files if item[1] > 0]
-
-        if not excel_files:
-            return getMesOperativo()
-
-        latest_name = max(excel_files, key=lambda item: item[1])[0]
-        parsed = _parse_mes_anio_desde_nombre_archivo(latest_name)
-        if parsed is None:
-            return getMesOperativo()
-
-        month_num, year_num = parsed
-        return pd.Timestamp(year=year_num, month=month_num, day=1)
-    except Exception:
-        # Si falla Drive/Sheets o falta la configuración, mantenemos el cálculo anterior
-        return getMesOperativo()
-
 def _imputar_pab_pl(asignacion_df: pd.DataFrame, maskNanPL: pd.Series, maskZeroOrigen: pd.Series) -> pd.DataFrame:
     # Para esto agrupamos quitando sin PL por Banco y calculamos el Descuento Promedio
     # Luego aplicamos ese descuento a los NaNs
@@ -1933,6 +1933,9 @@ def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionS
 
     # Imputamos Negociador con "Sin Negociador Asignado"
     imputeNans(asignacion_df, col='Negociador', value="Sin Negociador Asignado")
+
+    # Quitamos la Columna Fecha_Cartera
+    asignacion_df = asignacion_df.drop(columns=['Fecha_Cartera'])
 
     # Por último, validamos el esquema
     return AsignacionSchema.validate(asignacion_df, lazy=True)

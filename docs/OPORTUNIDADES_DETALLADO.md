@@ -7,7 +7,7 @@ Particularmente para Crédito, es importante que el cliente sea optimo (esto seg
 
 De la misma forma, no es posible calcular oportunidades para deudas ya liquidadas, ya que las oportunidades se calculan con el fin de generar una liquidación.
 
-> **Nota de implementación:** `PaB_Actualizado` todavía no está implementado ni existe en `ActualizacionesSchema`; se agregará al esquema de actualizaciones. Por ahora las fórmulas de este documento son la especificación de negocio y las funciones de `modules/oportunidades.py` están pendientes.
+> **Nota de implementación:** `PaB_Actualizado` ya existe en `ActualizacionesSchema` y se carga desde la columna `payment_to_bank` de la hoja de Actualizaciones. Las fórmulas de este documento siguen siendo la especificación de negocio; las funciones de `modules/oportunidades.py` están pendientes de implementación. El loader actual toma el primer número de `payment_to_bank` y lo divide entre 100, por lo que hay que validar la unidad (centavos/porcentaje) antes de usar estas fórmulas.
 
 ## **Depósito Extra**
 Un depósito extra hace referencia a una solicitud al cliente de conseguir un dinero adicional con el fin de liquidar una o más deudas. Estos depósitos se suelen medir en `Apartados Netos` del cliente con el fin de tener una medida estándar entre los 
@@ -28,6 +28,7 @@ Es la diferencia entre el pago total a realizar actualmente (Pago por las Deudas
 Una vez establecidos los cálculos la regla de que sea oportunidad consiste en que se cumpla alguna de estas condiciones:
 - $\frac{Deposito\_Extra}{Apartado\_Neto} \leq 3$
 - $Deposito\_Extra \leq 1,000,000 COP$
+En caso de que el Apartado_Neto sea 0, solo aplica la segunda condición, ya que implica que no hay dinero extra a futuro con el cuál se pueda contar.
 
 ## **ContraOferta Viable**
 Una ContraOferta viable hace referencia a pedir un monto por todas las deudas de modo que se cumpla el cupo de crédito o que el cliente con el ahorro pueda realizar el pago por las deudas y la comisión.
@@ -47,7 +48,7 @@ Una vez establecidos los cálculos la regla de que sea oportunidad consiste en q
 - $ContraOferta \: Viable > Descuento \:Actual$
 - $ContraOferta \: Viable \leq 0.95$
 - $ContraOferta \: Viable \leq Descuento\_Esperado + 0.2$
-Teniendo en cuenta que el `Descuento Actual` se calcula según el `PaB Actualizado`
+Teniendo en cuenta que el `Descuento Actual` se calcula según el `PaB Actualizado`. Para varias deudas, `Descuento_Esperado` se pondera por `PaB_Origen`: `SUM(Descuento_Esperado_i * PaB_Origen_i) / SUM(PaB_Origen_i)`.
 
 ## **Liquidación Instantánea**
 La Liquidación Instantánea hace referencia a que un cliente ya cuenta con un descuento actual suficiente para que entre dentro del cupo de crédito (Si Aplica) y/o pueda realizar el pago + comisión con el ahorro que tiene.
@@ -71,6 +72,8 @@ El flujo para conseguir la fecha es:
 2. Si no existe, verificar fecha en Meta
     - Si no hay fecha en Meta pero el resto de los datos se obtiene, se considera para robo
     - Si ocurrió un error al traer los datos de meta mejor dejar como que no es oportunidad para evitar problemas a futuro.
+
+La unión con Alianzas y Metabase se hace **por deuda** (`Id_Deuda`), no por referencia, porque no todas las deudas del cliente tienen un acuerdo de pago en curso.
 
 ## **IA Liquidadora**
 La oportunidad de IA Liquidadora es única en su categoría ya que no requiere ningún cálculo. Esto dado que proviene de los `Prospectos de Tradicional`, que son el resultado de un modelo de probabilidad de liquidación.
