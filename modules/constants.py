@@ -54,7 +54,7 @@ DESCRIPCION_OPORTUNIDADES = {
     ),
     'ContraOferta Viable': (
         "Existe un descuento que permite pagar las deudas y la comisión "
-        "con el ahorro o el cupo de crédito."
+        "con el ahorro o el cupo de crédito. PD: puedes pedir mayor descuento :D"
     ),
     'Liquidación Instantánea': (
         "El descuento actual ya es suficiente para liquidar sin necesidad "
