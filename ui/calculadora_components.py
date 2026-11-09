@@ -262,7 +262,7 @@ def mostrar_seleccion_deuda(*,deuda: str, init_pab: Optional[float]) -> float:
 
     Args:
         deuda (str): El Id de la Deuda Seleccionada
-        init_pab (Optional[float]): El PaB inicial de la deuda
+        init_pab (Optional[float]): El PaB con Descuento inicial a tomar
 
     Returns:
         float: El Pago por la Deuda
@@ -481,7 +481,12 @@ def mostrar_calculadora_individual():
         )
         st.metric(
             label="**❔Es Viable**",
-            # value="Viable 😁" if es_viable_cliente(referencia=ref_escogida, pab_deudas = pab_deudas) else "❌ No Viable"
+            # value="Viable 😁" if 
+            # es_viable_cliente(
+            # referencia=ref_escogida, 
+            # pab_deudas = pab_deudas, 
+            # ahorro_neto = ahorro_input + dep_extra_input - porcobrar_input) 
+            # else "❌ No Viable"
         )
         # Para Calcular la viabilidad del cliente hay que ver si es opp de liq instantanea dado el nuevo ahorro,por cobrar y deposito extra
 
