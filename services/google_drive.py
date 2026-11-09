@@ -6,7 +6,7 @@ from typing import Optional
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 import streamlit as st
 
 # Clase de GoogleDriveService para interactuar con la API de Google Drive (usando googleapiclient)
@@ -68,10 +68,11 @@ class GoogleDriveService:
         try:
             request = self.service.files().get_media(fileId=file_id, supportsAllDrives=True)
             file_bytes = BytesIO()
-            downloader = MediaIoBaseUpload(file_bytes, mimetype='application/octet-stream', resumable=True)
+            downloader = MediaIoBaseDownload(file_bytes, request)
             done = False
             while not done:
                 _, done = downloader.next_chunk()
+            file_bytes.seek(0)
             return file_bytes
         except Exception as e:
             print(f"Error al obtener el archivo de Google Drive: {e}")

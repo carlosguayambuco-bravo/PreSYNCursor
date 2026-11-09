@@ -420,6 +420,7 @@ class AsignacionSchema(pa.DataFrameModel):
     """
     Referencia: str
     Nombre_Cliente: str
+    Banco: str
     Id_Deuda: str = pa.Field(unique=True)  # Aseguramos que Id_Deuda sea único
     PaB_Origen: float
     Negociador: str
@@ -435,6 +436,7 @@ class AsignacionSchema(pa.DataFrameModel):
     Mora_Estructurado: int
     Mora_Credito: int
     Meses_Sin_Contacto: int
+    Fecha_Cartera: pa.dtypes.Timestamp
 
 class ProspectosTradicionalSchema(pa.DataFrameModel):
     """

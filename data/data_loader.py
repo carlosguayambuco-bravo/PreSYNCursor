@@ -1467,7 +1467,8 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
 
     # Paso 2: Definir el Nombre de la Hoja a Abrir
-    hojaName = 'act {}'.format(getMesOperativo().year)
+    mes_operativo = load_mes_operativo_asignacion()
+    hojaName = 'act {}'.format(mes_operativo.year)
 
     # Paso 3: Obtener los Datos
     actsDF = google_sheets_service.get_sheet_as_dataframe(ACTUALIZACIONES_SHEET_ID, hojaName)
@@ -1525,6 +1526,10 @@ def load_prospectos_tradicional() -> DataFrame[ProspectosTradicionalSchema]:
     # Paso 2: Obtenemos los Datos de la Hoja "Prosp_MEC_D_Liq" y de la Hoja "Mec_Probs"
     prosp_df = google_sheets_service.get_sheet_as_dataframe(PROSPECTOS_TRADICIONAL_SHEET_ID, 'Prosp_MEC_D_Liq')
     probs_df = google_sheets_service.get_sheet_as_dataframe(PROSPECTOS_TRADICIONAL_SHEET_ID, 'Mec_Probs')
+
+    # Si alguna de las dos hojas está vacía, no hay prospectos para validar
+    if prosp_df.empty or probs_df.empty:
+        return ProspectosTradicionalSchema.empty()
 
     # Cargamos los Cambios de Referencia
     refChangesDict = load_reference_changes()
@@ -1636,6 +1641,10 @@ def load_pipeline_credito() -> DataFrame[PipelineCreditoSchema]:
     # Paso 2: Obtenemos los Datos de la Hoja "Pipeline"
     pipecredDF = google_sheets_service.get_sheet_as_dataframe(PIPELINE_CREDITO_SHEET_ID, 'Pipeline')
 
+    # Si la hoja está vacía, devolvemos el esquema vacío
+    if pipecredDF.empty:
+        return PipelineCreditoSchema.empty()
+
     # Paso 3: Limpiamos los Datos
     # Renombramos Columnas
     pipecredDF = pipecredDF.rename(columns={
@@ -1667,32 +1676,77 @@ def load_pipeline_credito() -> DataFrame[PipelineCreditoSchema]:
 
 # --- Carga de la Asignación de Cartera del Mes en Curso ---
 ## Funciones Auxiliares
-def obtener_prioridad_archivo(file_name: str):
-    # Verificamos que sea un excel
-    if not file_name.endswith('.xlsx'):
-        return 0
+def _parse_mes_anio_desde_nombre_archivo(file_name: str) -> Optional[tuple[int, int]]:
+    """
+    Extrae el mes y el año del nombre de un archivo de asignación con formato
+    ``...-{Mes}{AA}.xlsx`` (por ejemplo, ``Asignacion-Oct25.xlsx``).
 
-    # 1. Obtener el Mes y el Año (String)
-    raw_month_year = file_name.split('-')[-1]
-    # 2. Separar el mes y el Año
-    month = raw_month_year[:3].lower()
-    year = raw_month_year[3:5]
-    # 3. Convertir los datos en Número
-    month_num = next((m_num for m_num in mesesDict if month in mesesDict[m_num].lower()),1)
-    year_num = int(year) + 2000
-    # 4. Devolver la Prioridad year_num * 13 + month_num
+    Args:
+        file_name (str): Nombre del archivo.
+
+    Returns:
+        Optional[tuple[int, int]]: (mes, año) o None si el nombre no cumple el formato.
+    """
+    # Verificamos que sea un Excel
+    if not isinstance(file_name, str) or not file_name.lower().endswith('.xlsx'):
+        return None
+
+    # Tomamos la parte final del nombre: "Oct25"
+    raw_month_year = file_name[:-5].rsplit('-', 1)[-1].strip().lower()
+
+    # Debe tener al menos 3 letras del mes + 2 dígitos del año
+    if len(raw_month_year) < 5:
+        return None
+
+    month_text = raw_month_year[:3]
+    year_text = raw_month_year[3:5]
+
+    # Validamos el año
+    if not year_text.isdigit():
+        return None
+
+    # Buscamos el número de mes por las primeras 3 letras
+    month_num = next(
+        (num for num, name in mesesDict.items() if name.lower().startswith(month_text)),
+        None,
+    )
+    if month_num is None:
+        return None
+
+    return month_num, int(year_text) + 2000
+
+def obtener_prioridad_archivo(file_name: str) -> int:
+    """Calcula la prioridad de un archivo de asignación a partir de su mes y año."""
+    parsed = _parse_mes_anio_desde_nombre_archivo(file_name)
+    if parsed is None:
+        return 0
+    month_num, year_num = parsed
     return year_num * 13 + month_num
 
-def obtener_prioridad_hoja(sheet_name: str) -> tuple[int,int,int]:
+def obtener_prioridad_hoja(sheet_name: str) -> tuple[int, int, int]:
+    """Calcula la prioridad de una hoja de asignación a partir de su nombre ``Mes AAAA``."""
     try:
         # 1. Obtener el Mes y el Año
-        month_name, year = sheet_name.split()
+        parts = str(sheet_name).strip().split()
+        if len(parts) != 2:
+            return 0, 0, 0
+        month_name, year = parts
+
         # 2. Convertir los datos a Números
-        month_num = next((m_num for m_num in mesesDict if month_name.lower() in mesesDict[m_num].lower()),1)
+        month_num = next(
+            (num for num, name in mesesDict.items() if name.lower().startswith(month_name.lower()[:3])),
+            None,
+        )
+        if month_num is None:
+            return 0, 0, 0
+
         year_num = int(year)
+        if year_num < 100:
+            year_num += 2000
+
         # 3. Devolver la Prioridad year_num * 13 + month_num
         return year_num * 13 + month_num, year_num, month_num
-    except:
+    except (AttributeError, ValueError):
         return 0, 0, 0
 
 def _cargar_datos_archivo(file_id: str, required_dfs: int = 1) -> list[pd.DataFrame]:
@@ -1700,6 +1754,11 @@ def _cargar_datos_archivo(file_id: str, required_dfs: int = 1) -> list[pd.DataFr
     driveService: GoogleDriveService = st.session_state["google_drive_service"]
     bytes_io_file = driveService.obtain_file(file_id)
 
+    # Si no se pudo descargar el archivo, no hay DataFrames para devolver
+    if bytes_io_file is None:
+        return []
+
+    bytes_io_file.seek(0)
     all_dfs = pd.read_excel(bytes_io_file, sheet_name=None, engine='calamine')
 
     sheet_priorities = [(sheet_name, obtener_prioridad_hoja(sheet_name)[0]) for sheet_name in all_dfs]
@@ -1729,11 +1788,13 @@ def _obtener_df_asignacion() -> pd.DataFrame:
     files_list = driveService.list_folder_contents(
         st.secrets["google_drive"]["folder_asignaciones"]
     )
+    if not files_list:
+        return pd.DataFrame()
 
     # Paso 3: Filtrar los Archivos Excel y Ordenarlos por Prioridad
     excel_files = [
         (file['id'], file['name'], obtener_prioridad_archivo(file['name']))
-        for file in files_list if file['name'].endswith('.xlsx')
+        for file in files_list if str(file.get('name', '')).lower().endswith('.xlsx')
     ]
     excel_files.sort(key=lambda x: x[2], reverse=True)
 
@@ -1748,6 +1809,46 @@ def _obtener_df_asignacion() -> pd.DataFrame:
 
     # Si no se pudo cargar ningún archivo, devolvemos un DataFrame vacío
     return pd.DataFrame()
+
+# Función Auxiliar para Obtener el Mes Operativo sin Cargar Toda la Cartera
+@st.cache_data(ttl=5*DAY_WAIT, show_spinner="Obteniendo el Mes Operativo desde la Asignación...")
+def load_mes_operativo_asignacion() -> pd.Timestamp:
+    """
+    Obtiene el primer día del Mes Operativo (MEC) a partir del archivo de
+    Asignación de Cartera más reciente de Google Drive.
+
+    Solo usa el nombre del archivo; no descarga ni procesa la cartera completa.
+    Si no se puede determinar, cae de vuelta al cálculo por ``LIMITE_MEC``.
+
+    Returns:
+        pd.Timestamp: Primer día del mes operativo.
+    """
+    try:
+        driveService: GoogleDriveService = st.session_state["google_drive_service"]
+        files_list = driveService.list_folder_contents(
+            st.secrets["google_drive"]["folder_asignaciones"]
+        )
+
+        excel_files = [
+            (file["name"], obtener_prioridad_archivo(file["name"]))
+            for file in files_list
+            if str(file.get("name", "")).lower().endswith(".xlsx")
+        ]
+        excel_files = [item for item in excel_files if item[1] > 0]
+
+        if not excel_files:
+            return getMesOperativo()
+
+        latest_name = max(excel_files, key=lambda item: item[1])[0]
+        parsed = _parse_mes_anio_desde_nombre_archivo(latest_name)
+        if parsed is None:
+            return getMesOperativo()
+
+        month_num, year_num = parsed
+        return pd.Timestamp(year=year_num, month=month_num, day=1)
+    except Exception:
+        # Si falla Drive/Sheets o falta la configuración, mantenemos el cálculo anterior
+        return getMesOperativo()
 
 def _imputar_pab_pl(asignacion_df: pd.DataFrame, maskNanPL: pd.Series, maskZeroOrigen: pd.Series) -> pd.DataFrame:
     # Para esto agrupamos quitando sin PL por Banco y calculamos el Descuento Promedio
@@ -1768,6 +1869,10 @@ def _imputar_pab_pl(asignacion_df: pd.DataFrame, maskNanPL: pd.Series, maskZeroO
 
 # Función Auxiliar para Limpiar y Validar el DataFrame de Asignación
 def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionSchema]:
+    # Si no hay datos, devolvemos un DataFrame vacío con el esquema
+    if asignacion_df.empty:
+        return AsignacionSchema.empty()
+
     # Paso 1: Limpiar las Columnas del DataFrame
     for col, possibleVals in COL_MAPPER_ASIGNACION.items():
         asignacion_df[col] = cleanCols(asignacion_df, col, possibleVals)
@@ -1820,7 +1925,7 @@ def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionS
     # Creamos la Columna Apartado_Neto como Apartado_Mensual - Comision_Mensual con Mínimo de 0
     asignacion_df['Apartado_Neto'] = (asignacion_df['Apartado_Mensual'] - asignacion_df['Comision_Mensual']).clip(lower=0)
     # Eliminamos las Columnas de Comision_Mensual, PaB_PL y Apartado_Mensual (ya no son necesarias)
-    asignacion_df = asignacion_df.drop(columns=['Comision_Mensual', 'PaB_PL', 'Apartado_Mensual','Fecha_Cartera'])
+    asignacion_df = asignacion_df.drop(columns=['Comision_Mensual', 'PaB_PL', 'Apartado_Mensual'])
 
     # Volvemos Meses_en_Programa, Meses_Sin_Contacto y Mora_Deuda a int
     for col in ['Meses_en_Programa', 'Meses_Sin_Contacto', 'Mora_Deuda']:

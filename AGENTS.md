@@ -29,10 +29,10 @@ La categoría formal/informal se registra en la hoja de aliados, pero **la app n
 
 | Actor | Rol en el negocio | Rol en la app (`admin`, `leader`, `nego`, `executive`) | Responsabilidad |
 |---|---|---|---|
-| Negociador | Contactar a los clientes y proponer propuestas de pago con el cliente al ejecutivo para liquidar la(s) deuda(s) | `nego` | Subir solicitudes, liquidar clientes y aprobar/rechazar solicitudes transitorias (`Bajo Comité` / `Titular Ilocalizable`) |
-| Líder de negociación | Llevar el seguimiento de un equipo de negociadores dando dirección y ayudas | `leader` | Realizar seguimiento a los KPIs de los negociadores |
+| Negociador | Contactar a los clientes y proponer propuestas de pago con el cliente al ejecutivo para liquidar la(s) deuda(s) | `nego` | Subir solicitudes, liquidar clientes, aprobar/rechazar solicitudes transitorias (`Bajo Comité` / `Titular Ilocalizable`) y consultar oportunidades de sus Referencias |
+| Líder de negociación | Llevar el seguimiento de un equipo de negociadores dando dirección y ayudas | `leader` | Realizar seguimiento a los KPIs de los negociadores y consultar oportunidades propias y de su equipo |
 | Ejecutivo de alianzas | Ser el contacto intermediador con los aliados | `executive` | Contactar con los aliados, recibir descuentos y acuerdos de pago. También realizar seguimiento a los resultados por aliado |
-| Administrador / gerencia | Verificar el estado actual de la proyección y dar feedback de posibles cuellos de botella | `admin` | Controlar el estado de la operación en todo momento |
+| Administrador / gerencia | Verificar el estado actual de la proyección y dar feedback de posibles cuellos de botella | `admin` | Controlar el estado de la operación en todo momento y consultar oportunidades de todas las Referencias |
 | Casa de cobro / aliado | Ninguno dentro de la app | No accede a la app | Cruzar bases (si es posible), verificar opciones de pago y enviar acuerdos de pago junto con paz y salvos |
 
 ### 1.3 Flujo end-to-end
@@ -47,6 +47,7 @@ La categoría formal/informal se registra en la hoja de aliados, pero **la app n
 6. El aliado responde con descuentos, contraofertas, cuotas o condiciones de pago.
 7. Se registra la respuesta, se valida el pago y se generan acuerdos y soportes.
 8. Se hace seguimiento a liquidaciones, vencimientos y reasignaciones.
+9. Al finalizar, el usuario puede enviar feedback desde el componente `mostrar_componente_feedback`; se guarda en la hoja `Feedback` de Configs.
 
 Si la solicitud cae en `Bajo Comité` o `Titular Ilocalizable`, el **negociador** aprueba o rechaza con base en lo hablado con el cliente. Si aprueba, la solicitud vuelve a la cola del ejecutivo para que la finalice.
 
@@ -58,6 +59,17 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 2. El ejecutivo sube la base y se realiza un pre-cruce con el algoritmo interno.
 3. El ejecutivo cruza manualmente todas las deudas que no cruzaron inicialmente por el algoritmo.
 4. El ejecutivo sube la información al Sheets de descuentos en base, donde se maneja la información principal.
+
+#### 1.3.3 Cálculo de oportunidades
+
+1. El negociador entra a **Calculadora de Oportunidades** y selecciona una Referencia habilitada (propias; el líder también ve las de su equipo; el admin ve todas).
+2. Revisa el ahorro neto, el pricing, el prospecto de crédito (`Batch`/`Cr Parcial`) y el prospecto de tradicional (`Trad 1-4`).
+3. Selecciona las deudas a analizar. La app bloquea deudas ya liquidadas.
+4. Elige el tipo de análisis: **Tradicional** (ahorro del cliente) o **Crédito** (PaB Ideal). Crédito exige PaB Ideal para todas las deudas y un estado apto en el Pipeline de Crédito.
+5. La app muestra las oportunidades aplicables: Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora. También permite enviar feedback.
+6. El resultado es informativo: no crea ni modifica solicitudes por sí solo.
+
+> **Estado actual:** la vista y los cálculos de oportunidades son un **esquema/stub**. Las funciones `oportunidad_*` de `modules/oportunidades.py` lanzan `NotImplementedError` y la UI individual todavía tiene controles sin conectar. Ver sección 6.8.
 
 ### 1.4 Glosario de negocio
 
@@ -74,14 +86,14 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | PaB Ideal / `PaB_Ideal_Credito` | Cupo aprobado desde el área de crédito para pagar una deuda. No todos los clientes lo tienen; es exclusivo de clientes con buen comportamiento |
 | `PaB_PL` | PaB prometido al cliente en su Plan de Liquidación. En el código viene de `payment_to_bank`; si falta, se estima como `PaB_Origen * (1 - 0.15)` |
 | `PaB_Portafolio` | Monto de pago asociado al portafolio completo |
-| `PaB_Actualizado` | Monto de pago asociado a una actualización con Etiqueta "CAMBIO DE PAB o ACUERDO o DEPOSITO o ACTUALIZADO_ALIANZAS". En caso de no aplicar se deja el `PaB\_Origen` |
-| `Apartado_Neto` | El Ahorro que hace el cliente mes a mes |
+| `PaB_Actualizado` | Monto de pago asociado a la última actualización confiable de la deuda (etiquetas `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`). Para `ACTUALIZADO_ALIANZAS` se busca el último descuento en base y/o la última solicitud exitosa. Si no aplica, se deja `PaB_Origen`. **Pendiente de implementación:** todavía no existe en `ActualizacionesSchema`. |
+| `Apartado_Neto` | Ahorro mensual neto del cliente: `max(Apartado_Mensual - Comision_Mensual, 0)`. Se usa como unidad para medir si un depósito extra es viable. |
 | `Pricing` | Comisión de éxito (%) que cobra la empresa. En el código viene de `success_commission_percentage`; el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing` |
 | `Ahorro` | Ahorro con el que cuenta el cliente para pagar sus deudas (hoja de SALDOS) |
 | `Por Cobrar` | Monto que el cliente debe a la empresa (hoja TOTAL) |
 | `IVA` | Impuesto de Colombia: 19% |
-| `Descuento Esperado` | El descuento calculado con base en los descuentos históricos para esa deuda teniendo en cuenta el banco (viene de un Modelo de ML) |
-| `Ingreso Esperado` | El Ingreso que se espera obtener con base en el Descuento Esperado |
+| `Descuento Esperado` | Descuento esperado por deuda según el modelo de ML histórico, considerando el banco. En la Asignación de Cartera viene de la columna `Descuento` (`Descuento_Esperado`). |
+| `Ingreso Esperado` | Ingreso estimado por deuda: `PaB_Origen * Descuento_Esperado * Pricing`, **sin IVA** y con mínimo 0. Se calcula en `load_asignacion_cartera`. |
 | Deuda Bravo | Nombre operativo del monto original de la deuda (`PaB_Origen`) |
 | Descuento en base | Descuento que el aliado cruza a inicio de mes para sus deudas. Se representa con `PaB_Propuesta` |
 | Descuento máximo | Puede referirse a dos cosas: (1) `Brindan Máx. Descuento` en la hoja de aliados, que indica que ya se analizó el máximo y pedir más suele ser rechazado; (2) `Max_Descuento_Otorgado` en una respuesta, que indica que no se puede contraofertar. La app solo advierte en el primer caso y fuerza el flag en `Bajo Comité` |
@@ -102,10 +114,10 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | `Refi` | Tipo de pago por refinanciación |
 | `Crédito` | Tipo de pago que usa el PaB Ideal aprobado por crédito |
 | `Pendientes_IdAutDeud` | Hoja interna donde se guardan los registros del cruce de cartera antes de subirlos a descuentos en base |
-| `Prospectos de Crédito / Batch` | Clientes con buen comportamiento de ahorro que son aptos para crédito. Se clasifican en: Batch 1, Batch 2, ..., Batch 4 y Cr Parcial (ES POR CLIENTES) |
-| `Prospectos de Tradicional` | Deudas con más alta probabilidad de liquidación según un modelo de ML (ES POR DEUDAS). Se clasifican como Trad 1-4 (no se tienen en cuenta los Cr Parcial dado que ya tienen un crédito y por ende no aplican para liquidación por tradicional)|
-| `Actualizaciones` | Gestiones que se le realizan a las deudas de los clientes, con diferentes categorias según el tipo de gestión |
-| `Mes en Curso (MEC)` | Mes operativo actual. Se saca de la fecha en `Fecha_Cartera` de del df de `Asignación de Cartera` |
+| `Prospectos de Crédito / Batch` | Clientes con buen comportamiento de ahorro que son aptos para crédito. Se clasifican en `Batch 1` a `Batch 4` y `Cr Parcial`; es **por cliente**. |
+| `Prospectos de Tradicional` | Deudas con mayor probabilidad de liquidación según el modelo de ML. Se alimentan de `Prosp_MEC_D_Liq` + `Mec_Probs`; es **por deuda**. Se clasifican como `Trad 1` a `Trad 4` y se usan para `IA Liquidadora` cuando `Prob_Liq >= 0.5`. |
+| `Actualizaciones` | Gestiones registradas sobre las deudas (etiqueta, fecha, correo, nombre y referencia). Son la fuente para `PaB_Actualizado` y para detectar portafolios. |
+| `Mes en Curso (MEC)` | Mes operativo actual. **Implementación actual:** `getMesOperativo()` usa `LIMITE_MEC` (día 5). **Objetivo:** usar `Fecha_Cartera` de la Asignación de Cartera; ya se conserva en `AsignacionSchema` y existe `load_mes_operativo_asignacion()` con caché de 5 días. |
 
 ### 1.5 Reglas, excepciones y acuerdos con aliados
 
@@ -113,15 +125,15 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 - **Pago total obligatorio:** se exige cuando el aliado lo requiera; es un input que depende del aliado y del cliente. Significa aplicar el pago a **todas las deudas** de la respuesta. En `Bajo Comité` el código fuerza `Pago_Total_Obligatorio = True`.
 - **Cuotas:** la información de qué aliados permiten cuotas y con qué plazos está en la hoja de aliados (`AlianzasVigentes`).
 - **Bancos bloqueados:** se bloquean bancos por aliado para robustecer las solicitudes. Si el aliado trabaja exclusivamente con un banco, no tiene sentido permitir otro. Si alguna deuda seleccionada tiene un banco no habilitado, el formulario **detiene el envío** y pide corregir la selección.
-- **Vencida:** se vence a los **15 días hábiles** desde la subida (`Timestamp`) o desde que se marca como `Solicitado` (`Fecha_Solicitado`). La automatización de `automations/` usa 15 días; la introducción del notebook menciona 30 y está desactualizada. `LIMITE_MEC` (día 5) define el mes operativo, aunque hay una migración en curso para dejar de requerirlo.
+- **Vencida:** se vence a los **15 días hábiles** desde la subida (`Timestamp`) o desde que se marca como `Solicitado` (`Fecha_Solicitado`). La automatización de `automations/` usa 15 días; la introducción del notebook menciona 30 y está desactualizada. `LIMITE_MEC` (día 5) sigue como fallback de `getMesOperativo()`; la fuente objetivo es `load_mes_operativo_asignacion()`.
 - **Cancelada:** la solicitud aún no tiene gestión y el negociador que la subió decide cancelarla; solo aplica en `Sin Tocar`. La app valida que el correo del usuario sea el de la solicitud.
 - **Reasignable:** un acuerdo solicitado por un asesor cuyo pago no se ha reflejado puede ser tomado por otro negociador cuando vence la fecha límite de pago. Aplica a Acuerdos y Ofertas de Acuerdo no liquidados; excluye Validaciones. Cualquier negociador puede tomarlo.
 - **Aprobaciones de comité / titular ilocalizable:** `Estado_Comite` y `Estado_Titular_Ilocalizable` usan `1 = pendiente de aprobación`, `2 = rechazado`, `3 = aprobado pendiente de finalizar`. El **negociador** aprueba o rechaza con base en lo hablado con el cliente; si aprueba, la solicitud vuelve a la cola del ejecutivo para finalizarla. `Bajo Comité` suele implicar pago obligatorio y `Titular Ilocalizable` se usa para informar la situación de localización del titular.
 - **Contrapropuesta máxima relativa:** llega un descuento en base del aliado y ya se hizo un estudio de hasta qué porcentaje se puede mejorar. El código calcula `1 - monto_solicitado / monto_en_base` y **detiene el envío** si supera `Contrapropuesta_Maxima_Relativa`; aplica a Validación/Oferta y cuando el aliado se resolvió por `Directo Base`.
-- **Descuento Actual**: Consiste en el descuento actual con el cual cuenta la deuda. Para esto existe la siguiente regla: De las actualizaciones solo se confia en las siguientes etiquetas: *CAMBIO DE PAB*,*ACUERDO*,*DEPOSITO* y *ACTUALIZADO_ALIANZAS*. En el caso de actualizado alianzas se busca el último descuento en base y/o la última solicitud exitosa de la deuda.
-- **Búsqueda de Portafolios**: Para definir las deudas que se necesitan agrupar por portafolios existen 2 reglas:
-1. **Con Actualización**: En este caso, se toman todas las deudas del cliente con una actualización y se verifica si están en un período de actualización entre ellas de ~1 min max. Todas las deudas que cumplan este criterio se consideran en portafolio.
-2. **Sin Actualizaciones**: Si no existen actualizaciones, se agrupan las deudas sin actualizaciones por los bancos exclusvimante mostrados en la constante   *BANCOS_PORTAFOLIO*.
+- **Descuento Actual**: `1 - PaB_Actualizado / PaB_Origen` para el conjunto de deudas analizado. De las actualizaciones solo se confía en las etiquetas `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`; para `ACTUALIZADO_ALIANZAS` se busca el último descuento en base y/o la última solicitud exitosa. Cualquier otra etiqueta se trata como descuento 0% en el cálculo masivo; en el cálculo individual se asume que las deudas escogidas son el portafolio. **Pendiente de implementación:** `PaB_Actualizado` aún no está en `ActualizacionesSchema`.
+- **Búsqueda de Portafolios**: para definir las deudas que se agrupan como portafolio existen 2 reglas:
+  1. **Con Actualización:** se toman solo las deudas con una actualización dentro de la ventana configurable `VENTANA_PORTAFOLIO_SEGUNDOS` (por defecto `45` segundos) y que además compartan la misma etiqueta. Las deudas que cumplan se consideran en portafolio.
+  2. **Sin Actualizaciones:** si no existen actualizaciones, se agrupan las deudas por los bancos exclusivamente listados en `BANCOS_PORTAFOLIO`: `BBVA Colombia`, `Itaú`, `Banco de Occidente` y `Banco Popular`.
 
 ### 1.6 SLA y métricas
 
@@ -143,18 +155,19 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | Dato | Fuente actual | Dueño | Observaciones |
 |---|---|---|---|
 | Solicitudes | Google Sheets (`Solicitudes_MEC`) | Propio | Es muy importante no borrar información ni escribir por encima; es información delicada |
-| Cartera / deudas / actualizaciones | Metabase | MB de la Empresa | Solo hay permiso de lectura, no escritura. Las Actualizaciones tienen como Backup un Sheets |
+| Cartera / deudas | Metabase | MB de la Empresa | Solo hay permiso de lectura, no escritura |
 | Aliados y reglas | Google Sheets (`AlianzasVigentes`, spreadsheet de Aliados) | Propio | Contiene la información relevante de los aliados y la categoría formal/informal, que la app no usa |
 | Descuentos / masivas | Google Sheets (`Bases mes actual 2024`, spreadsheet de Masivas) | Propio | Lugar principal donde se registran los descuentos que llegan; el nombre de la hoja es legado |
 | Pendientes de cruce | Google Sheets (`Pendientes_IdAutDeud`, spreadsheet de Configs) | Propio | Registros del cruce de cartera antes de subirlos a descuentos en base |
 | Liquidaciones | Google Sheets (`Liquidaciones`) | Sheets de la Empresa | Guarda la facturación histórica; la actualiza un área externa |
 | Acuerdos y soportes | Google Drive | Shared Drive | Guarda los PDFs de acuerdos y soportes de pago |
-| Actualizaciones | Google Sheets `Actualizaciones` | Propio | Backup de las Actualizaciones de Metabase |
+| Actualizaciones | Google Sheets (`Actualizaciones`) + Metabase | Propio / MB de la Empresa | Sheets es el backup que consume la app; Metabase se usa para consultar vencimiento de acuerdos (`QUERY_VENCIMIENTO_ACTS`) |
 | Archivos subidos | Google Sheets (`Archivos_Subidos`) + Drive | Propio | Evidencia de acuerdos firmados y soportes de pago |
-| Prospectos de Crédito | Google Sheets `Prospectos de Crédito` | Del Área de Crédito | Solo se toma la hoja del mes en curso (la más reciente) |
-| Prospectos de Tradicional | Google Sheets `Prosp_MEC_D_Liq` | Propio | Solo se toma la hoja del mes en curso |
-| Pipeline de Crédito | Google Sheets `Pipeline Crédito` | Del área de crédito | Flujo de los procesos de crédito con el cliente. NO SE DEBE EDITAR |
-| Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. NO SE DEBE EDITAR |
+| Prospectos de Crédito | Google Sheets (`Prospectos de Crédito`) | Del Área de Crédito | Solo se toma la hoja del mes en curso (la más reciente). Es por cliente (`Batch 1-4`, `Cr Parcial`) |
+| Prospectos de Tradicional | Google Sheets (`Prosp_MEC_D_Liq` + `Mec_Probs`) | Propio | Se unen por `Id_Deuda`; es por deuda (`Trad 1-4`) y trae `Prob_Liq`, `Prob_Liq_Cred`, `Prob_Liq_Trad` |
+| Pipeline de Crédito | Google Sheets (`Pipeline Crédito`, hoja `Pipeline`) | Del área de crédito | Flujo de los procesos de crédito con el cliente. NO SE DEBE EDITAR. Se toma el último estado por `Referencia` |
+| Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. Archivo `...-MesAA.xlsx` y hoja `Mes AAAA`; se toma el más reciente. NO SE DEBE EDITAR |
+| Feedback de la app | Google Sheets (`Feedback`, spreadsheet de Configs) | Propio | Una fila por envío: `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Solo se escribe; la app no lo lee |
 
 ---
 
@@ -169,11 +182,15 @@ PreSYNCursor es una aplicación **Streamlit** que gestiona solicitudes de pago e
 - Generar acuerdos de pago y soportes PDF, subirlos a Google Drive y enviarlos por correo.
 - Consultar cartera, liquidaciones, logs y métricas.
 - Cruzar la cartera de un aliado contra la cartera interna para obtener el **Id Deuda interno** (pestaña "Agregar Cartera").
+- Calcular **oportunidades por Referencia** (Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora). Estado actual: esquema/stub, ver sección 6.8.
+- Cargar **Asignación de Cartera**, **Prospectos de Tradicional** y **Pipeline de Crédito** como fuentes nuevas de la calculadora.
+- Enviar **feedback de la app** a la hoja `Feedback` del spreadsheet de Configs.
 
 ### Stack principal
 
 - **Frontend / runtime:** Streamlit.
 - **Datos tabulares:** pandas + pandera (esquemas en `data/data_models.py`).
+- **Excel de Asignación de Cartera:** `pandas.read_excel` con motor `calamine` (`python-calamine`); `openpyxl` está disponible como alternativa.
 - **Base de datos operativa:** Google Sheets vía `gspread` / `gspread-dataframe`.
 - **Consultas de deudas:** Metabase (HTTP API).
 - **Archivos:** Google Drive.
@@ -190,7 +207,7 @@ PreSYNCursor es una aplicación **Streamlit** que gestiona solicitudes de pago e
 
 - Python 3.12+ para la app principal (`numpy 2.5.2` requiere `>=3.12`; el entorno local usa 3.13). Los workflows de automatización usan Python 3.10 con `automations/requirements.txt`, que es independiente.
 - Acceso a los secretos de Streamlit y a las cuentas de servicio de Google.
-- Dependencias de `requirements.txt`.
+- Dependencias de `requirements.txt`. La lectura de la Asignación de Cartera usa `python-calamine` (motor `calamine`); no lo elimines sin cambiar el loader.
 
 ### 3.2 Instalación local
 
@@ -208,6 +225,11 @@ streamlit run app.py
 ```
 
 La app requiere `.streamlit/secrets.toml` (ignorado por git). No lo imprimas, no lo subas y no pegues su contenido en issues o commits.
+
+Secretos nuevos relacionados con la calculadora:
+
+- `google_drive.folder_asignaciones`: carpeta de Drive donde están los Excel de Asignación de Cartera.
+- `PERMITIR_CALCULO_NO_ASIGNADO`: booleano. Si es `true`, la calculadora habilita todas las Referencias para cualquier rol. Úsalo solo para pruebas; en producción el alcance debe salir de la Asignación/Headcount.
 
 ### 3.4 Ejecutar tests
 
@@ -244,6 +266,7 @@ Notas:
 │   ├── constants.py           # Constantes, estados, queries, IDs de hojas, configuración
 │   ├── forms.py               # Descuento óptimo, validación de base, bloqueo de bancos
 │   ├── gest_sols.py           # Núcleo: solicitudes, descuentos, distribución, PDFs, correos
+│   ├── oportunidades.py       # Acceso y esquema de cálculo de oportunidades (stubs)
 │   ├── bank_normalizer.py     # Normalización de nombres de bancos
 │   ├── acuerdo_pdf_generator/ # Generación de acuerdos en PDF
 │   └── id_aut_deud/           # Cruce de cartera para obtener el Id Deuda interno
@@ -253,7 +276,7 @@ Notas:
 ├── utils/                     # Helpers generales, de hojas de cálculo e inicialización
 ├── tests/                     # Suite de tests con unittest
 ├── automations/               # Notebook y workflows de vencimiento automático
-├── docs/                      # Documentación funcional (NEGO_DOC.md)
+├── docs/                      # Documentación funcional (NEGO_DOC.md, OPORTUNIDADES*.md)
 ├── assets/
 ├── requirements.txt
 └── .streamlit/                # Configuración local; secrets.toml está ignorado
@@ -267,20 +290,25 @@ Notas:
 | `core/auth.py` | OAuth con Google, cookies, refresh tokens, restauración de sesión. |
 | `core/permissions.py` | Permisos, roles y mapeo permiso → página. |
 | `core/users.py` | Objeto de usuario autenticado. |
-| `data/data_loader.py` | Lecturas cacheadas de Google Sheets y Metabase; normalización de solicitudes. |
-| `data/data_uploader.py` | Escrituras/actualizaciones en Google Sheets y logs. |
+| `data/data_loader.py` | Lecturas cacheadas de Google Sheets, Google Drive y Metabase; normalización de solicitudes, asignación, prospectos y pipeline. |
+| `data/data_uploader.py` | Escrituras/actualizaciones en Google Sheets, logs y feedback. |
 | `data/data_deleter.py` | Borrados controlados (por ejemplo, bases de cruce). |
-| `data/data_models.py` | Esquemas pandera y TypedDicts de solicitudes, masivas, cruce, etc. |
+| `data/data_models.py` | Esquemas pandera y TypedDicts de solicitudes, masivas, cruce, asignación, prospectos y pipeline. |
 | `services/google_sheets.py` | Cliente gspread con reintentos y manejo de errores. |
-| `services/google_drive.py` | Subida/descarga/borrado de archivos. |
+| `services/google_drive.py` | Subida/descarga/borrado de archivos. La descarga usa `MediaIoBaseDownload`. |
 | `services/google_mail.py` | Envío de correos con adjuntos. |
 | `services/metabase.py` | Consultas a Metabase para deudas, planes y actualizaciones. |
 | `modules/gest_sols.py` | Reglas de solicitud, comparación de descuentos, distribución de montos, PDFs y notificaciones. |
 | `modules/forms.py` | Fórmulas del monto recomendado, descuento óptimo y validaciones del formulario. |
+| `modules/oportunidades.py` | Acceso a Asignación/Headcount/Prospectos/Pipeline y esquema de cálculo de oportunidades. Las funciones `oportunidad_*` son stubs. |
 | `modules/id_aut_deud/deuda_matcher.py` | Algoritmo de matching de cartera (etiquetas EXACTO/DUPLICADO/AMBIGUO/ADDENDUM/NULO). |
 | `modules/id_aut_deud/helpers.py` | Limpieza, índices, pagos a cuotas, portafolios y preparación de la base del mes. |
+| `ui/calculadora_components.py` | UI de la calculadora individual por Referencia. Actualmente es un esquema con controles pendientes. |
+| `ui/forms_components.py` | Componentes del formulario de solicitudes y componente de feedback. |
 | `ui/` | Componentes de presentación y formularios reutilizables. |
-| `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, logs, cache. |
+| `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, calculadora, logs, cache. |
+| `docs/OPORTUNIDADES.md` | Explicación funcional de oportunidades para negociadores. |
+| `docs/OPORTUNIDADES_DETALLADO.md` | Fórmulas y reglas exactas de cada oportunidad. Fuente de verdad de negocio. |
 | `utils/helpers_general.py` | Números, fechas hábiles, formato, meses operativos. |
 | `utils/initializer.py` | Bootstrap de `st.session_state` y servicios. |
 | `automations/` | Vencimiento automático de solicitudes (notebook + GitHub Actions). |
@@ -311,18 +339,27 @@ Notas:
 4. Si `debugging_mode` está activo, `initialize_test_states()` inyecta un usuario de prueba. Si no, `authenticate_user()` ejecuta OAuth.
 5. `get_permit_pages(role)` crea la navegación permitida y `pg.run()` ejecuta la vista.
 
+**Datos de la calculadora:** `load_asignacion_cartera()`, `load_prospectos_tradicional()` y `load_pipeline_credito()` se cargan **bajo demanda** con `st.cache_data`; no están en `initialize_data()`. `load_mes_operativo_asignacion()` (caché de 5 días) obtiene el MEC desde el nombre del archivo de asignación más reciente y cae a `getMesOperativo()` si no puede determinarlo.
+
 **Implicación para tests:** las funciones puras deben recibir DataFrames/diccionarios por parámetro. No deben depender de `st.session_state` ni de servicios de Google. Si una función lo hace, aíslala con mocks o extrae la lógica pura.
 
 ### Roles y páginas
 
 | Rol | Páginas principales |
 |---|---|
-| `nego` | Subir Solicitud, Ver Mis Solicitudes, Ver Cartera Total |
-| `leader` | Subir Solicitud, Ver Mis Solicitudes, Ver Cartera Total |
+| `nego` | Subir Solicitud, Ver Mis Solicitudes, Ver Cartera Total, Calculadora de Oportunidades |
+| `leader` | Subir Solicitud, Ver Mis Solicitudes, Ver Cartera Total, Calculadora de Oportunidades |
 | `executive` | Agregar Cartera, Gestionar Solicitudes, Ver Mis Solicitudes, Ver Cartera Total |
-| `admin` | Todas: incluye Logs y Manejo de Cache |
+| `admin` | Todas: incluye Calculadora de Oportunidades, Logs y Manejo de Cache |
 
-La fuente de verdad de permisos es `core/permissions.py`.
+La fuente de verdad de permisos es `core/permissions.py`. El permiso `calcular_opps` está en `admin`, `leader` y `nego`; `executive` no lo tiene.
+
+**Alcance de Referencias en la calculadora:**
+
+- `admin`: todas las Referencias de la Asignación de Cartera.
+- `leader`: sus Referencias y las de los negociadores cuyo `Lider` en el Headcount sea su nombre.
+- `nego`: solo las Referencias donde `Negociador` coincide con su nombre del Headcount.
+- `PERMITIR_CALCULO_NO_ASIGNADO=true`: habilita todas para cualquier rol (solo pruebas).
 
 ---
 
@@ -349,6 +386,7 @@ La fuente de verdad de permisos es `core/permissions.py`.
 - `Monto_Propuesto`: monto de pago que propone el negociador para cada deuda.
 - `PaB_Ideal_Credito`: cupo aprobado desde crédito para pagar la deuda; no todos los clientes lo tienen.
 - `PaB_PL`: PaB prometido al cliente en su Plan de Liquidación (`payment_to_bank`). Si falta, se estima como `PaB_Origen * (1 - DEFAULT_DISCOUNT_PL)`.
+- `PaB_Actualizado`: monto de pago de la última actualización confiable (etiquetas `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`); si no aplica, `PaB_Origen`. **Pendiente de implementación.**
 - `PaB_Portafolio`: valor de pago del portafolio completo.
 - `PaB_Liq`: valor pagado al banco en una liquidación.
 - `Pricing`: comisión de éxito (%) que cobra la empresa (`success_commission_percentage`); el IVA del 19% se suma aparte. El umbral de 60M COP de `PaB_Origen` es un criterio de elegibilidad del programa, no el valor de `pricing`.
@@ -444,7 +482,7 @@ Invariantes que los tests protegen:
 - `Aliado.obtener_tr_dias()` usa `horas // 24`; para 1 semana son 5 días.
 - La fecha límite de respuesta se guarda en `Metadata_Solicitud["Fecha_Limite_Respuesta"]`; si no existe, se recalcula con el tiempo del aliado y el `Timestamp` de la solicitud.
 - Una solicitud se vence a los **15 días hábiles** desde `Timestamp` o desde `Fecha_Solicitado`, según la automatización de `automations/Vencimiento_Automatico_Solicitudes.ipynb`. La introducción de ese notebook menciona 30 días; el código usa 15 y es la referencia vigente.
-- `LIMITE_MEC` (día 5) define el mes operativo actual. Hay una migración en curso para dejar de requerir ese corte.
+- `LIMITE_MEC` (día 5) sigue siendo el fallback de `getMesOperativo()`. La fuente objetivo es `load_mes_operativo_asignacion()` (caché de 5 días), que lee el mes/año del nombre del Excel de Asignación más reciente y cae al fallback si no puede determinarlo.
 
 ### 6.6 Estados de solicitud
 
@@ -528,6 +566,136 @@ Portafolios:
 - En `preparar_datos_base_mes` los `ADDENDUM` no se suben como deuda nueva a la base del mes; se registran aparte con `upload_massive_addendums` en masivas.
 - Si el cruce se hizo solo por nombre y la base no trae cédula, `build_pendiente_cruce_df` guarda `Cedula` como cadena vacía para que `PendienteCruceSchema` pueda validar la fila. El cargador también normaliza cédulas vacías a `''`.
 
+### 6.8 Cálculo de oportunidades (calculadora)
+
+> **Estado actual:** especificación de negocio + stubs. `modules/oportunidades.py` ya implementa el acceso a datos (referencias habilitadas, pricing, prospectos, pipeline, liquidaciones y última actualización), pero las funciones `oportunidad_*` lanzan `NotImplementedError` y la UI de `ui/calculadora_components.py` es un esquema (sliders/métricas sin conectar). No hay tests de las fórmulas de oportunidad todavía. La fuente de verdad de negocio es `docs/OPORTUNIDADES_DETALLADO.md`.
+
+**Fuentes y supuestos:**
+
+- Se analiza un conjunto de deudas seleccionadas. En la calculadora individual se asume que **las deudas escogidas son el portafolio**.
+- `PaB_Origen`: monto original de la deuda.
+- `PaB_Actualizado`: monto de pago de la última actualización confiable. **Pendiente de implementación**; hoy no existe en `ActualizacionesSchema`. Si no aplica, se usa `PaB_Origen`.
+- `PaB_Ideal_Credito`: cupo aprobado por crédito. Para análisis por crédito, **todas** las deudas seleccionadas deben tener PaB Ideal > 0.
+- `Ahorro` y `Por_Cobrar`: valores del cliente desde SALDOS/TOTAL.
+- `Apartado_Neto = max(Apartado_Mensual - Comision_Mensual, 0)`.
+- `Pricing`: 0.15, 0.20 o 0.25 (`AsignacionSchema` lo valida estrictamente). `IVA = 1.19`.
+- `Descuento_Esperado`: descuento esperado por deuda (modelo de ML, columna `Descuento` de la Asignación).
+- `20_000`: COP 20.000 fijos por restricción de dónde se guarda el ahorro.
+- `Descuento Actual = 1 - SUM(PaB_Actualizado) / SUM(PaB_Origen)` para el conjunto analizado.
+
+**Bloqueos y validaciones:**
+
+- Si alguna deuda seleccionada está liquidada (`obtener_estado_liquidacion_deudas`), la calculadora se detiene.
+- Análisis por crédito: se bloquea si el cliente está en `ESTADOS_NO_OPP_CREDITO` (`NO_PERFILA`, `NO_VIABLE_MEC`, `DTO_INSUFICIENTE`) o si alguna deuda no tiene PaB Ideal. Si está en `ESTADOS_NO_QUIERE_CREDITO` (`NO_LE_INTERESA`) solo se advierte. No estar en el Pipeline no bloquea.
+- `Prospectos de Crédito`: si el prospecto es `Tradicional`, la UI deshabilita el análisis por crédito; si contiene `parcial` (`Cr Parcial`), fuerza crédito y deshabilita el cambio.
+- `Prospectos de Tradicional`: `IA Liquidadora` usa `Prob_Liq >= 0.5` (probabilidad total, no `Prob_Liq_Cred` ni `Prob_Liq_Trad`).
+
+**Fórmulas:**
+
+- **Depósito Extra (Crédito):**
+
+  ```text
+  deposito_extra = SUM(PaB_Ideal_Credito) + 20_000 - SUM(PaB_Actualizado)
+  ```
+
+- **Depósito Extra (Tradicional):**
+
+  ```text
+  deposito_extra = SUM(PaB_Actualizado)
+                   + max((SUM(PaB_Origen) - SUM(PaB_Actualizado)) * Pricing * 1.19, 0)
+                   + 20_000
+                   - (Ahorro - Por_Cobrar)
+  ```
+
+- **ContraOferta Viable (Crédito):**
+
+  ```text
+  contraoferta = 1 - (SUM(PaB_Ideal_Credito) + 20_000) / SUM(PaB_Origen)
+  ```
+
+- **ContraOferta Viable (Tradicional):**
+
+  ```text
+  contraoferta = (Ahorro - Por_Cobrar - SUM(PaB_Origen) - 20_000)
+                 / (SUM(PaB_Origen) * (Pricing * 1.19 - 1))
+  ```
+
+  > La fórmula del detallado **no** lleva un `1 -` delante; el `1 -` era un error de despeje.
+
+- **Depósito Extra como oportunidad:** se cumple si `deposito_extra / Apartado_Neto <= 3` **o** `deposito_extra <= 1_000_000`. Si `deposito_extra < 0`, no es oportunidad de depósito extra: pasa a evaluarse como Liquidación Instantánea. Si `Apartado_Neto == 0`, se debe evitar la división por cero (borde pendiente de definir).
+- **ContraOferta Viable como oportunidad:** se cumplen **todas**:
+  - `contraoferta > Descuento Actual`
+  - `contraoferta <= 0.95`
+  - `contraoferta <= Descuento_Esperado + 0.2`
+- **Liquidación Instantánea:** se cumple si `Descuento Actual <= contraoferta` y `Descuento Actual != 0`. También aplica si `deposito_extra < 0` (no hace falta depósito extra) o si `contraoferta < Descuento Actual` (el descuento actual ya es mejor).
+- **Acuerdo para Robo:** acuerdos de pago del MEC ya vencidos y no liquidados. La fecha de vencimiento sale de:
+  1. Alianzas: `Fecha_Limite_Pago` de la solicitud exitosa.
+  2. Si no existe, Metabase: `QUERY_VENCIMIENTO_ACTS` (`bda.expiration`, `type = 'agreement'`, últimos 30 días).
+  3. Si no hay fecha en Metabase pero el resto de datos se obtiene, se considera para robo; si la consulta falla, **no** se considera oportunidad.
+- **IA Liquidadora:** no requiere cálculo; se activa con `Prospectos de Tradicional` y `Prob_Liq >= 0.5`. Tener categoría `Trad 1-4` da prioridad, pero el umbral es la probabilidad.
+
+**Portafolios:**
+
+- Con actualizaciones: solo deudas con actualización dentro de `VENTANA_PORTAFOLIO_SEGUNDOS` (45 s por defecto) y con la **misma etiqueta**.
+- Sin actualizaciones: agrupar por los bancos de `BANCOS_PORTAFOLIO` (`BBVA Colombia`, `Itaú`, `Banco de Occidente`, `Banco Popular`).
+- Las etiquetas confiables para descuento son `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`; el resto se trata como 0% en el cálculo masivo.
+
+**Pendientes de definición/implementación:**
+
+- Agregar `PaB_Actualizado` a `ActualizacionesSchema` y definir la precedencia exacta entre actualización confiable, último descuento en base y última solicitud exitosa.
+- Definir el comportamiento cuando `Apartado_Neto == 0` en la regla de Depósito Extra.
+- Implementar la calculadora masiva de oportunidades (hoy la pestaña `Oportunidades Masivas` está vacía).
+- Definir cómo se agrega `Descuento_Esperado` cuando se analizan varias deudas (promedio ponderado por `PaB_Origen` vs. suma).
+- Definir el matching exacto de `Acuerdo para Robo` contra solicitudes de Alianzas y Metabase (por `Id_Deuda`, `Referencia` o ambos).
+
+### 6.9 Carga y transformación de fuentes de la calculadora
+
+**Asignación de Cartera (`load_asignacion_cartera`):**
+
+1. Lista `google_drive.folder_asignaciones`, se queda con los `.xlsx` y elige el de mayor prioridad según `...-MesAA.xlsx`.
+2. Dentro del Excel elige la hoja de mayor prioridad con formato `Mes AAAA` y le asigna `Fecha_Cartera` = primer día de ese mes.
+3. Renombra columnas con `COL_MAPPER_ASIGNACION`, normaliza `Referencia`/`Id_Deuda` a string y aplica los cambios de referencia.
+4. Imputa valores:
+   - `PaB_Origen`, `Meses_en_Programa`, `Mora_Deuda`, `Apartado_Mensual`, `Comision_Mensual` y `Descuento_Esperado`: `0` si son nulos.
+   - `Pricing`: `0.15` si es nulo; solo se aceptan `0.15`, `0.20` o `0.25`.
+   - `Meses_Sin_Contacto`: `6` si es nulo.
+   - `PaB_PL`: si falta, se imputa con el descuento promedio del banco; si el banco no tiene histórico, `30%`.
+   - `Descuento_PL = 1 - PaB_PL / PaB_Origen`; si `PaB_Origen = 0`, `1`.
+5. Mapea moras:
+   - `Mora_Estructurado`: `No tiene estructurado = 0`, `No = 1`, `Sí = 2`.
+   - `Mora_Credito`: `No = 0`, `Sí = 1`.
+6. Calcula:
+   - `Ingreso_Esperado = PaB_Origen * Descuento_Esperado * Pricing` (sin IVA, mínimo 0).
+   - `Apartado_Neto = max(Apartado_Mensual - Comision_Mensual, 0)`.
+7. Elimina `Comision_Mensual`, `PaB_PL` y `Apartado_Mensual`; conserva `Banco` y `Fecha_Cartera`. `Negociador` nulo queda como `Sin Negociador Asignado`.
+8. Valida con `AsignacionSchema` (`Id_Deuda` único, `Pricing` permitido, `Fecha_Cartera` presente).
+
+**Prospectos de Tradicional (`load_prospectos_tradicional`):**
+
+- Lee `Prosp_MEC_D_Liq` (prospecto por deuda) y `Mec_Probs` (probabilidades).
+- Normaliza `Id_Deuda`/`Referencia`, aplica cambios de referencia y convierte `Prob_Liq*` a numérico; los nulos se imputan a `0`.
+- Hace `merge` por `Id_Deuda` y valida `ProspectosTradicionalSchema`.
+- `Prospecto` debe cumplir `Trad \d`; `Id_Deuda` debe ser único.
+- `Prob_Liq` total es la que usa `IA Liquidadora`; `Prob_Liq_Cred` y `Prob_Liq_Trad` quedan disponibles para futuros cálculos.
+
+**Pipeline de Crédito (`load_pipeline_credito`):**
+
+- Lee la hoja `Pipeline`, renombra `Fecha de Subida`/`Status`, normaliza `Referencia` y aplica cambios de referencia.
+- Ordena por `Fecha_Subida` y deja el último registro por `Referencia`.
+- `Rechazo_Credito = Status_Credito in ESTADOS_NO_QUIERE_CREDITO` (`NO_LE_INTERESA`).
+- `No_Opta_Credito = Status_Credito in ESTADOS_NO_OPP_CREDITO` (`NO_PERFILA`, `NO_VIABLE_MEC`, `DTO_INSUFICIENTE`).
+
+**Actualizaciones (`load_actualizacines_negos`):**
+
+- Abre la hoja `act {año}` del año del MEC (`load_mes_operativo_asignacion().year`).
+- Renombra `end/debt_id/inserted_at/bank_reference/Status_Act` a `Correo/Id_Deuda/Fecha_Act/Referencia/Etiqueta_Act`.
+- Resta 5 horas a `Fecha_Act` (UTC → Bogotá), filtra correos no relevantes y hace `left join` con Headcount para obtener `Nombre`.
+
+**MEC (`load_mes_operativo_asignacion`):**
+
+- Caché de 5 días. Usa solo el nombre del archivo más reciente de Asignación (`...-MesAA.xlsx`) para construir el primer día del mes.
+- Si no hay archivos, el nombre no cumple el formato o falla Drive, usa `getMesOperativo()` (día 5) como fallback.
+
 ---
 
 ## 7. Tests existentes
@@ -539,15 +707,18 @@ Portafolios:
 | `tests/test_cruce_deudas.py` | Limpieza de cédula/nombre/crédito/banco, etiquetas del matcher, pagos a cuotas, estados de cruce, distribución y agrupación de portafolios, y validación de `build_pendiente_cruce_df` (incluido el cruce por nombre sin cédula). |
 | `tests/test_archivos.py` | Nombres de archivos, metadata de PDFs, esquema de archivos subidos y soportes por deuda. |
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
+| `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde el nombre del archivo y fallback, columnas nuevas de `AsignacionSchema`, alcance de Referencias (admin/líder/negociador), override por secreto y última actualización de deuda. **No cubre todavía las fórmulas de oportunidad.** |
 
 ### Convenciones para nuevos tests
 
 - Usa `unittest` y `unittest.mock`; no requiere dependencias nuevas.
 - No uses `st.session_state` real ni llamadas a Google/Metabase. Pasa DataFrames y diccionarios en memoria.
-- Para funciones que llaman a Streamlit (`st.warning`, `st.stop`, `st.progress`), mockea la función o prueba la lógica pura extraída.
+- Para funciones que llaman a Streamlit (`st.warning`, `st.stop`, `st.progress`), mockea la función o prueba la lógica pura extraída. Para `modules/oportunidades.py` puedes reemplazar `modules.oportunidades.st` por un mock con `session_state` y `secrets`.
+- Para la Asignación de Cartera, mockea `load_asignacion_cartera` y `load_headcount_negociacion`; no descargues el Excel en tests.
 - Usa fechas de 2026 en los tests de días hábiles: el módulo `utils/helpers_general.py` construye los festivos de Colombia para el año actual al importarse. Si cambias el año de ejecución, revisa esos tests.
 - No fijes valores frágiles de punto flotante; usa `assertAlmostEqual`.
 - Si agregas una regla de negocio, agrega el caso feliz y al menos un borde (vacío, cero, nulo, duplicado o inconsistente).
+- Si implementas una oportunidad en `modules/oportunidades.py`, agrega tests de la fórmula y de los umbrales antes de conectarla a la UI.
 
 ---
 
@@ -560,6 +731,11 @@ Portafolios:
 - Maneja fechas en `America/Bogota` y quita la zona horaria antes de comparar con datos de Sheets (`tz_localize(None)`).
 - No mezcles `datetime` con zona y sin zona.
 - Los esquemas de datos viven en `data/data_models.py`. Si agregas columnas, actualiza el esquema y los loaders/uploaders.
+- Los loaders nuevos (`load_asignacion_cartera`, `load_prospectos_tradicional`, `load_pipeline_credito`, `load_mes_operativo_asignacion`) están cacheados con `st.cache_data`. No los llames desde funciones puras; recibe el DataFrame por parámetro.
+- La Asignación de Cartera, el Pipeline de Crédito y los Prospectos son **solo lectura**. No los edites desde la app.
+- El feedback se escribe únicamente con `send_feedback` en la hoja `Feedback` del spreadsheet de Configs. No inventes otra hoja ni cambies los campos sin actualizar el esquema/documentación.
+- Para leer Excel de Asignación se usa `engine='calamine'`; si cambias a `openpyxl`, actualiza `requirements.txt` y el loader.
+- `AsignacionSchema` conserva `Fecha_Cartera` y `Banco`; no las elimines del DataFrame antes de validar.
 - No llames servicios de Google desde funciones de cálculo puras. Recibe los datos por parámetro.
 - No cambies IDs de hojas, nombres de columnas o constantes de estados sin revisar todas las vistas y tests.
 - No expongas secretos, tokens, IDs de hojas ni contenido de `.streamlit/secrets.toml`.
@@ -567,10 +743,11 @@ Portafolios:
 ### Dónde poner una nueva función
 
 - Cálculo puro y reutilizable → `modules/gest_sols.py`, `modules/forms.py` o `utils/helpers_general.py`.
+- Cálculo de oportunidades → `modules/oportunidades.py` (mantén la especificación en `docs/OPORTUNIDADES_DETALLADO.md`).
 - Regla de aliados / normalización → `modules/classes.py`, `modules/bank_normalizer.py`.
 - Cruce de cartera → `modules/id_aut_deud/`.
 - Lectura/escritura de datos → `data/data_loader.py` / `data/data_uploader.py`.
-- Componente visual → `ui/`.
+- Componente visual → `ui/`. La calculadora vive en `ui/calculadora_components.py`.
 - Página → `views/` y registrar permiso en `core/permissions.py`.
 
 ---
@@ -586,13 +763,25 @@ Portafolios:
 7. **Los textos de negocio usan tildes.** Al comparar estados como `Bajo Comité` o `Validación`, usa el literal exacto. Un `?` o una tilde distinta cambia la máscara.
 8. **Los workflows de GitHub Actions** (`automations/`) ejecutan notebooks con `nbconvert` y credenciales en secrets. No los ejecutes localmente sin revisar qué celdas escriben en Sheets.
 9. **SLA y estados de cierre.** `Vencida` y `Cancelada` se excluyen de SLA y del promedio de respuesta en `ESTADOS_EXCLUIDOS_METRICAS_RESPUESTA`. Si se agrega un estado que tampoco sea una respuesta efectiva, actualiza esa constante y sus tests.
-10. **`LIMITE_MEC` está en migración.** El día 5 todavía define el mes operativo, pero el negocio está migrando a no requerir ese corte. No lo elimines sin revisar `getMesOperativo`, `load_solicitudes_mec` y los reportes.
+10. **`LIMITE_MEC` está en migración.** El día 5 sigue como fallback de `getMesOperativo()`, pero la fuente principal es `load_mes_operativo_asignacion()` (nombre del Excel de Asignación). No borres `LIMITE_MEC` sin revisar `getMesOperativo`, `load_solicitudes_mec` y los reportes.
 11. **Los soportes de pago no liquidan por sí solos.** La fuente de `Estado_Liquidacion` es la hoja externa `Liquidaciones`; los archivos en Drive/`Archivos_Subidos` son evidencia.
 12. **`Addendum` no es una solicitud separada.** Se adjunta a `Metadata_Solicitud["Addendums"]` y se incluye en el acuerdo/respuesta. `ADDENDUM` en el cruce solo indica que el cliente coincide pero la deuda no se pudo acotar.
 13. **`Brindan Máx. Descuento` no bloquea.** La app advierte; el bloqueo duro no está implementado. Si negocio quiere bloquear, hay que cambiar formulario y tests.
 14. **`Pago_Total_Obligatorio` se fuerza en `Bajo Comité`.** La UI lo pone en `True` y deshabilita el toggle; no es una elección libre en ese estado.
 15. **Bloqueos duros del formulario.** El envío se detiene si hay bancos no habilitados o si se excede la contrapropuesta máxima relativa. `Brindan Máx. Descuento` sigue siendo solo una advertencia.
 16. **Conteo de liquidaciones en reportes.** Las fórmulas oficiales se definen sobre solicitudes exitosas, pero `obtener_resumen_liquidaciones` y `obtener_tops_negociadores` todavía pueden contar liquidaciones de solicitudes No Exitosas o Validadas por Fuera. Revisa el filtro antes de usar esos números en decisiones.
+17. **La calculadora de oportunidades es un stub.** Las funciones `oportunidad_*` de `modules/oportunidades.py` lanzan `NotImplementedError`; `mostrar_seleccion_deuda` y `mostrar_oportunidades_referencia` todavía no conectan sliders/métricas. No presentes la calculadora como una funcionalidad de producción hasta implementar y probar las fórmulas.
+18. **`PaB_Actualizado` aún no existe en el código.** Las fórmulas de oportunidades lo necesitan, pero `ActualizacionesSchema` no lo trae. Está pendiente de agregar. Mientras tanto, cualquier cálculo que dependa de él debe fallar explícitamente, no asumir un valor.
+19. **`AsignacionSchema` es estricto con `Pricing` y `Id_Deuda`.** Solo acepta `Pricing` 0.15, 0.20 o 0.25; si el Excel trae otro valor (o 15/20/25 sin dividir entre 100), la validación falla. `Id_Deuda` debe ser único. También conserva `Banco` y `Fecha_Cartera`.
+20. **Formato de la Asignación de Cartera.** El archivo debe terminar en `-MesAA.xlsx` (mes de 3 letras + año de 2 dígitos) y la hoja debe llamarse `Mes AAAA` (por ejemplo, `Octubre 2025`). Si el nombre no cumple, `obtener_prioridad_archivo`/`obtener_prioridad_hoja` devuelven prioridad 0 y el loader puede caer a un archivo anterior o a `getMesOperativo()`.
+21. **Descarga de Google Drive.** `GoogleDriveService.obtain_file` usa `MediaIoBaseDownload` y devuelve un `BytesIO` con el puntero al inicio. Si la descarga falla, `_obtener_df_asignacion` devuelve un DataFrame vacío y la calculadora muestra advertencia; revisa el archivo/carpeta antes de asumir que no hay asignación.
+22. **Prospectos de Tradicional.** Se unen `Prosp_MEC_D_Liq` y `Mec_Probs` por `Id_Deuda` con `how='left'`; las probabilidades faltantes se imputan a 0. `Prospecto` debe cumplir `Trad \d` y `Id_Deuda` debe ser único. `IA Liquidadora` usa `Prob_Liq` total, no `Prob_Liq_Cred` ni `Prob_Liq_Trad`.
+23. **Zona horaria de Actualizaciones.** `load_actualizacines_negos` resta 5 horas a `Fecha_Act` para pasar de UTC a hora local de Bogotá. No vuelvas a restar 5 horas ni mezcles `Fecha_Act` con timestamps con zona.
+24. **MEC: dos rutas.** `getMesOperativo()` (día 5) sigue existiendo como fallback. `load_mes_operativo_asignacion()` (caché 5 días) lee el mes/año del nombre del archivo más reciente; si falla, cae al fallback. No borres `LIMITE_MEC` sin revisar tests y reportes.
+25. **Última actualización de deuda.** `obtener_ultima_actualizacion_deuda` acepta `fecha_min=None` (muestra la última disponible) y usa la columna `Nombre`; no existe `Origen_Act` en `ActualizacionesSchema`.
+26. **Ruta de la documentación.** `views/calculadora_opps.py` resuelve `docs/OPORTUNIDADES.md` desde `__file__`; si mueves la carpeta `docs/`, actualiza esa ruta.
+27. **`PERMITIR_CALCULO_NO_ASIGNADO` es un override de pruebas.** Si está activo, cualquier rol ve todas las Referencias. No lo dejes activo en producción.
+28. **El feedback no se lee desde la app.** Se escribe en la hoja `Feedback` de Configs con `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Si cambias el esquema, actualiza `send_feedback` y la documentación.
 
 ---
 
@@ -607,3 +796,8 @@ Portafolios:
 - [ ] ¿Mantuviste el estilo de comentarios y nombres del proyecto?
 - [ ] ¿Revisaste el impacto en las vistas que consumen la función modificada?
 - [ ] ¿Si cambiaste reglas de estado/SLA, actualizaste las constantes, los tests y este documento?
+- [ ] ¿Si cambiaste una fórmula de oportunidad, actualizaste `docs/OPORTUNIDADES_DETALLADO.md`, `docs/OPORTUNIDADES.md` y `AGENTS.md`?
+- [ ] ¿Agregaste tests de la fórmula, los umbrales y los bordes (sin deudas, deuda liquidada, sin PaB Ideal, `Apartado_Neto = 0`, sin actualizaciones) antes de conectar una oportunidad a la UI?
+- [ ] ¿Verificaste que la Asignación de Cartera tenga `Fecha_Cartera`, `Banco`, `Pricing` válido y `Id_Deuda` único?
+- [ ] ¿Evitaste escribir en Asignación de Cartera, Pipeline de Crédito o Prospectos?
+- [ ] ¿Si cambió el formato de archivo/hoja de Asignación, actualizaste `_parse_mes_anio_desde_nombre_archivo`, `obtener_prioridad_hoja` y sus tests?

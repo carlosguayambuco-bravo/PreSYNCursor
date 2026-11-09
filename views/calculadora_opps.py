@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from pathlib import Path
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
@@ -12,8 +13,9 @@ from ui.calculadora_components import mostrar_calculadora_individual
 st.header("🧮 Calculadora de Oportunidades" )
 
 # Agregamos en Detalle la documentación de las Oportunidades
+ruta_documentacion = Path(__file__).resolve().parents[1] / "docs" / "OPORTUNIDADES.md"
 with st.expander("📖 Documentación de Oportunidades"):
-    with open("docs/OPORTUNIDADES.md", "r", encoding="utf-8") as f:
+    with open(ruta_documentacion, "r", encoding="utf-8") as f:
         st.markdown(f.read())
 
 st.divider()

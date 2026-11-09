@@ -7,6 +7,8 @@ Particularmente para Crédito, es importante que el cliente sea optimo (esto seg
 
 De la misma forma, no es posible calcular oportunidades para deudas ya liquidadas, ya que las oportunidades se calculan con el fin de generar una liquidación.
 
+> **Nota de implementación:** `PaB_Actualizado` todavía no está implementado ni existe en `ActualizacionesSchema`; se agregará al esquema de actualizaciones. Por ahora las fórmulas de este documento son la especificación de negocio y las funciones de `modules/oportunidades.py` están pendientes.
+
 ## **Depósito Extra**
 Un depósito extra hace referencia a una solicitud al cliente de conseguir un dinero adicional con el fin de liquidar una o más deudas. Estos depósitos se suelen medir en `Apartados Netos` del cliente con el fin de tener una medida estándar entre los 
 
@@ -37,7 +39,7 @@ $$ContraOferta \: Viable = 1 - \frac{SUM(Pab\_Ideal) + 20k}{SUM(PaB\_Origen)}$$
 Es simplemente calcular el descuento que se otorga por el cupo total del crédito (agregando los 20k restrictivos).
 
 ### **Cálculo para Tradicional**
-$$ContraOferta \: Viable = 1 - \frac{Ahorro - Por\_Cobrar - SUM(PaB\_Origen) - 20k}{SUM(PaB\_Origen) * (Pricing * 1.19 - 1)}$$
+$$ContraOferta \: Viable = \frac{Ahorro - Por\_Cobrar - SUM(PaB\_Origen) - 20k}{SUM(PaB\_Origen) * (Pricing * 1.19 - 1)}$$
 Esta formula sale de despejar el descuento de acuerdo al pago que se realiza sumado a la comisión y los 20k restrictivos.
 
 ### **Determinación de Oportundiad**

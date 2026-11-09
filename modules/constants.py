@@ -450,4 +450,6 @@ MASIVAS_PORTFOLIO_COLUMNS = ['Portafolio', 'Monto Portafolio']
 MASIVAS_EXISTENTES_COLUMNS = ['Metadata'] + MASIVAS_PORTFOLIO_COLUMNS
 MASIVAS_MAX_ROWS_PER_BATCH = 3000
 
-BANCOS_PORTAFOLIO = ["BBVA Colombia","Itaú","Banco de Occidente"]
+BANCOS_PORTAFOLIO = ["BBVA Colombia", "Itaú", "Banco de Occidente", "Banco Popular"]
+# Ventana configurable para agrupar actualizaciones de una misma gestión como portafolio.
+VENTANA_PORTAFOLIO_SEGUNDOS = 45
