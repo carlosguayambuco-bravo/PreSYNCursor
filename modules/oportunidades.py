@@ -1229,7 +1229,7 @@ def calcular_oportunidades_referencia(
     credito_habilitado = True
     detalle_credito = ""
     if es_opp_cred:
-        _, _, no_opp = obtener_estado_actual_credito(referencia)
+        _, _, no_opp = obtener_estado_actual_credito(referencia=referencia)
         if no_opp:
             credito_habilitado = False
             detalle_credito = "El cliente no opta a Crédito."
@@ -1318,7 +1318,7 @@ def calcular_oportunidades_referencia(
         if prob >= UMBRAL_PROB_LIQ_IA
     }
     detalle_ia = (
-        "; ".join("{}: {:.0%}".format(deuda, prob) for deuda, prob in probabilidades_cumplen.items())
+        "; ".join("ID_Deuda: {} - {:.0%} Prob Liq.".format(deuda, prob) for deuda, prob in probabilidades_cumplen.items())
         if probabilidades_cumplen
         else "Sin deudas con probabilidad >= 50%."
     )

@@ -199,7 +199,7 @@ def mostrar_alertas_credito(*, referencia: str, deudas: list[str]):
         )
         st.stop()
     # Siguiente: Verificamos el Rechazo de Crédito
-    status, rechazo, no_opp = obtener_estado_actual_credito(referencia)
+    status, rechazo, no_opp = obtener_estado_actual_credito(referencia=referencia)
 
     # Creamos 3 Columnas para Mostrar estos Datos
     colReferencia, colCred, colAlerta = st.columns([1,3,2])
@@ -469,7 +469,7 @@ def mostrar_seleccion_deuda(
     ingreso = max((pab_origen - pab_final) * float(pricing), 0.0)
 
     colIdDum, colSliders, colManual, colDiscPayment, colIngreso = st.columns(
-        [1, 3, 1, 1, 1], vertical_alignment="center"
+        [2, 3, 1, 2, 2], vertical_alignment="center", gap="small"
     )
 
     with colIdDum:
@@ -520,7 +520,7 @@ def mostrar_seleccion_deuda(
         )
         st.metric(
             label="**💵 PaB**",
-            value="$ {}".format(formatNumber(pab_final))
+            value="${:,.0f}".format(pab_final)
         )
 
     with colIngreso:
@@ -568,8 +568,9 @@ def mostrar_calculadora_individual():
         st.metric(
             label="💰 Ahorro Neto",
             value=f"${ahorro_neto:,.0f}",
-            delta=f"${ahorro:,.0f} - ${porcobrar:,.0f}",
-            delta_color="inverse"
+            delta=f"`${ahorro:,.0f} - ${porcobrar:,.0f}`",
+            delta_color="red" if ahorro_neto <=0 else "green",
+            delta_arrow="down" if ahorro_neto <=0 else "up",
         )
 
     with colPricing:
@@ -598,6 +599,8 @@ def mostrar_calculadora_individual():
 
     # Mostramos la alerta de las deudas
     mostrar_alertas_liquidacion(deudas = debts_selected)
+
+    st.divider()
 
     # Escoger el Tipo de Análisis: Por Crédito o Tradicional
     tipo_analisis = st.radio(
@@ -700,7 +703,7 @@ def mostrar_calculadora_individual():
     }
 
     # Se crean 2 Columnas: Columna de Detalles de Deudas y Columna de Resultados
-    colDetallesDeudas, colResultados = st.columns([4, 1], vertical_alignment="center", gap="xsmall")
+    colDetallesDeudas, colResultados = st.columns([4, 1], vertical_alignment="center", gap="small")
 
     pab_deudas = {}
     pab_ideal_deudas = {}
@@ -748,33 +751,34 @@ def mostrar_calculadora_individual():
     )
 
     with colResultados:
-        # Mostramos Dum Total, PaB, Ingreso, Pago Total del Cliente y si es Viable
-        st.metric(
-            label="**💰 DUM Total**",
-            value="$ {}".format(formatNumber(dum_total)),
-        )
-        st.metric(
-            label="**💵 PaB**",
-            value="$ {}".format(formatNumber(pab_total)),
-        )
-        st.metric(
-            label="**😁 Ingreso**",
-            value="$ {}".format(formatNumber(ingreso_total)),
-            delta="$ {} con IVA".format(formatNumber(ingreso_total * IVA)),
-        )
-        st.metric(
-            label="**ℹ️ Pago Total**",
-            value="$ {}".format(formatNumber(viabilidad["pago_total"])),
-            help="Incluye comisión con IVA y los $20.000 adicionales.",
-        )
-        st.metric(
-            label="**❔Es Viable**",
-            value="Viable 😁" if viabilidad["viable"] else "❌ No Viable",
-        )
-        st.caption("Tradicional: {} | Crédito: {}".format(
-            "✅" if viabilidad["viable_tradicional"] else "❌",
-            ("✅" if viabilidad["viable_credito"] else "❌") if opp_credito else "N/A",
-        ))
+        with st.container(border=True):
+            # Mostramos Dum Total, PaB, Ingreso, Pago Total del Cliente y si es Viable
+            st.metric(
+                label="**💰 DUM Total**",
+                value="$ {}".format(formatNumber(dum_total)),
+            )
+            st.metric(
+                label="**💵 PaB**",
+                value="$ {}".format(formatNumber(pab_total)),
+            )
+            st.metric(
+                label="**😁 Ingreso**",
+                value="$ {}".format(formatNumber(ingreso_total)),
+                delta="$ {} con IVA".format(formatNumber(ingreso_total * IVA)),
+            )
+            st.metric(
+                label="**ℹ️ Pago Total**",
+                value="$ {}".format(formatNumber(viabilidad["pago_total"])),
+                help="Incluye comisión con IVA y los $20.000 adicionales.",
+            )
+            st.metric(
+                label="**❔Es Viable**",
+                value="Viable 😁" if viabilidad["viable"] else "❌ No Viable",
+            )
+            st.caption("Tradicional: {} | Crédito: {}".format(
+                "✅" if viabilidad["viable_tradicional"] else "❌",
+                ("✅" if viabilidad["viable_credito"] else "❌") if opp_credito else "N/A",
+            ))
 
     # Agregamos los resultados a las Configuraciones
     configs.update({

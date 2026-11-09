@@ -52,7 +52,7 @@ def _mascara_nombre(*, nombre_val, nombre_exact_index, nombre_word_index, n: int
         palabras_ordenadas = sorted(palabras_distintas, key=lambda p: len(nombre_word_index.get(p, ())))
         comunes = set(nombre_word_index.get(palabras_ordenadas[0], ()))
         for palabra in palabras_ordenadas[1:]:
-            comunes &= nombre_word_index.get(palabra, ())
+            comunes &= nombre_word_index.get(palabra, set())
             if not comunes:
                 break
         candidatos |= comunes

@@ -833,6 +833,9 @@ def _clean_liquidaciones(liqsDF: pd.DataFrame) -> DataFrame[LiquidationsSchema]:
     liqsDF['Id_Deuda'] = liqsDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
     liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
 
+    # Quitamos Datos donde Id_Deuda = "", sea NaN o = "nan"
+    liqsDF = liqsDF[~(liqsDF['Id_Deuda'].isin(["",np.nan,"nan"]))]
+
     # Cargamos los Cambios de Referencia y los aplicamos
     ref_changes = load_reference_changes()
     liqsDF['Referencia'] = liqsDF['Referencia'].apply(lambda r: ref_changes.get(r,r))
@@ -850,7 +853,7 @@ def _clean_liquidaciones(liqsDF: pd.DataFrame) -> DataFrame[LiquidationsSchema]:
     fecha_min_mec = liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Fecha_Liq'].min()
     # Imputamos Mes_Liq y Año_Liq con las propiedades de esta fecha
     liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Mes_Liq'] = fecha_min_mec.month
-    liqsDF.loc[liqsDF['Mes_Liq'].isna(),'Año_Liq'] = fecha_min_mec.year
+    liqsDF.loc[liqsDF['Año_Liq'].isna(),'Año_Liq'] = fecha_min_mec.year
 
     # Hacemos Strip a la Columna Negociador_Liq
     liqsDF['Negociador_Liq'] = liqsDF['Negociador_Liq'].astype(str).str.strip()
@@ -1489,7 +1492,7 @@ def load_pendiente_cruce_con_cambios() -> pd.DataFrame:
     return cruce_ajustado
 
 # --> Carga de Actualizaciones desde Sheets 
-@st.cache_data(show_spinner=False, ttl=2*HOUR_WAIT)
+@st.cache_data(show_spinner="Cargando Actualizaciones desde Google Sheets...", ttl=2*HOUR_WAIT, show_time=True)
 def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     # Paso 1: Obtener el Servicio de Google Sheets
     google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
@@ -1549,7 +1552,7 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     )
 
     # Imputamos el Nombre con el Correo
-    maskSinNombre = actsDF['Correo'].isna()
+    maskSinNombre = actsDF['Nombre'].isna()
     actsDF.loc[maskSinNombre,'Nombre'] = actsDF.loc[maskSinNombre,'Correo']
 
     # Validamos el DF
@@ -1692,7 +1695,7 @@ def load_pipeline_credito() -> DataFrame[PipelineCreditoSchema]:
         "Status": "Status_Credito"
     })
     # Dejamos solo las Columnas Necesarias
-    pipecredDF = pipecredDF[['Referencia','Fecha_Subida','Status']]
+    pipecredDF = pipecredDF[['Referencia','Fecha_Subida','Status_Credito']]
     # Volvemos la Columna Referencia a String
     pipecredDF['Referencia'] = pipecredDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
     # Cargamos los cambios de Referencia y los Aplicamos
@@ -1875,7 +1878,7 @@ def _limpiar_df_asignacion(asignacion_df: pd.DataFrame) -> DataFrame[AsignacionS
 
     # Paso 1: Limpiar las Columnas del DataFrame
     for col, possibleVals in COL_MAPPER_ASIGNACION.items():
-        asignacion_df[col] = cleanCols(asignacion_df, col, possibleVals)
+        asignacion_df = cleanCols(asignacion_df, col, possibleVals)
 
     # Paso 2: Formateo de Datos
     # Volvemos Referencia e Id_Deuda a String

@@ -66,7 +66,7 @@ DESCRIPCION_OPORTUNIDADES = {
     ),
     'IA Liquidadora': (
         "La deuda tiene probabilidad de liquidación >= 50% según el modelo "
-        "de Prospectos de Tradicional."
+        "de Liquidación (como un ChatGPT)"
     ),
 }
 
