@@ -256,6 +256,7 @@ def mostrar_oportunidades_referencia(
     ahorro: Optional[float],
     porcobrar: Optional[float],
     deposito_extra: float,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ):
     """Muestra las oportunidades aplicables de una Referencia.
 
@@ -266,6 +267,8 @@ def mostrar_oportunidades_referencia(
         ahorro (Optional[float]): Ahorro simulado.
         porcobrar (Optional[float]): Por Cobrar simulado.
         deposito_extra (float): Depósito Extra simulado.
+        pab_por_deuda (Optional[dict[str, float]]): PaB simulado por deuda
+            desde los inputs de la calculadora.
     """
     # Primero calculamos todas las oportunidades de la Referencia
     with st.spinner("Calculando oportunidades..."):
@@ -276,6 +279,7 @@ def mostrar_oportunidades_referencia(
             ahorro=ahorro,
             porcobrar=porcobrar,
             deposito_extra=deposito_extra,
+            pab_por_deuda=pab_por_deuda,
         )
     oportunidades_aplicables = [
         oportunidad for oportunidad in OPORTUNIDADES
@@ -283,12 +287,17 @@ def mostrar_oportunidades_referencia(
     ]
 
     # Mostramos un resumen de los insumos usados en el cálculo
+    pab_simulado_total = sum(
+        float((pab_por_deuda or {}).get(deuda, 0.0))
+        for deuda in debts_selected
+    )
     st.caption(
-        "Análisis: **{}** | Ahorro: **$ {:,.0f}** | Por Cobrar: **$ {:,.0f}** | Depósito Extra: **$ {:,.0f}**".format(
+        "Análisis: **{}** | Ahorro: **\\$ {:,.0f}** | Por Cobrar: **\\$ {:,.0f}** | Depósito Extra: **\\$ {:,.0f}** | PaB simulado: **\\$ {:,.0f}**".format(
             "Crédito" if es_opp_cred else "Tradicional",
             ahorro or 0,
             porcobrar or 0,
             deposito_extra or 0,
+            pab_simulado_total,
         )
     )
 
@@ -418,6 +427,15 @@ def _sincronizar_desde_texto_pab(*, clave: str, pab_origen: float):
     st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento * 100
     st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento)
     st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
+
+# Función Auxiliar para Obtener el PaB Inicial de una Deuda
+def _obtener_pab_inicial_deuda(*, deuda: str, pab_origen: float) -> float:
+    """Obtiene el PaB inicial de una deuda: su descuento actual.
+
+    Si la deuda no tiene una actualización confiable, se devuelve el
+    ``PaB_Origen`` (0% de descuento), nunca el PaB Ideal de Crédito.
+    """
+    return obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
 
 # Función Auxiliar para Mostrar la Selección de una Deuda
 def mostrar_seleccion_deuda(
@@ -568,7 +586,7 @@ def mostrar_calculadora_individual():
         st.metric(
             label="💰 Ahorro Neto",
             value=f"${ahorro_neto:,.0f}",
-            delta=f"`${ahorro:,.0f} - ${porcobrar:,.0f}`",
+            delta=f"\\${ahorro:,.0f} - \\${porcobrar:,.0f}",
             delta_color="red" if ahorro_neto <=0 else "green",
             delta_arrow="down" if ahorro_neto <=0 else "up",
         )
@@ -712,12 +730,16 @@ def mostrar_calculadora_individual():
         for d in debts_selected:
             with st.container(border=True):
                 pab_origen_deuda = float(mapa_pab_origen.get(str(d), 0.0))
-                if opp_credito:
-                    init_pab = obtener_valor_pab_ideal(debt=d)
-                    pab_ideal_deudas[d] = init_pab
-                else:
-                    init_pab = obtener_pab_actualizado_deuda(d, pab_origen=pab_origen_deuda)
-                    pab_ideal_deudas[d] = 0.0
+                # El PaB inicial siempre refleja el descuento actual de la deuda.
+                # Si no hay actualización confiable, devuelve el PaB_Origen
+                # (0% de descuento), no el PaB Ideal.
+                init_pab = _obtener_pab_inicial_deuda(
+                    deuda=d,
+                    pab_origen=pab_origen_deuda,
+                )
+                pab_ideal_deudas[d] = (
+                    obtener_valor_pab_ideal(debt=d) if opp_credito else 0.0
+                )
 
                 pab_deudas[d] = mostrar_seleccion_deuda(
                     deuda=d,
@@ -799,6 +821,7 @@ def mostrar_calculadora_individual():
         ahorro=ahorro_val,
         porcobrar=porcobrar_val,
         deposito_extra=dep_extra_val,
+        pab_por_deuda=pab_deudas,
     )
 
     st.divider()

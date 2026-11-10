@@ -577,6 +577,7 @@ Portafolios:
 - `PaB_Actualizado`: monto de pago de la última actualización confiable. Se carga en `ActualizacionesSchema` desde `payment_to_bank`; el loader toma el primer número y lo divide entre 100 porque la fuente viene en **centavos** y el resultado queda en **COP**. Se toma la actualización **más reciente**: si su etiqueta no es confiable, se usa `PaB_Origen` (Descuento Actual = 0). Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base (masivas) con la última solicitud exitosa; si ambas fuentes tienen fecha, prevalece la más reciente, y si no hay fechas comparables se usa el valor de la fila de actualización.
 - `PaB_Ideal_Credito`: cupo aprobado por crédito. Para análisis por crédito, **todas** las deudas seleccionadas deben tener PaB Ideal > 0.
 - `Ahorro` y `Por_Cobrar`: valores del cliente desde SALDOS/TOTAL. En la calculadora individual se pueden simular con los inputs editables.
+- `PaB simulado`: en la calculadora individual, el input de PaB de cada deuda inicia con `PaB_Actualizado` (o `PaB_Origen` si no hay actualización confiable) y reemplaza el `PaB_Actualizado` oficial en Depósito Extra, Descuento Actual, Liquidación Instantánea y la comparación de la ContraOferta. La fórmula de la ContraOferta no cambia. La calculadora pasa el diccionario `pab_por_deuda` a `calcular_oportunidades_referencia`.
 - `Apartado_Neto = max(Apartado_Mensual - Comision_Mensual, 0)`. Es un dato del cliente que se repite por deuda; para el cálculo se toma un **único valor** (el máximo de las filas seleccionadas), no la suma.
 - `Pricing`: 0.15, 0.20 o 0.25 (`AsignacionSchema` lo valida estrictamente). `IVA = 1.19`.
 - `Descuento_Esperado`: descuento esperado por deuda (modelo de ML, columna `Descuento` de la Asignación).
@@ -595,7 +596,7 @@ Portafolios:
 - **Depósito Extra (Crédito):**
 
   ```text
-  deposito_extra = SUM(PaB_Ideal_Credito) + 20_000 - SUM(PaB_Actualizado)
+  deposito_extra = SUM(PaB_Actualizado) + 20_000 - SUM(PaB_Ideal_Credito)
   ```
 
 - **Depósito Extra (Tradicional):**

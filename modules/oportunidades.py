@@ -709,11 +709,18 @@ def calcular_deposito_extra_credito(
     pab_ideal_total: float,
     pab_actualizado_total: float,
 ) -> float:
-    """Calcula el Depósito Extra necesario para Crédito."""
+    """Calcula el Depósito Extra necesario para Crédito.
+
+    El PaB Ideal es el cupo aprobado por Crédito. Si el pago actual
+    (``PaB_Actualizado``) supera ese cupo, el cliente debe cubrir la
+    diferencia para que el crédito quede aprobado:
+
+    ``Depósito Extra = SUM(PaB_Actualizado) + 20k - SUM(PaB_Ideal)``.
+    """
     return (
-        _a_float(pab_ideal_total)
+        _a_float(pab_actualizado_total)
         + MONTO_ADICIONAL_DEPOSITO
-        - _a_float(pab_actualizado_total)
+        - _a_float(pab_ideal_total)
     )
 
 def calcular_deposito_extra_tradicional(
@@ -885,8 +892,40 @@ def _resolver_saldos_cliente(
             porcobrar = saldos_dict["PorCobrar"][referencia]
     return max(_a_float(ahorro), 0.0), max(_a_float(porcobrar), 0.0)
 
-def _obtener_totales_deudas(*, referencia: str, deudas: list[str]) -> dict[str, Any]:
-    """Calcula los totales y datos base de las deudas seleccionadas."""
+def _resolver_pab_simulado_por_deuda(
+    *,
+    pab_por_deuda: Optional[dict[str, float]],
+) -> dict[str, float]:
+    """Normaliza el PaB simulado por deuda que llega desde la calculadora.
+
+    Las llaves se normalizan igual que los ``Id_Deuda`` de la Asignación para
+    que el cruce no falle por sufijos ``.0`` o espacios.
+    """
+    if not isinstance(pab_por_deuda, dict):
+        return {}
+    pab_normalizado = {}
+    for deuda, pab in pab_por_deuda.items():
+        deuda_norm = _normalizar_id_deuda(deuda)
+        if not deuda_norm:
+            continue
+        pab_float = _a_float(pab, default=np.nan)
+        if pd.isna(pab_float):
+            continue
+        pab_normalizado[deuda_norm] = max(pab_float, 0.0)
+    return pab_normalizado
+
+def _obtener_totales_deudas(
+    *,
+    referencia: str,
+    deudas: list[str],
+    pab_por_deuda: Optional[dict[str, float]] = None,
+) -> dict[str, Any]:
+    """Calcula los totales y datos base de las deudas seleccionadas.
+
+    Si se recibe ``pab_por_deuda``, su valor se usa como PaB_Actualizado
+    simulado para esa deuda. Las deudas que no vengan en el diccionario usan
+    el PaB_Actualizado oficial de las Actualizaciones.
+    """
     asignacion_df = _obtener_df_deudas_seleccionadas(referencia=referencia, deudas=deudas)
     pricing = obtener_pricing_para_referencia(referencia)
     if asignacion_df.empty:
@@ -908,11 +947,16 @@ def _obtener_totales_deudas(*, referencia: str, deudas: list[str]) -> dict[str, 
     descuentos_esperados = []
     pab_origen_lista = []
     pab_ideal_total = 0.0
+    pab_simulado = _resolver_pab_simulado_por_deuda(pab_por_deuda=pab_por_deuda)
 
     for _, fila in asignacion_df.iterrows():
         deuda = _normalizar_id_deuda(fila["Id_Deuda"])
         pab_origen = max(_a_float(fila.get("PaB_Origen")), 0.0)
-        pab_actualizado = obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
+        if deuda in pab_simulado:
+            # El PaB del input nunca puede superar el PaB_Origen de la deuda
+            pab_actualizado = min(pab_simulado[deuda], pab_origen) if pab_origen > 0 else 0.0
+        else:
+            pab_actualizado = obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
         pab_origen_por_deuda[deuda] = pab_origen
         pab_actualizado_por_deuda[deuda] = pab_actualizado
         pab_origen_lista.append(pab_origen)
@@ -944,9 +988,14 @@ def oportunidad_dep_extra_credito(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene el Depósito Extra necesario para Crédito."""
-    totales = _obtener_totales_deudas(referencia=referencia, deudas=deudas)
+    totales = _obtener_totales_deudas(
+        referencia=referencia,
+        deudas=deudas,
+        pab_por_deuda=pab_por_deuda,
+    )
     if totales["pab_ideal_total"] <= 0:
         return 0.0
     return calcular_deposito_extra_credito(
@@ -961,9 +1010,14 @@ def oportunidad_dep_extra_tradicional(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene el Depósito Extra necesario para Tradicional."""
-    totales = _obtener_totales_deudas(referencia=referencia, deudas=deudas)
+    totales = _obtener_totales_deudas(
+        referencia=referencia,
+        deudas=deudas,
+        pab_por_deuda=pab_por_deuda,
+    )
     ahorro, porcobrar = _resolver_saldos_cliente(
         referencia=referencia,
         ahorro=ahorro,
@@ -985,6 +1039,7 @@ def oportunidad_dep_extra(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene el Depósito Extra necesario según el tipo de análisis."""
     if es_opp_cred:
@@ -994,6 +1049,7 @@ def oportunidad_dep_extra(
             ahorro=ahorro,
             porcobrar=porcobrar,
             deposito_extra=deposito_extra,
+            pab_por_deuda=pab_por_deuda,
         )
     return oportunidad_dep_extra_tradicional(
         referencia=referencia,
@@ -1001,6 +1057,7 @@ def oportunidad_dep_extra(
         ahorro=ahorro,
         porcobrar=porcobrar,
         deposito_extra=deposito_extra,
+        pab_por_deuda=pab_por_deuda,
     )
 
 ### - ContraOfertas Viables
@@ -1097,9 +1154,14 @@ def oportunidad_liq_insta_credito(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene el Descuento Actual para evaluar la Liquidación Instantánea por Crédito."""
-    totales = _obtener_totales_deudas(referencia=referencia, deudas=deudas)
+    totales = _obtener_totales_deudas(
+        referencia=referencia,
+        deudas=deudas,
+        pab_por_deuda=pab_por_deuda,
+    )
     return calcular_descuento_actual(
         pab_origen_total=totales["pab_origen_total"],
         pab_actualizado_total=totales["pab_actualizado_total"],
@@ -1112,9 +1174,14 @@ def oportunidad_liq_insta_tradicional(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene el Descuento Actual para evaluar la Liquidación Instantánea por Tradicional."""
-    totales = _obtener_totales_deudas(referencia=referencia, deudas=deudas)
+    totales = _obtener_totales_deudas(
+        referencia=referencia,
+        deudas=deudas,
+        pab_por_deuda=pab_por_deuda,
+    )
     return calcular_descuento_actual(
         pab_origen_total=totales["pab_origen_total"],
         pab_actualizado_total=totales["pab_actualizado_total"],
@@ -1128,6 +1195,7 @@ def oportunidad_liq_insta(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> float:
     """Obtiene la Liquidación Instantánea según el tipo de análisis."""
     if es_opp_cred:
@@ -1137,6 +1205,7 @@ def oportunidad_liq_insta(
             ahorro=ahorro,
             porcobrar=porcobrar,
             deposito_extra=deposito_extra,
+            pab_por_deuda=pab_por_deuda,
         )
     return oportunidad_liq_insta_tradicional(
         referencia=referencia,
@@ -1144,6 +1213,7 @@ def oportunidad_liq_insta(
         ahorro=ahorro,
         porcobrar=porcobrar,
         deposito_extra=deposito_extra,
+        pab_por_deuda=pab_por_deuda,
     )
 
 ### - IA Liquidadora
@@ -1178,6 +1248,7 @@ def calcular_oportunidades_referencia(
     ahorro: Optional[float] = None,
     porcobrar: Optional[float] = None,
     deposito_extra: float = 0.0,
+    pab_por_deuda: Optional[dict[str, float]] = None,
 ) -> dict[str, dict[str, Any]]:
     """Calcula todas las oportunidades de una Referencia para un conjunto de deudas.
 
@@ -1188,6 +1259,10 @@ def calcular_oportunidades_referencia(
         ahorro (Optional[float]): Ahorro a usar. Si es None, se toma el oficial.
         porcobrar (Optional[float]): Por Cobrar a usar. Si es None, se toma el oficial.
         deposito_extra (float): Depósito Extra simulado en la calculadora.
+        pab_por_deuda (Optional[dict[str, float]]): PaB simulado por deuda desde
+            los inputs de la calculadora. Reemplaza el PaB_Actualizado oficial
+            para el Depósito Extra, el Descuento Actual y la evaluación de la
+            ContraOferta. Las deudas ausentes usan el PaB_Actualizado oficial.
 
     Returns:
         dict[str, dict[str, Any]]: Diccionario por oportunidad con
@@ -1208,6 +1283,7 @@ def calcular_oportunidades_referencia(
     totales = _obtener_totales_deudas(
         referencia=referencia,
         deudas=deudas_normalizadas,
+        pab_por_deuda=pab_por_deuda,
     )
     if totales["pab_origen_total"] <= 0:
         return {

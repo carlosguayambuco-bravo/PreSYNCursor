@@ -36,6 +36,7 @@ from modules.oportunidades import (
 from ui.calculadora_components import (
     _calcular_descuento_desde_pab,
     _calcular_pab_desde_descuento,
+    _obtener_pab_inicial_deuda,
     _sincronizar_desde_slider_descuento,
     _sincronizar_desde_slider_pab,
     _sincronizar_desde_texto_pab,
@@ -240,12 +241,21 @@ class TestMesOperativoLiquidaciones(unittest.TestCase):
 
 class TestCalculosOportunidades(unittest.TestCase):
     def test_deposito_extra_credito(self):
+        # Si el pago actual es menor al cupo, no se requiere depósito
         self.assertEqual(
             calcular_deposito_extra_credito(
                 pab_ideal_total=80_000_000,
                 pab_actualizado_total=60_000_000,
             ),
-            20_020_000,
+            -19_980_000,
+        )
+        # Si el pago actual supera el cupo, el cliente cubre la diferencia
+        self.assertEqual(
+            calcular_deposito_extra_credito(
+                pab_ideal_total=80_000_000,
+                pab_actualizado_total=90_000_000,
+            ),
+            10_020_000,
         )
 
     def test_deposito_extra_tradicional(self):
@@ -778,7 +788,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
             ),
         ]
 
-    def _calcular(self, es_opp_cred):
+    def _calcular(self, es_opp_cred, pab_por_deuda=None):
         patches = self._patches(es_opp_cred)
         for p in patches:
             p.start()
@@ -790,6 +800,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
                 ahorro=50_000_000,
                 porcobrar=5_000_000,
                 deposito_extra=0,
+                pab_por_deuda=pab_por_deuda,
             )
         finally:
             for p in patches:
@@ -797,8 +808,9 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
 
     def test_analisis_por_credito(self):
         opps = self._calcular(es_opp_cred=True)
-        self.assertTrue(opps["Depósito Extra"]["aplica"])
-        self.assertEqual(opps["Depósito Extra"]["valor"], 20_020_000)
+        # El pago actual (60M) cabe en el cupo (80M): no requiere depósito
+        self.assertFalse(opps["Depósito Extra"]["aplica"])
+        self.assertEqual(opps["Depósito Extra"]["valor"], -19_980_000)
         self.assertFalse(opps["ContraOferta Viable"]["aplica"])
         self.assertTrue(opps["Liquidación Instantánea"]["aplica"])
         self.assertFalse(opps["Acuerdo para Robo"]["aplica"])
@@ -812,6 +824,73 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
         self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
         self.assertFalse(opps["Acuerdo para Robo"]["aplica"])
         self.assertTrue(opps["IA Liquidadora"]["aplica"])
+
+    def test_pab_simulado_reemplaza_pab_actualizado_en_tradicional(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            pab_por_deuda={"D1": 40_000_000},
+        )
+        # Con PaB simulado de 40M el depósito baja de 22.16M a 5.73M
+        self.assertEqual(opps["Depósito Extra"]["valor"], 5_730_000)
+        self.assertTrue(opps["ContraOferta Viable"]["aplica"])
+        self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
+
+    def test_pab_simulado_se_usa_en_comparacion_de_contraoferta(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            pab_por_deuda={"D1": 30_000_000},
+        )
+        # La fórmula de la ContraOferta no cambia, pero al simular 70% de
+        # descuento ya no es oportunidad y pasa a Liquidación Instantánea
+        self.assertAlmostEqual(opps["ContraOferta Viable"]["valor"], 55_020_000 / 82_150_000)
+        self.assertFalse(opps["ContraOferta Viable"]["aplica"])
+        self.assertTrue(opps["Liquidación Instantánea"]["aplica"])
+        self.assertAlmostEqual(opps["Liquidación Instantánea"]["valor"], 0.7)
+
+    def test_pab_simulado_reemplaza_pab_actualizado_en_credito(self):
+        opps = self._calcular(
+            es_opp_cred=True,
+            pab_por_deuda={"D1": 50_000_000},
+        )
+        # Depósito Extra Crédito = 50M + 20k - 80M
+        self.assertFalse(opps["Depósito Extra"]["aplica"])
+        self.assertEqual(opps["Depósito Extra"]["valor"], -29_980_000)
+        self.assertFalse(opps["ContraOferta Viable"]["aplica"])
+        self.assertTrue(opps["Liquidación Instantánea"]["aplica"])
+        self.assertAlmostEqual(opps["Liquidación Instantánea"]["valor"], 0.5)
+
+    def test_pab_simulado_mayor_al_ideal_exige_deposito_extra_credito(self):
+        opps = self._calcular(
+            es_opp_cred=True,
+            pab_por_deuda={"D1": 90_000_000},
+        )
+        # Depósito Extra Crédito = 90M + 20k - 80M
+        self.assertTrue(opps["Depósito Extra"]["aplica"])
+        self.assertEqual(opps["Depósito Extra"]["valor"], 10_020_000)
+        self.assertTrue(opps["ContraOferta Viable"]["aplica"])
+        self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
+
+    def test_pab_simulado_normaliza_ids_y_deudas_ausentes_usan_oficial(self):
+        opps_sin_deuda = self._calcular(
+            es_opp_cred=False,
+            pab_por_deuda={"D2": 10_000_000},
+        )
+        self.assertEqual(opps_sin_deuda["Depósito Extra"]["valor"], 22_160_000)
+
+        opps_id_con_sufijo = self._calcular(
+            es_opp_cred=False,
+            pab_por_deuda={"D1.0": 40_000_000},
+        )
+        self.assertEqual(opps_id_con_sufijo["Depósito Extra"]["valor"], 5_730_000)
+
+    def test_pab_simulado_se_acota_al_pab_origen(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            pab_por_deuda={"D1": 150_000_000},
+        )
+        # El input no puede superar el PaB_Origen: 100M + 20k - 45M
+        self.assertEqual(opps["Depósito Extra"]["valor"], 55_020_000)
+        self.assertAlmostEqual(opps["Liquidación Instantánea"]["valor"], 0.0)
 
     def test_sin_deudas_no_hay_oportunidades(self):
         opps = calcular_oportunidades_referencia(
@@ -872,6 +951,21 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
         self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
         self.assertIn("Falta PaB Ideal", opps["Depósito Extra"]["detalle"])
         self.assertTrue(opps["IA Liquidadora"]["aplica"])
+
+
+class TestPabInicialCalculadora(unittest.TestCase):
+    def test_pab_inicial_usa_descuento_actual_y_no_pab_ideal(self):
+        with patch(
+            "ui.calculadora_components.obtener_pab_actualizado_deuda",
+            return_value=60_000_000,
+        ) as mock_actualizado:
+            pab_inicial = _obtener_pab_inicial_deuda(
+                deuda="D1",
+                pab_origen=100_000_000,
+            )
+
+        self.assertEqual(pab_inicial, 60_000_000)
+        mock_actualizado.assert_called_once_with("D1", pab_origen=100_000_000)
 
 
 if __name__ == "__main__":
