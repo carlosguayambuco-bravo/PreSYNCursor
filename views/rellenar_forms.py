@@ -509,7 +509,7 @@ response_info = {
 # Creamos 2 Columnas: Una para el Botón de Envío y otra para el Mensaje de Éxito
 colBoton, colMensaje = st.columns([1, 2])
 
-ref_enviar_completa = referencia_cliente + ''.join((d['Id_Deuda'] for d in info_completa_deudas))
+ref_enviar_completa = referencia_cliente + ''.join((d['Id_Deuda'] for d in info_completa_deudas)) + tipo_solicitud
 ya_enviado = (ref_enviar_completa != '') and (ref_enviar_completa == st.session_state.get('ultima_referencia_enviada'))
 
 with colBoton:
