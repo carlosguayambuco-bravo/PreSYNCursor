@@ -1,8 +1,9 @@
 # Estándar usando Pep8
 # Librerías de Python
 import math
-from typing import Any, Callable, Literal, Optional
+from html import escape
 from time import sleep
+from typing import Any, Callable, Literal, Optional
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -3247,9 +3248,18 @@ def mostrar_boton_modificaciones(*, solicitud: pd.Series) -> None:
         dialog_historial_modificaciones(solicitud=solicitud)
 
 # Función Auxiliar para mostrar los detalles de la respuesta de la Solicitud
-def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Literal['nego','ejecutivo'], expander_key: str, default_expand_debts: bool = True):
+def mostrar_detalles_respuesta_solicitud(
+    *,
+    solicitud: pd.Series,
+    origen: Literal['nego','ejecutivo'],
+    expander_key: str,
+    default_expand_debts: bool = True,
+    mostrar_titulo: bool = True,
+    mostrar_mensaje_sin_exito: bool = True,
+):
     # Siguiente Paso: Mostramos la Info de la Respuesta
-    st.subheader("**📋 Información de la Respuesta a la Solicitud**")
+    if mostrar_titulo:
+        st.subheader("**📋 Información de la Respuesta a la Solicitud**")
 
     comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo','Sin Comentario Adicional') or 'Sin Comentario Adicional'
     
@@ -3261,16 +3271,24 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
             colFechaResp, colEstadoSolicitud = st.columns([2, 2], vertical_alignment="center")
     
         with colFechaResp:
-            # Calculamos los Días a Hoy
-            dia_diff = getBDDaysDiffFloat(solicitud["Fecha_Respuesta"], pd.Timestamp.now('America/Bogota').tz_localize(None))
+            # Calculamos los Días a Hoy (Solo si Existe la Fecha de Respuesta)
+            if pd.notnull(solicitud["Fecha_Respuesta"]):
+                dia_diff = getBDDaysDiffFloat(solicitud["Fecha_Respuesta"], pd.Timestamp.now('America/Bogota').tz_localize(None))
+                delta_fecha = "Hace {:.2f} días hábiles".format(dia_diff)
+                delta_color_fecha = "green" if dia_diff <= 5 else "red"
+                delta_arrow_fecha = "up" if dia_diff <=5 else "down"
+            else:
+                delta_fecha = "Sin Fecha de Respuesta"
+                delta_color_fecha = "gray"
+                delta_arrow_fecha = "off"
             st.metric(
                 label="**Fecha de Respuesta:**",
                 value=solicitud["Fecha_Respuesta"].strftime("%Y-%m-%d %X") if pd.notnull(solicitud["Fecha_Respuesta"]) else "No Brindada",
                 help = "La Fecha de Respuesta de la solicitud",
                 width="stretch",
-                delta = "Hace {:.2f} días hábiles".format(dia_diff),
-                delta_color="green" if dia_diff <= 5 else "red",
-                delta_arrow="up" if dia_diff <=5 else "down",
+                delta = delta_fecha,
+                delta_color=delta_color_fecha, # type: ignore
+                delta_arrow=delta_arrow_fecha, # type: ignore
             )
         with colEstadoSolicitud:
             st.metric(
@@ -3304,7 +3322,7 @@ def mostrar_detalles_respuesta_solicitud(*, solicitud: pd.Series, origen: Litera
         # Si es Bajo Comité, mostramos los Valores Otorgados (Si existen)
         if solicitud["Estado_Solicitud"] == "Bajo Comité":
             mostrar_valores_bajo_comite(solicitud=solicitud)
-        else:
+        elif mostrar_mensaje_sin_exito:
             st.success("Como la Solicitud no es Exitosa, no hay nada más que mostrar",icon="😁")
         return
     
@@ -4148,6 +4166,372 @@ def mostrar_botones_cancelar_reactivar_solicitud(*, solicitud: pd.Series) -> Non
             else:
                 st.error("Hubo un error al reactivar la solicitud {}. Por favor, intente nuevamente.".format(solicitud['ID_Solicitud']), icon="❌")
 
+# Función Auxiliar para Renderizar un Banner de Sección con Color y Contraste
+def _renderizar_banner_seccion(
+    *,
+    emoji: str,
+    titulo: str,
+    subtitulo: str,
+    color_inicio: str,
+    color_fin: str,
+    insignia: Optional[str] = None,
+) -> None:
+    """
+    Muestra un banner llamativo para diferenciar las secciones de la vista.
+
+    Args:
+        emoji (str): Emoji representativo de la sección.
+        titulo (str): Título principal de la sección.
+        subtitulo (str): Texto corto que contextualiza la sección.
+        color_inicio (str): Color inicial del degradado.
+        color_fin (str): Color final del degradado.
+        insignia (Optional[str]): Etiqueta opcional que se muestra a la derecha.
+    """
+    # Construimos la Insignia (Si Aplica)
+    insignia_html = ""
+    if insignia:
+        insignia_html = (
+            '<span style="margin-left:auto; padding:4px 12px; border-radius:999px; '
+            'background:rgba(255,255,255,.20); font-size:.78rem; font-weight:700; '
+            'letter-spacing:.4px; white-space:nowrap;">{}</span>'
+        ).format(escape(str(insignia)))
+
+    # Renderizamos el Banner con HTML para que Sea Visualmente Distinto al Contenido
+    st.markdown(
+        (
+            '<div style="display:flex; align-items:center; gap:14px; padding:14px 18px; '
+            'border-radius:14px; background:linear-gradient(90deg, {inicio}, {fin}); '
+            'color:#ffffff; margin:4px 0 12px 0; box-shadow:0 4px 14px rgba(0,0,0,.12);">'
+            '<span style="font-size:1.7rem; line-height:1;">{emoji}</span>'
+            '<div style="display:flex; flex-direction:column; gap:2px; min-width:0;">'
+            '<span style="font-size:1.02rem; font-weight:800; letter-spacing:.5px; text-transform:uppercase;">{titulo}</span>'
+            '<span style="font-size:.82rem; opacity:.94;">{subtitulo}</span>'
+            '</div>'
+            '{insignia}'
+            '</div>'
+        ).format(
+            inicio=color_inicio,
+            fin=color_fin,
+            emoji=escape(str(emoji)),
+            titulo=escape(str(titulo)),
+            subtitulo=escape(str(subtitulo)),
+            insignia=insignia_html,
+        ),
+        unsafe_allow_html=True,
+    )
+
+# Función Auxiliar para Mostrar los Datos de Identificación de una Solicitud (Vista Negociador)
+def mostrar_identificacion_solicitud_negociador(*, solicitud: pd.Series) -> None:
+    # Creamos 4 Columnas: Referencia, Cédula, Nombre del Cliente y Ejecutivo a Cargo
+    colReferencia, colCedula, colCliente, colEjecutivo = st.columns(4, border=True)
+
+    with colReferencia:
+        st.metric(
+            label="**📄 Referencia**",
+            value=str(solicitud["Referencia"]),
+            help="La Referencia del cliente que realizó la solicitud.",
+            delta="Solicitud #{}".format(solicitud["ID_Solicitud"]),
+            delta_color="gray",
+            delta_arrow="off",
+        )
+
+    with colCedula:
+        st.metric(
+            label="**🆔 Cédula**",
+            value=str(solicitud["Cedula"]) if pd.notnull(solicitud["Cedula"]) else "No Brindada",
+            help="El número de cédula del titular de las deudas.",
+        )
+
+    with colCliente:
+        st.metric(
+            label="**👤 Nombre del Cliente**",
+            value=str(solicitud["Metadata_Solicitud"].get("Nombre_Cliente", "Nombre no Encontrado")),
+            help="El nombre del cliente titular de las deudas.",
+        )
+
+    with colEjecutivo:
+        # Definimos los Nombres y los Apellidos del Ejecutivo
+        ejecutivo = solicitud["Ejecutivo"]
+        nombres = ' '.join(str(ejecutivo).split()[:2]) if pd.notnull(ejecutivo) else "Sin Asignar"
+        apellidos = ' '.join(str(ejecutivo).split()[2:]) if pd.notnull(ejecutivo) else ""
+        st.metric(
+            label="**🧑‍💼 Ejecutivo a Cargo**",
+            value=nombres,
+            delta=apellidos if apellidos else None,
+            delta_arrow="off",
+            delta_color="gray",
+            help="El Ejecutivo que atiende la solicitud.",
+        )
+
+# Función Auxiliar para Mostrar las Acciones Disponibles sobre la Respuesta de una Solicitud
+def _mostrar_acciones_respuesta_negociador(*, solicitud: pd.Series) -> None:
+    # Si la Respuesta no fue Exitosa, solo se puede consultar el Historial de Modificaciones
+    if solicitud['Estado_Solicitud'] != 'Exitosa':
+        mostrar_subestado_transitorio(solicitud=solicitud)
+        mostrar_boton_modificaciones(solicitud=solicitud)
+        return
+
+    st.markdown("**⚡ Acciones de la Respuesta**")
+
+    # Siguiente: Mostrar el Botón al Acuerdo de Pago o las Acciones de ContraOferta
+    if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
+        es_reasignable_acuerdo = (es_acuerdo_reasignable(solicitud) is True)
+        file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
+
+        # Creamos las Columnas: Link al Acuerdo, (Reasignación si Aplica) y Botón para Copiar Datos
+        if es_reasignable_acuerdo:
+            colLinkAcuerdo, colReasignar, colBotonCopiar = st.columns([3, 2, 1], vertical_alignment="center")
+        else:
+            colLinkAcuerdo, colBotonCopiar = st.columns([4, 1], vertical_alignment="center")
+
+        with colLinkAcuerdo:
+            if file_id is None or file_id == "":
+                st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
+            else:
+                url_acuerdo_pago = obtener_link_archivo_drive(file_id)
+                st.link_button(
+                    label="📄 Ver Acuerdo de Pago",
+                    url=url_acuerdo_pago,
+                    width="stretch",
+                    type="primary",
+                    help="Haga clic para ver el Acuerdo de Pago en PDF.",
+                )
+
+        if es_reasignable_acuerdo:
+            with colReasignar: # type: ignore
+                if st.button(
+                    label="**Re-Subir Acuerdo de Pago**",
+                    width="stretch",
+                    type="primary",
+                    key="reasignar_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
+                    help="Botón para Re-Subir un Acuerdo de Pago de una Solicitud Reasignable (Fecha Límite de Pago Vencida y Sin Liquidar).",
+                    icon="🔄",
+                ):
+                    dialog_subir_acuerdo_pago(solicitud=solicitud)
+
+        with colBotonCopiar:
+            txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
+            copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
+    else:
+
+        # Mostramos la Respuesta de Max_Descuento_Otorgado
+        max_discount = solicitud['Metadata_Solicitud'].get('Max_Descuento_Otorgado',False)
+        if max_discount:
+            st.error(
+                "El Ejecutivo ha catalogado la Solicitud como Máximo Descuento, si se requiere subir una contraoferta que sea de carácter exclusivo cuando se consiguieron mejores descuentos por fuera",
+                title="Imposibilidad de Contraoferta",
+                icon="🔴"
+            )
+
+        if solicitud['Es_Historico']:
+            st.warning("Ten en cuenta que la Solicitud es Histórica, el descuento puede cambiar",icon="⚠️",title="Alerta de Solicitud")
+
+        # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
+        coLGenAC, colGenCO, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
+
+        with coLGenAC:
+            if st.button(
+                label="**Subir Solicitud de Acuerdo de Pago**",
+                width="stretch",
+                type="primary",
+                key = "abrir_dialogo_ac_pago_{}".format(solicitud['ID_Solicitud']),
+                help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago",
+                icon="📄"
+            ):
+                dialog_subir_acuerdo_pago(solicitud=solicitud)
+
+        with colGenCO:
+            if st.button(
+                label="**Generar ContraOferta**" if not max_discount else "**ContraOferta por Mejor Descuento por Fuera**",
+                width="stretch",
+                type="secondary",
+                key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
+                help = "Botón para ajustar la oferta de pago de la solicitud",
+                icon="🔄",
+            ):
+                ajustar_contraoferta_solicitud(solicitud=solicitud)
+
+        with colBotonCopiar:
+            txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
+            copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
+
+    mostrar_boton_modificaciones(solicitud=solicitud)
+
+    # Mostrar los Archivos de Acuerdo Firmado y Soportes de Pago (Solo Acuerdos Exitosos)
+    mostrar_archivos_solicitud(solicitud=solicitud)
+
+# Función Auxiliar para Mostrar la Sección de la Respuesta de una Solicitud (Vista Negociador)
+def _mostrar_seccion_respuesta_negociador(*, solicitud: pd.Series, expander_key: str) -> None:
+    # Definimos el Color y el Subtítulo del Banner según el Estado de la Respuesta
+    fecha_respuesta = pd.to_datetime(solicitud.get("Fecha_Respuesta"), errors="coerce")
+    subtitulo = "Respuesta del Ejecutivo de Alianzas"
+    if pd.notna(fecha_respuesta):
+        subtitulo = "{} · {}".format(subtitulo, fecha_respuesta.strftime("%Y-%m-%d %H:%M"))
+
+    if solicitud['Estado_Solicitud'] == 'Exitosa':
+        color_inicio, color_fin = "#065f46", "#059669"
+    else:
+        color_inicio, color_fin = "#78350f", "#b45309"
+
+    _renderizar_banner_seccion(
+        emoji="📬",
+        titulo="Respuesta",
+        subtitulo=subtitulo,
+        insignia=solicitud['Estado_Solicitud'],
+        color_inicio=color_inicio,
+        color_fin=color_fin,
+    )
+
+    # Mostramos los Datos de la Respuesta y las Acciones que le Corresponden
+    mostrar_detalles_respuesta_solicitud(
+        solicitud=solicitud,
+        origen='nego',
+        expander_key=expander_key,
+        mostrar_titulo=False,
+    )
+    _mostrar_acciones_respuesta_negociador(solicitud=solicitud)
+
+# Función Auxiliar para Mostrar la Sección de Respuesta Pendiente de Aprobación (Vista Negociador)
+def _mostrar_seccion_respuesta_aprobacion_negociador(*, solicitud: pd.Series, expander_key: str) -> None:
+    solicitud_historica = solicitud['Es_Historico']
+
+    _renderizar_banner_seccion(
+        emoji="🔐",
+        titulo="Respuesta Pendiente de Aprobación",
+        subtitulo="Revisa los valores otorgados y aprueba o rechaza la petición.",
+        insignia=solicitud['Estado_Solicitud'],
+        color_inicio="#5b21b6",
+        color_fin="#8b5cf6",
+    )
+
+    # Mostramos los Datos de la Respuesta sin el Mensaje de "No Exitosa"
+    mostrar_detalles_respuesta_solicitud(
+        solicitud=solicitud,
+        origen='nego',
+        expander_key=expander_key,
+        mostrar_titulo=False,
+        mostrar_mensaje_sin_exito=False,
+    )
+
+    mostrar_subestado_transitorio(solicitud=solicitud)
+    # Definimos el Tipo de Aprobación
+    tipo_aprobacion = obtener_tipo_aprobacion_necesaria(solicitud)
+    st.info("Esta solicitud requiere aprobación de tipo: {}".format(tipo_aprobacion), icon="ℹ️")
+
+    cm_aprobacion = st.text_area(
+        label="**Comentario de la Aprobación**",
+        value=solicitud["Metadata_Solicitud"].get("Comentario_Negociador", ""),
+        key="comentario_aprobacion_solicitud_{}".format(solicitud['ID_Solicitud']),
+        help="Ingrese un comentario para enriquecer el entendimiento de la aprobación o rechazo de la petición.",
+        persist_state="page",
+    )
+
+    # Creamos 2 Botones: Uno para Aprobar y Otro para Desaprobar la Solicitud
+    colAprobar, colDesaprobar = st.columns(2, vertical_alignment="center", gap="large")
+
+    with colAprobar:
+        hacer_aprobacion = st.button(
+            label="Aprobar Solicitud",
+            key="aprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para aprobar la solicitud. Esta acción enviará la solicitud al aliado.",
+            type="primary",
+            width="stretch",
+            disabled=solicitud_historica,
+        )
+    with colDesaprobar:
+        hacer_desaprobacion = st.button(
+            label="Desaprobar Solicitud",
+            key="desaprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
+            help="Haga clic para desaprobar la solicitud. Esta acción enviará la solicitud al aliado.",
+            type="secondary",
+            width="stretch",
+            disabled=solicitud_historica,
+        )
+
+    if hacer_aprobacion or hacer_desaprobacion:
+        aceptar_peticion = hacer_aprobacion
+        success = actualizar_aprobacion_necesaria(
+            solicitud=solicitud,
+            tipo_aprobacion=tipo_aprobacion,
+            aprobado=aceptar_peticion,
+            comentario=str(cm_aprobacion),
+        )
+        if success:
+            st.toast("Solicitud {} {} correctamente.".format(solicitud['ID_Solicitud'], "aprobada" if aceptar_peticion else "desaprobada"), icon="✅")
+            st.rerun()
+        else:
+            st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aceptar_peticion else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
+
+    if solicitud_historica:
+        st.error("No se puede modificar una solicitud Histórica",icon="❌",title="Sin Posibilidad de Modificar")
+
+    mostrar_boton_modificaciones(solicitud=solicitud)
+
+# Función Auxiliar para Mostrar la Sección de la Solicitud Original (Vista Negociador)
+def _mostrar_seccion_solicitud_negociador(*, solicitud: pd.Series) -> None:
+    _renderizar_banner_seccion(
+        emoji="📝",
+        titulo="Solicitud",
+        subtitulo="Datos de lo que se solicitó al aliado.",
+        insignia=solicitud['Tipo_Solicitud'],
+        color_inicio="#1e3a8a",
+        color_fin="#3b82f6",
+    )
+
+    # Mostramos los Detalles de los Tiempos de la Solicitud
+    mostrar_tiempos_solicitud(solicitud=solicitud)
+
+    # Mostramos el Monto Total, las Deudas y los Bancos de la Solicitud
+    monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
+    monto_actual_solicitud = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"])
+    bancos_list = sorted({
+        str(d['Banco']).strip()
+        for d in solicitud["Datos_Solicitud"]
+        if pd.notnull(d.get('Banco')) and str(d.get('Banco')).strip()
+    })
+
+    colMontoTotal, colDeudas, colBancos = st.columns(3, border=True)
+
+    with colMontoTotal:
+        st.metric(
+            label="**💰 Monto Total Solicitado**",
+            value=formatNumber(monto_total_solicitud),
+            help="El monto total de la solicitud (la suma de los valores propuestos por deuda) que se envió al Aliado.",
+            delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
+        )
+
+    with colDeudas:
+        st.metric(
+            label="**🔢 Deudas Solicitadas**",
+            value="{} deudas".format(len(solicitud["Datos_Solicitud"])),
+            help="Número de deudas incluidas en la solicitud original.",
+        )
+
+    with colBancos:
+        st.metric(
+            label="**🏦 Bancos**",
+            value=", ".join(bancos_list) if bancos_list else "Sin Bancos",
+            help="Los bancos involucrados en la solicitud original.",
+            delta="Número de Bancos: {}".format(len(bancos_list)),
+            delta_color="gray",
+            delta_arrow="off",
+        )
+
+    # Siguiente: Especificaciones si es Acuerdo de Pago u Oferta de Pago
+    if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
+        mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Pagar la Solicitud :D")
+
+    # Mostramos el Comentario del Negociador
+    comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "Sin Comentario del Negociador")
+    st.info("{}".format(comentario_negociador or "Sin Comentario"), icon="💬", title="Comentario del Negociador")
+
+    # Mostramos los Datos por Deuda de la Solicitud en un Expander
+    with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
+        mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
+
+    # Mostramos la Opción de Cancelar o Reactivar la Solicitud al Final de la Sección
+    mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
+
 # Función Auxiliar para Mostrar los Datos de una Solicitud para Negociador
 def mostrar_datos_solicitud_negociador(*,solicitud):
     # Definimos el Nombre del Expander
@@ -4189,238 +4573,33 @@ def mostrar_datos_solicitud_negociador(*,solicitud):
         expander_name = "{} | :orange-background[**REASIGNABLE**]".format(expander_name)
 
     expander_key = "solicitud_nego_{}_expander".format(solicitud["ID_Solicitud"])
-    solicitud_historica = solicitud['Es_Historico']
 
     with st.expander(expander_name, expanded=False, key=expander_key, on_change="rerun"):
 
-        # Vamos a Mostrar: Referencia, Monto Total, Ejecutivo
-        colReferencia, colMontoTotal, colEjecutivo = st.columns([2, 2, 2], border=True)
-        with colReferencia:
-            st.metric(
-                label="**Referencia:**", value=solicitud["Referencia"],
-                help = "La Referencia del Cliente que realizó la solicitud",
-                delta = "CC: {}".format(solicitud["Cedula"]) if pd.notnull(solicitud["Cedula"]) else "No Brindada",
-                delta_color="gray",
-                delta_arrow="off",
-            )
-        with colMontoTotal:
-            monto_total_solicitud = sum(cleanNumber(d['Monto_Propuesto']) for d in solicitud["Datos_Solicitud"])
-            monto_actual_solicitud = sum(cleanNumber(d['Monto_Actual']) for d in solicitud["Datos_Solicitud"])
-            st.metric(
-                label="**Monto Total:**", value=formatNumber(monto_total_solicitud),
-                help = "El monto total de la solicitud (La Suma de los Valores Propuestos por Deuda) que se va a enviar al Aliado",
-                delta="{:.1%} de Descuento".format(1 - monto_total_solicitud / monto_actual_solicitud) if monto_actual_solicitud > 0 else "N/A",
-            )
-        with colEjecutivo:
-            # Definimos los Nombres y los Apellidos
-            nombres = ' '.join(solicitud["Ejecutivo"].split()[:2]) if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar"
-            apellidos = ' '.join(solicitud["Ejecutivo"].split()[2:]) if pd.notnull(solicitud["Ejecutivo"]) else "Sin Asignar"
-            st.metric(
-                label="**Ejecutivo:**",
-                value=nombres,
-                delta=apellidos,
-                delta_arrow="off",
-                delta_color="gray",
-                help = "El Ejecutivo que atiende la solicitud",
-            )
+        # PASO 1: Datos de Identificación del Cliente y de la Solicitud
+        st.caption("👤 **Identificación del Cliente**")
+        mostrar_identificacion_solicitud_negociador(solicitud=solicitud)
 
-        # Mostramos los Detalles de los tiempos de la solicitud
-        mostrar_tiempos_solicitud(solicitud=solicitud)
-
-        # Siguiente: Especificaciones si es Acuerdo de Pago u Ofe   rta de Pago
-        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
-            mostrar_detalle_acuerdo(solicitud=solicitud, cmt_delta="Pagar la Solicitud :D")
-
-        # Mostramos el Comentario del Negociadoor y el Ejecutivo
-        comentario_negociador = solicitud["Metadata_Solicitud"].get("Comentario_Negociador", "Sin Comentario del Negociador")
-        st.info("{}".format(comentario_negociador or "Sin Comentario"), icon="💬", title="Comentario del Negociador")
-
-        # Añadimos un Divisor
-        st.divider()
-
-        # Mostramos los Datos por Deuda de la Solicitud en un Expander
-        with st.expander("**💰 Detalles de la Solicitud por Deuda**", expanded=False):
-            mostrar_detalles_solicitudes_deuda(solicitud=solicitud, disable_inputs=True, origen="negociador")
-
+        # PASO 2: Respuesta de la Solicitud (Si Existe)
         subestado = obtener_subestado_transitorio(solicitud)
+        requiere_aprobacion = es_solicitud_aprobacion_necesaria(solicitud)
+        fecha_respuesta = pd.to_datetime(solicitud.get("Fecha_Respuesta"), errors="coerce")
+        tiene_respuesta = (pd.notna(fecha_respuesta) or requiere_aprobacion or (subestado is not None))
 
-        # Siguiente verificación: Si necesita aprobación es necesario que se apruebe o desapruebe
-        if es_solicitud_aprobacion_necesaria(solicitud):
-
-            # Mostramos el Comentario del Ejecutivo
-            comentario_ejecutivo = solicitud['Metadata_Solicitud'].get('Comentario_Ejecutivo', "Sin Comentario Adicional") or 'Sin Comentario Adicional'
-            st.info("{}".format(comentario_ejecutivo.replace("\n","\n\n")), icon="💬", title="Comentario del Ejecutivo")
-
-            mostrar_subestado_transitorio(solicitud=solicitud)
-            # Mostramos los Valores Otorgados Bajo Comité para que el Negociador los Conozca antes de Aprobar
-            mostrar_valores_bajo_comite(solicitud=solicitud)
-            # Definimos el Tipo de AProbación
-            tipo_aprobacion = obtener_tipo_aprobacion_necesaria(solicitud)
-            st.info("Esta solicitud requiere aprobación de tipo: {}".format(tipo_aprobacion), icon="ℹ️")
-
-            cm_aprobacion = st.text_area(
-                label="**Comentario de la Aprobación**",
-                value=solicitud["Metadata_Solicitud"].get("Comentario_Negociador", ""),
-                key="comentario_aprobacion_solicitud_{}".format(solicitud['ID_Solicitud']),
-                help="Ingrese un comentario para enriquecer el entendimiento de la aprobación o rechazo de la petición.",
-                persist_state="page",
+        if requiere_aprobacion:
+            _mostrar_seccion_respuesta_aprobacion_negociador(solicitud=solicitud, expander_key=expander_key)
+        elif tiene_respuesta:
+            _mostrar_seccion_respuesta_negociador(solicitud=solicitud, expander_key=expander_key)
+        else:
+            st.info(
+                "Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espera a que un ejecutivo la gestione.",
+                icon="⏳",
+                title="Sin Respuesta Aún",
             )
 
-            # Creamos 2 Botones: Uno para Aprobar y Otro para Desaprobar la Solicitud
-            colAprobar, colDesaprobar = st.columns(2, vertical_alignment="center", gap="large")
-
-            with colAprobar:
-                hacer_aprobacion = st.button(
-                    label="Aprobar Solicitud",
-                    key="aprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
-                    help="Haga clic para aprobar la solicitud. Esta acción enviará la solicitud al aliado.",
-                    type="primary",
-                    width="stretch",
-                    disabled=solicitud_historica,
-                )
-            with colDesaprobar:
-                hacer_desaprobacion = st.button(
-                    label="Desaprobar Solicitud",
-                    key="desaprobar_solicitud_{}".format(solicitud['ID_Solicitud']),
-                    help="Haga clic para desaprobar la solicitud. Esta acción enviará la solicitud al aliado.",
-                    type="secondary",
-                    width="stretch",
-                    disabled=solicitud_historica,
-                )
-
-            if hacer_aprobacion or hacer_desaprobacion:
-                aceptar_peticion = hacer_aprobacion
-                success = actualizar_aprobacion_necesaria(
-                    solicitud=solicitud,
-                    tipo_aprobacion=tipo_aprobacion,
-                    aprobado=aceptar_peticion,
-                    comentario=str(cm_aprobacion),
-                )
-                if success:
-                    st.toast("Solicitud {} {} correctamente.".format(solicitud['ID_Solicitud'], "aprobada" if aceptar_peticion else "desaprobada"), icon="✅")
-                    st.rerun()
-                else:
-                    st.error("Hubo un error al {} la solicitud {}. Por favor, intente nuevamente.".format("aprobar" if aceptar_peticion else "desaprobar", solicitud['ID_Solicitud']), icon="❌")
-
-            if solicitud_historica:
-                st.error("No se puede modificar una solicitud Histórica",icon="❌",title="Sin Posibilidad de Modificar")
-            # Acabamos la función aquí, ya que no se puede continuar con la solicitud hasta que se apruebe o desapruebe
-            mostrar_boton_modificaciones(solicitud=solicitud)
-            return 
-
-        mostrar_subestado_transitorio(solicitud=solicitud)
-
-        if subestado is not None:
-            mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
-            mostrar_boton_modificaciones(solicitud=solicitud)
-            return
-
-        # Si no esta gestionada, se muestra un mensaje de información de que no se ha respondido
-        if es_solicitud_sin_responder(solicitud):
-            st.info("Esta solicitud aún no ha sido respondida por un ejecutivo. Por favor, espere a que un ejecutivo la gestione.", icon="ℹ️")
-            # Mostramos la Opción de Cancelar la Solicitud al Final de la Vista
-            mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
-            mostrar_boton_modificaciones(solicitud=solicitud)
-            return
-
+        # PASO 3: Datos de la Solicitud Original (Separados Visualmente de la Respuesta)
         st.divider()
-
-        mostrar_detalles_respuesta_solicitud(solicitud=solicitud, origen='nego', expander_key=expander_key)
-
-        # Mostramos la Opción de Reactivar la Solicitud al Final de la Vista (Solo si fue Cancelada)
-        if solicitud['Estado_Solicitud'] == 'Cancelada':
-            mostrar_botones_cancelar_reactivar_solicitud(solicitud=solicitud)
-
-        if solicitud['Estado_Solicitud'] != 'Exitosa':
-            mostrar_boton_modificaciones(solicitud=solicitud)
-            return
-
-        # Siguiente: Mostrar el Botón al acuerdo de Pago o de Posibilidad de Subir Solicitud de Acuerdo
-        if solicitud["Tipo_Solicitud"] in ["Acuerdo de Pago", "Oferta de Acuerdo"]:
-            es_reasignable_acuerdo = (es_acuerdo_reasignable(solicitud) is True)
-            file_id = solicitud.get("Metadata_Solicitud", {}).get("Id_Acuerdo_Pago", None)
-
-            # Creamos las Columnas: Link al Acuerdo, (Reasignación si Aplica) y Botón para Copiar Datos
-            if es_reasignable_acuerdo:
-                colLinkAcuerdo, colReasignar, colBotonCopiar = st.columns([3, 2, 1], vertical_alignment="center")
-            else:
-                colLinkAcuerdo, colBotonCopiar = st.columns([4, 1], vertical_alignment="center")
-
-            with colLinkAcuerdo:
-                if file_id is None or file_id == "":
-                    st.warning("No se encontró el archivo del Acuerdo de Pago. Por favor, contacte al ejecutivo.", icon="⚠️")
-                else:
-                    url_acuerdo_pago = obtener_link_archivo_drive(file_id)
-                    st.link_button(
-                        label="📄 Ver Acuerdo de Pago",
-                        url=url_acuerdo_pago,
-                        width="stretch",
-                        type="primary",
-                        help="Haga clic para ver el Acuerdo de Pago en PDF.",
-                    )
-
-            if es_reasignable_acuerdo:
-                with colReasignar: # type: ignore
-                    if st.button(
-                        label="**Re-Subir Acuerdo de Pago**",
-                        width="stretch",
-                        type="primary",
-                        key="reasignar_acuerdo_pago_{}".format(solicitud['ID_Solicitud']),
-                        help="Botón para Re-Subir un Acuerdo de Pago de una Solicitud Reasignable (Fecha Límite de Pago Vencida y Sin Liquidar).",
-                        icon="🔄",
-                    ):
-                        dialog_subir_acuerdo_pago(solicitud=solicitud)
-
-            with colBotonCopiar:
-                txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
-                copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
-        else:
-
-            # Mostramos la Respuesta de Max_Descuento_Otorgado
-            max_discount = solicitud['Metadata_Solicitud'].get('Max_Descuento_Otorgado',False)
-            if max_discount:
-                st.error(
-                    "El Ejecutivo ha catalogado la Solicitud como Máximo Descuento, si se requiere subir una contraoferta que sea de carácter exclusivo cuando se consiguieron mejores descuentos por fuera",
-                    title="Imposibilidad de Contraoferta",
-                    icon="🔴"
-                )
-
-            if solicitud_historica:
-                st.warning("Ten en cuenta que la Solicitud es Histórica, el descuento puede cambiar",icon="⚠️",title="Alerta de Solicitud")
-
-            # Creamos 3 Columnas: 1 para Boton de Abrir Dialogo, una para ajustar la oferta y otra de botón copiar
-            coLGenAC, colGenCO, colBotonCopiar = st.columns([3, 4, 1], vertical_alignment="center")
-
-            with coLGenAC:
-                if st.button(
-                    label="**Subir Solicitud de Acuerdo de Pago**",
-                    width="stretch",
-                    type="primary",
-                    key = "abrir_dialogo_ac_pago_{}".format(solicitud['ID_Solicitud']),
-                    help = "Botón para tener la Posibilidad de subir un Acuerdo de Pago",
-                    icon="📄"
-                ):
-                    dialog_subir_acuerdo_pago(solicitud=solicitud)
-
-            with colGenCO:
-                if st.button(
-                    label="**Generar ContraOferta**" if not max_discount else "**ContraOferta por Mejor Descuento por Fuera**",
-                    width="stretch",
-                    type="secondary",
-                    key = "ajustar_oferta_pago_{}".format(solicitud['ID_Solicitud']),
-                    help = "Botón para ajustar la oferta de pago de la solicitud",
-                    icon="🔄",
-                ):
-                    ajustar_contraoferta_solicitud(solicitud=solicitud)
-
-            with colBotonCopiar:
-                txt_copiar = get_solicitud_txt(solicitud=solicitud,origen='JSON_Respuesta')
-                copy_button(txt_copiar, key="copy_solicitud_{}_respuesta".format(solicitud['ID_Solicitud']),tooltip="Copiar Resultado")
-
-        mostrar_boton_modificaciones(solicitud=solicitud)
-
-        # Mostrar los Archivos de Acuerdo Firmado y Soportes de Pago (Solo Acuerdos Exitosos)
-        mostrar_archivos_solicitud(solicitud=solicitud)
+        _mostrar_seccion_solicitud_negociador(solicitud=solicitud)
 
 # Función Auxiliar para mostrar el Resumen del Ejecutivo de sus Solicitudes
 def mostrar_resumen_solicitudes_ejecutivo(*, solicitudes: pd.DataFrame) -> None:
