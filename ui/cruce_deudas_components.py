@@ -24,183 +24,667 @@ OPCION_SIN_OPCIONES = 'Sin Opciones Actuales'
 ID_DEFINITIVO_ADDENDUM = 'ADDENDUM'
 
 # Opciones de Ordenamiento de las Deudas a Identificar
-OPCION_ORDEN_DF = 'Orden del DataFrame (Actual)'
+OPCION_ORDEN_ORIGINAL = 'Orden original (Id_Registro)'
 OPCION_ORDEN_CEDULA = 'Cédula'
-OPCION_ORDEN_NOMBRE = 'Nombre del Cliente'
-OPCION_ORDEN_ETIQUETA = 'Etiqueta'
+OPCION_ORDEN_BANCO = 'Banco'
+OPCION_ORDEN_MONTO_ACTUAL = 'Monto_Actual'
+OPCION_ORDEN_ETIQUETA = 'Etiqueta (prioridad de negocio)'
+OPCION_ORDEN_FECHA_CRUCE = 'Fecha de cruce inicial'
+OPCION_ORDEN_ULTIMA_ACTUALIZACION = 'Última actualización'
 
-# Función Auxiliar para Obtener el Id_Definitivo Actual de un Registro (Cambio Pendiente o Metadata)
-def _id_definitivo_actual(*, fila: pd.Series, cambios: dict) -> str:
-    id_cruce = str(fila.get('Id_Cruce') or '')
-    if id_cruce in cambios:
-        return str(cambios[id_cruce])
-    mtdt = fila.get('Metadata') or {}
-    return str(mtdt.get('Id_Definitivo') or '')
+# Opciones de Dirección del Ordenamiento
+OPCION_ORDEN_DIRECCION_ASC = '↑ Ascendente'
+OPCION_ORDEN_DIRECCION_DESC = '↓ Descendente'
+
+# Opciones del Filtro de Id_Definitivo (Identificación Manual)
+OPCION_FILTRO_ID_SIN = 'Sin Id_Definitivo (Pendientes)'
+OPCION_FILTRO_ID_TODOS = 'Todos'
+OPCION_FILTRO_ID_CON = 'Con Id_Definitivo'
+OPCION_FILTRO_ID_ADDENDUM = 'Solo ADDENDUM'
+
+# Campos de Fecha Disponibles para el Filtro
+OPCION_FILTRO_FECHA_CRUCE = 'Fecha de cruce inicial (Sin Reconocer)'
+OPCION_FILTRO_FECHA_ULTIMA = 'Última actualización'
+MAPA_CAMPOS_FECHA_FILTRO_CRUCE = {
+    OPCION_FILTRO_FECHA_CRUCE: '_Fecha_Sin_Reconocer',
+    OPCION_FILTRO_FECHA_ULTIMA: '_Ultima_Fecha',
+}
+
+# Claves de los Widgets de Filtros (para poder Limpiarlos)
+LLAVES_FILTROS_CRUCE = [
+    'filtro_cruce_busqueda_input',
+    'filtro_cruce_casa_cobro_input',
+    'filtro_cruce_alias_input',
+    'filtro_cruce_archivo_origen_input',
+    'filtro_cruce_etiqueta_input',
+    'filtro_cruce_estado_input',
+    'filtro_cruce_id_definitivo_input',
+    'filtro_cruce_cedula_input',
+    'filtro_cruce_banco_input',
+    'filtro_cruce_monto_min_input',
+    'filtro_cruce_monto_max_input',
+    'filtro_cruce_campo_fecha_input',
+    'filtro_cruce_rango_fecha_input',
+    'filtro_cruce_orden_criterio_input',
+    'filtro_cruce_direccion_input',
+    LLAVE_FILTRO_NO_VALIDADOS,
+    # Claves de la Versión Anterior (se eliminan para no dejar Estado Residual)
+    'filtro_cruce_incluir_definitivo_input',
+    'filtro_cruce_ordenamiento_input',
+]
+
+# Función Auxiliar para Normalizar una Cédula para el Filtro Exacto
+def _normalizar_cedula_filtro(valor) -> str:
+    if valor is None:
+        return ''
+    try:
+        if pd.isna(valor):
+            return ''
+    except (TypeError, ValueError):
+        pass
+    texto = str(valor).strip()
+    if texto.lower() in ('', 'nan', 'none', 'nat'):
+        return ''
+    if texto.endswith('.0'):
+        texto = texto[:-2]
+    return texto.replace('.', '').replace(' ', '')
+
+# Función Auxiliar para Construir el Texto de Búsqueda de las Deudas Posibles
+def _texto_deudas_posibles_filtro(mtdt: dict) -> str:
+    if not isinstance(mtdt, dict):
+        return ''
+    partes = []
+    for deuda in (mtdt.get('Deudas_Posibles') or []):
+        if not isinstance(deuda, dict):
+            continue
+        for campo in ('Id_Deuda', 'Banco', 'Numero_Credito'):
+            texto = _texto_busqueda(deuda.get(campo))
+            if texto:
+                partes.append(texto)
+    return ' '.join(partes)
+
+# Función Auxiliar para Construir las Columnas Internas de Filtrado y Ordenamiento
+def _construir_df_filtros_cruce(
+        *,
+        cruce_df: pd.DataFrame,
+        cambios: Optional[dict] = None,
+    ) -> pd.DataFrame:
+    # Si no hay Registros, devolvemos el DataFrame tal cual
+    if cruce_df.empty:
+        return cruce_df.copy()
+
+    # Quitamos Columnas Internas de una Construcción Anterior
+    columnas_internas = [col for col in cruce_df.columns if str(col).startswith('_')]
+    df = cruce_df.drop(columns=columnas_internas).copy()
+    cambios = cambios or {}
+
+    # Paso 1: Extraer la Metadata de Cada Registro
+    df['_Metadata_Filtro'] = df.apply(_obtener_metadata_detalle, axis=1)
+    df['_Casa_Cobro'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Casa_Cobro')))
+    df['_Alias_Casa'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Alias_Casa')))
+    df['_Archivo_Origen'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Archivo_Origen')))
+    df['_Etiqueta'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Etiqueta')))
+    df['_Prioridad_Etiqueta'] = (
+        df['_Etiqueta'].map(PRIORIDAD_ETIQUETAS_CRUCE).fillna(99).astype(int)
+    )
+    df['_Estado'] = df['_Metadata_Filtro'].apply(obtener_ultimo_status_cruce)
+
+    # Paso 2: Resolver el Id_Definitivo Guardado y el Actual (Metadata + Cambios Pendientes)
+    ids_definitivos_metadata = df['_Metadata_Filtro'].apply(
+        lambda m: _texto_id(m.get('Id_Definitivo'))
+    )
+    ids_definitivos_actuales = []
+    for id_cruce, id_definitivo in zip(df['Id_Cruce'], ids_definitivos_metadata):
+        clave_cruce = _texto_id(id_cruce)
+        if clave_cruce in cambios:
+            ids_definitivos_actuales.append(_texto_id(cambios.get(clave_cruce)))
+        else:
+            ids_definitivos_actuales.append(id_definitivo)
+    df['_Id_Definitivo_Metadata'] = ids_definitivos_metadata
+    df['_Tiene_Id_Definitivo_Metadata'] = df['_Id_Definitivo_Metadata'] != ''
+    df['_Es_Addendum_Metadata'] = df['_Id_Definitivo_Metadata'] == ETIQUETA_ADDENDUM
+    df['_Id_Definitivo_Actual'] = ids_definitivos_actuales
+    df['_Tiene_Id_Definitivo_Actual'] = df['_Id_Definitivo_Actual'] != ''
+
+    # Paso 3: Extraer las Fechas de Auditoría
+    df['_Fechas_Status'] = df['_Metadata_Filtro'].apply(_fechas_status_detalle)
+    df['_Fecha_Sin_Reconocer'] = pd.to_datetime(
+        df['_Fechas_Status'].apply(
+            lambda fechas: fechas.get('Sin Reconocer') if isinstance(fechas, dict) else None
+        ),
+        errors='coerce',
+    )
+    df['_Ultima_Fecha'] = pd.to_datetime(
+        df['_Fechas_Status'].apply(
+            lambda fechas: _ultima_fecha_detalle(fechas) if isinstance(fechas, dict) else None
+        ),
+        errors='coerce',
+    )
+
+    # Paso 4: Extraer el Id_Registro Numérico para el Orden Original
+    df['_Id_Registro_Num'] = df['_Metadata_Filtro'].apply(
+        lambda m: pd.to_numeric(m.get('Id_Registro'), errors='coerce')
+    )
+    df['_Id_Registro_Num'] = pd.to_numeric(df['_Id_Registro_Num'], errors='coerce')
+    df.loc[df['_Id_Registro_Num'] <= 0, '_Id_Registro_Num'] = np.nan
+
+    # Paso 5: Preparar las Columnas de Filtrado de Datos
+    df['_Cedula_Filtro'] = (
+        df[COL_CEDULA].apply(_normalizar_cedula_filtro)
+        if COL_CEDULA in df.columns else ''
+    )
+    df['_Banco'] = (
+        df[COL_BANCO].apply(_texto_busqueda)
+        if COL_BANCO in df.columns else ''
+    )
+    df['_Monto_Actual_Num'] = (
+        pd.to_numeric(df[COL_MONTO_ACTUAL], errors='coerce')
+        if COL_MONTO_ACTUAL in df.columns else np.nan
+    )
+    df['_Deudas_Posibles_Texto'] = df['_Metadata_Filtro'].apply(_texto_deudas_posibles_filtro)
+
+    # Paso 6: Construir el Texto de Búsqueda Global
+    series_busqueda = []
+    for columna in [COL_CEDULA, COL_NOMBRE, 'Id_Cruce', COL_CREDITO, COL_BANCO]:
+        if columna in df.columns:
+            series_busqueda.append(df[columna].apply(_texto_busqueda))
+        else:
+            series_busqueda.append(pd.Series('', index=df.index))
+    series_busqueda.append(df['_Id_Definitivo_Actual'])
+    series_busqueda.append(df['_Deudas_Posibles_Texto'])
+    series_busqueda.append(df['_Cedula_Filtro'])
+    df['_Busqueda'] = (
+        pd.concat(series_busqueda, axis=1)
+        .fillna('')
+        .astype(str)
+        .agg(' '.join, axis=1)
+        .str.lower()
+    )
+
+    return df
+
+# Función Auxiliar para Aplicar los Filtros de Identificación Manual
+def _aplicar_filtros_cruce(
+        *,
+        df: pd.DataFrame,
+        busqueda: str = '',
+        casas: Optional[list[str]] = None,
+        alias: Optional[list[str]] = None,
+        archivos: Optional[list[str]] = None,
+        etiquetas: Optional[list[str]] = None,
+        estados: Optional[list[str]] = None,
+        tipo_id: str = OPCION_FILTRO_ID_SIN,
+        filtrar_no_validados: bool = False,
+        ids_no_validados: Optional[set[str]] = None,
+        cedula: str = '',
+        bancos: Optional[list[str]] = None,
+        monto_min: Optional[float] = None,
+        monto_max: Optional[float] = None,
+        campo_fecha: str = OPCION_FILTRO_FECHA_CRUCE,
+        rango_fecha=(),
+    ) -> pd.DataFrame:
+    df_filtrado = df.copy()
+    if df_filtrado.empty:
+        return df_filtrado
+
+    # Paso 1: Búsqueda Global
+    if busqueda and busqueda.strip():
+        termino_busqueda = busqueda.strip().lower()
+        mask_busqueda = df_filtrado['_Busqueda'].str.contains(
+            termino_busqueda, case=False, na=False, regex=False
+        )
+        # Si el Usuario Pega una Cédula con Puntos, también se busca Normalizada
+        cedula_busqueda = _normalizar_cedula_filtro(termino_busqueda)
+        if (
+            cedula_busqueda
+            and (cedula_busqueda != termino_busqueda)
+            and cedula_busqueda.isdigit()
+            and (len(cedula_busqueda) >= 4)
+        ):
+            mask_busqueda |= df_filtrado['_Cedula_Filtro'].str.contains(
+                cedula_busqueda, na=False, regex=False
+            )
+        df_filtrado = df_filtrado[mask_busqueda]
+
+    # Paso 2: Filtros de Contexto
+    if casas:
+        df_filtrado = df_filtrado[df_filtrado['_Casa_Cobro'].isin(casas)]
+    if alias:
+        df_filtrado = df_filtrado[df_filtrado['_Alias_Casa'].isin(alias)]
+    if archivos:
+        df_filtrado = df_filtrado[df_filtrado['_Archivo_Origen'].isin(archivos)]
+    if etiquetas:
+        df_filtrado = df_filtrado[df_filtrado['_Etiqueta'].isin(etiquetas)]
+    if estados:
+        df_filtrado = df_filtrado[df_filtrado['_Estado'].isin(estados)]
+
+    # Paso 3: Filtros de Datos de la Deuda
+    if bancos:
+        df_filtrado = df_filtrado[df_filtrado['_Banco'].isin(bancos)]
+
+    cedula_normalizada = _normalizar_cedula_filtro(cedula)
+    if cedula_normalizada:
+        df_filtrado = df_filtrado[df_filtrado['_Cedula_Filtro'] == cedula_normalizada]
+
+    if (monto_min is not None) and (monto_max is not None) and (monto_min > monto_max):
+        monto_min, monto_max = monto_max, monto_min
+    montos = pd.to_numeric(df_filtrado['_Monto_Actual_Num'], errors='coerce')
+    mask_monto = pd.Series(True, index=df_filtrado.index)
+    if monto_min is not None:
+        mask_monto &= montos >= float(monto_min)
+    if monto_max is not None:
+        mask_monto &= montos <= float(monto_max)
+    df_filtrado = df_filtrado[mask_monto]
+
+    # Paso 4: Filtro de Id_Definitivo (o de Ids_Deuda No Validados)
+    ids_no_validados = {_texto_id(i) for i in (ids_no_validados or set())}
+    if filtrar_no_validados:
+        # Los Ids No Validados existen en Berex, pero no en la Metadata del registro;
+        # se incluyen para poder corregirlos aunque tengan Id_Definitivo.
+        df_filtrado = df_filtrado[
+            df_filtrado['_Id_Definitivo_Actual'].isin(ids_no_validados)
+        ]
+    elif tipo_id == OPCION_FILTRO_ID_CON:
+        df_filtrado = df_filtrado[df_filtrado['_Tiene_Id_Definitivo_Metadata']]
+    elif tipo_id == OPCION_FILTRO_ID_SIN:
+        df_filtrado = df_filtrado[~df_filtrado['_Tiene_Id_Definitivo_Metadata']]
+    elif tipo_id == OPCION_FILTRO_ID_ADDENDUM:
+        df_filtrado = df_filtrado[df_filtrado['_Es_Addendum_Metadata']]
+
+    # Paso 5: Filtro por Rango de Fechas
+    inicio_fecha = None
+    fin_fecha = None
+    if isinstance(rango_fecha, (tuple, list)):
+        if len(rango_fecha) == 1:
+            inicio_fecha = fin_fecha = rango_fecha[0]
+        elif len(rango_fecha) >= 2:
+            inicio_fecha = rango_fecha[0]
+            fin_fecha = rango_fecha[1]
+    elif rango_fecha:
+        inicio_fecha = fin_fecha = rango_fecha
+
+    if (inicio_fecha is not None) and (fin_fecha is not None):
+        if inicio_fecha > fin_fecha:
+            inicio_fecha, fin_fecha = fin_fecha, inicio_fecha
+        columna_fecha = MAPA_CAMPOS_FECHA_FILTRO_CRUCE.get(
+            campo_fecha, '_Fecha_Sin_Reconocer'
+        )
+        if columna_fecha in df_filtrado.columns:
+            serie_fecha = pd.to_datetime(df_filtrado[columna_fecha], errors='coerce')
+            mask_fecha = (
+                (serie_fecha.dt.date >= inicio_fecha)
+                & (serie_fecha.dt.date <= fin_fecha)
+            )
+            df_filtrado = df_filtrado[mask_fecha]
+
+    return df_filtrado
+
+# Función Auxiliar para Ordenar los Registros del Cruce
+def _ordenar_cruce(*, df: pd.DataFrame, orden: str, ascendente: bool) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+
+    if orden == OPCION_ORDEN_ORIGINAL:
+        return df.sort_values(
+            by=['_Id_Registro_Num', '_Archivo_Origen'],
+            ascending=[ascendente, True],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_CEDULA:
+        return df.sort_values(
+            by=['_Cedula_Filtro', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_BANCO:
+        return df.sort_values(
+            by=['_Banco', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_MONTO_ACTUAL:
+        return df.sort_values(
+            by=['_Monto_Actual_Num', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_ETIQUETA:
+        return df.sort_values(
+            by=['_Prioridad_Etiqueta', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_FECHA_CRUCE:
+        return df.sort_values(
+            by=['_Fecha_Sin_Reconocer', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    if orden == OPCION_ORDEN_ULTIMA_ACTUALIZACION:
+        return df.sort_values(
+            by=['_Ultima_Fecha', '_Id_Registro_Num'],
+            ascending=[ascendente, ascendente],
+            na_position='last',
+            kind='stable',
+        )
+    return df
+
+# Función Auxiliar para Limpiar los Filtros de Identificación Manual
+def _limpiar_filtros_cruce() -> None:
+    for llave in LLAVES_FILTROS_CRUCE:
+        st.session_state.pop(llave, None)
 
 # Función Auxiliar para Mostrar los Filtros de las Deudas a Identificar
 def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
     # Si no hay Deudas a Identificar, no hacemos nada
     if cruce_df.empty:
-        st.warning("No hay Deudas a Identificar para mostrar. Sube una base en la pestaña de Subida de Datos.", icon="⚠️")
+        st.warning(
+            "No hay Deudas a Identificar para mostrar. Sube una base en la pestaña de Subida de Datos.",
+            icon="⚠️",
+        )
         return cruce_df
 
-    # Paso 1: Extraemos las Columnas de Filtro desde la Metadata
-    df = cruce_df.copy()
-    df['_Casa_Cobro'] = df['Metadata'].apply(lambda m: str(m.get('Casa_Cobro', '') or ''))
-    df['_Alias_Casa'] = df['Metadata'].apply(lambda m: str(m.get('Alias_Casa', '') or ''))
-    df['_Ejecutivo_Subida'] = df['Metadata'].apply(lambda m: str(m.get('Ejecutivo_Subida', '') or ''))
-    df['_Etiqueta'] = df['Metadata'].apply(lambda m: str(m.get('Etiqueta', '') or ''))
-    df['_Tiene_Id_Definitivo'] = df['Metadata'].apply(lambda m: (m.get('Id_Definitivo') not in (None, '')))
-    df['_Archivo_Origen'] = df['Metadata'].apply(lambda m: str(m.get('Archivo_Origen', '') or ''))
+    # Paso 1: Construir las Columnas Internas de Filtrado y Ordenamiento
+    cambios = st.session_state.get(LLAVE_CAMBIOS_ID_DEFINITIVO, {})
+    df = _construir_df_filtros_cruce(cruce_df=cruce_df, cambios=cambios)
 
     # Ids_Deuda No Validados (Post-Revisión): Set guardado al Actualizar la Información
     ids_no_validados = st.session_state.get(LLAVE_IDS_NO_VALIDADOS, set())
     hay_no_validados = len(ids_no_validados) > 0
 
-    # Paso 2: Mostrar los Filtros (Casa de Cobro, Alias, Ejecutivo de Subida y Etiqueta)
-    colCasa, colAlias, colEjecutivo, colEtiqueta = st.columns(4)
+    # Paso 2: Calcular las Opciones de los Filtros
+    opciones_casa = sorted(df['_Casa_Cobro'].unique().tolist())
+    hay_aliases = bool((df['_Alias_Casa'] != '').any())
+    opciones_alias = (
+        sorted(df.loc[df['_Alias_Casa'] != '', '_Alias_Casa'].unique().tolist())
+        if hay_aliases else []
+    )
+    opciones_archivo = sorted(df['_Archivo_Origen'].unique().tolist())
+    valores_etiqueta = set(df['_Etiqueta'].unique().tolist())
+    opciones_etiqueta = [etiqueta for etiqueta in ETIQUETAS_CRUCE if etiqueta in valores_etiqueta]
+    opciones_etiqueta += sorted(valores_etiqueta - set(ETIQUETAS_CRUCE))
+    statuses = list(get_args(TIPOS_STATUS))
+    valores_estado = set(df['_Estado'].unique().tolist())
+    opciones_estado = [status for status in statuses if status in valores_estado]
+    opciones_estado += sorted(valores_estado - set(statuses))
+    opciones_banco = sorted(df['_Banco'].unique().tolist())
 
-    with colCasa:
-        casa_seleccionada = st.multiselect(
-            label="**🥸 Casa de Cobro**",
-            options=sorted(df['_Casa_Cobro'].unique().tolist()),
-            key="filtro_cruce_casa_cobro_input",
-            help="Seleccione las casas de cobro que desea ver.",
-        )
+    # Paso 3: Mostrar los Filtros de Identificación
+    with st.container(border=True):
+        st.markdown("#### 🔎 Filtros de Identificación")
 
-    hay_aliases = (df['_Alias_Casa'] != '').any()
-    with colAlias:
-        if hay_aliases:
-            alias_seleccionado = st.multiselect(
-                label="**🏷️ Alias**",
-                options=sorted(df.loc[df['_Alias_Casa'] != '', '_Alias_Casa'].unique().tolist()),
-                key="filtro_cruce_alias_input",
-                help="Seleccione los alias que desea ver.",
+        colBusqueda, colCasa, colAlias = st.columns([2, 1, 1])
+        with colBusqueda:
+            busqueda = st.text_input(
+                label="**🔤 Búsqueda**",
+                placeholder="Cédula, nombre, Id_Cruce, crédito, banco, Id_Deuda...",
+                key="filtro_cruce_busqueda_input",
+                help=(
+                    "Busca en cédula, nombre, Id_Cruce, número de crédito, banco y deudas "
+                    "posibles (incluido el Id_Deuda)."
+                ),
             )
-        else:
-            alias_seleccionado = []
-            st.caption("Sin Alias disponibles")
-
-    with colEjecutivo:
-        ejecutivo_seleccionado = st.multiselect(
-            label="**🧑‍💼 Ejecutivo de Subida**",
-            options=sorted(df['_Ejecutivo_Subida'].unique().tolist()),
-            key="filtro_cruce_ejecutivo_input",
-            help="Seleccione los ejecutivos que subieron los datos.",
-        )
-
-    with colEtiqueta:
-        etiqueta_seleccionada = st.multiselect(
-            label="**🏷️ Etiqueta de la Deuda**",
-            options=sorted(df['_Etiqueta'].unique().tolist()),
-            key="filtro_cruce_etiqueta_input",
-            help="Seleccione las etiquetas que desea ver.",
-        )
-
-    # Filtro de Post-Revisión: Solo Ids_Deuda No Validados (solo se muestra si hay Ids Erróneos)
-    filtrar_no_validados = False
-    if hay_no_validados:
-        colNoValidados, colInfoNoValidados = st.columns([1, 3], vertical_alignment="center")
-        with colNoValidados:
-            filtrar_no_validados = st.toggle(
-                label="**🚨 Solo Ids_Deuda No Validados**",
-                key=LLAVE_FILTRO_NO_VALIDADOS,
-                help="Muestra únicamente los registros cuyo Id_Deuda no existe en Berex, para su post-revisión.",
+        with colCasa:
+            casa_seleccionada = st.multiselect(
+                label="**🥸 Casa de Cobro**",
+                options=opciones_casa,
+                format_func=lambda valor: _formatear_texto_opcional_detalle(valor, 'Sin casa de cobro'),
+                key="filtro_cruce_casa_cobro_input",
+                help="Selecciona las casas de cobro que deseas ver.",
             )
-        with colInfoNoValidados:
-            st.caption(
-                "Filtro de Post-Revisión: **{:,}** Id_Deuda sin validar en Berex.".format(len(ids_no_validados))
-            )
+        with colAlias:
+            if hay_aliases:
+                alias_seleccionado = st.multiselect(
+                    label="**🏷️ Alias**",
+                    options=opciones_alias,
+                    key="filtro_cruce_alias_input",
+                    help="Selecciona los alias que deseas ver.",
+                )
+            else:
+                alias_seleccionado = []
+                st.caption("Sin alias disponibles")
 
-    # Paso 3: Aplicar los Filtros Principales Seleccionados
-    if casa_seleccionada:
-        df = df[df['_Casa_Cobro'].isin(casa_seleccionada)]
-
-    if alias_seleccionado:
-        df = df[df['_Alias_Casa'].isin(alias_seleccionado)]
-
-    if ejecutivo_seleccionado:
-        df = df[df['_Ejecutivo_Subida'].isin(ejecutivo_seleccionado)]
-
-    if etiqueta_seleccionada:
-        df = df[df['_Etiqueta'].isin(etiqueta_seleccionada)]
-
-    # Paso 3.1: Aplicar el Filtro de Post-Revisión (Solo Ids_Deuda No Validados)
-    if filtrar_no_validados and not df.empty:
-        cambios = st.session_state.get(LLAVE_CAMBIOS_ID_DEFINITIVO, {})
-        ids_definitivos = df.apply(
-            lambda fila: _id_definitivo_actual(fila=fila, cambios=cambios), axis=1
-        )
-        df = df[ids_definitivos.isin(ids_no_validados)]
-
-    # Paso 4: Ayudas Auxiliares (Toggle de Id_Definitivo, Ordenamiento y Archivo de Origen)
-    with st.expander("Ayudas Auxiliares", expanded=False):
-        colToggle, colOrdenamiento, colArchivo = st.columns(3, vertical_alignment="center")
-
-        with colToggle:
-            incluir_con_definitivo = st.toggle(
-                label="**✅ Incluir Deudas con Id_Definitivo**",
-                value=False,
-                key="filtro_cruce_incluir_definitivo_input",
-                help="Activar para incluir también las deudas que ya tienen un Id_Definitivo asignado.",
-            )
-            st.caption("Por defecto los cruces exactos **NO se incluyen** para identificar")
-
-        with colOrdenamiento:
-            # El Ordenamiento por Cédula o Nombre solo tiene sentido si hay más de un valor distinto
-            opciones_ordenamiento = [OPCION_ORDEN_DF]
-            if df[COL_CEDULA].nunique() > 1:
-                opciones_ordenamiento.append(OPCION_ORDEN_CEDULA)
-            if df[COL_NOMBRE].nunique() > 1:
-                opciones_ordenamiento.append(OPCION_ORDEN_NOMBRE)
-            opciones_ordenamiento.append(OPCION_ORDEN_ETIQUETA)
-
-            # Si la opción guardada ya no existe entre las disponibles, volvemos al orden del DF
-            valor_orden_actual = st.session_state.get('filtro_cruce_ordenamiento_input', OPCION_ORDEN_DF)
-            index_ordenamiento = (
-                opciones_ordenamiento.index(valor_orden_actual)
-                if valor_orden_actual in opciones_ordenamiento else 0
-            )
-
-            ordenamiento = st.selectbox(
-                label="**Ordenamiento de los Datos**",
-                options=opciones_ordenamiento,
-                index=index_ordenamiento,
-                key="filtro_cruce_ordenamiento_input",
-                help="Selecciona el criterio con el que se ordenarán las deudas.",
-            )
-
+        colArchivo, colEtiqueta, colEstado, colBanco = st.columns(4)
         with colArchivo:
             archivo_seleccionado = st.multiselect(
-                label="**Archivo de Origen**",
-                options=sorted(df['_Archivo_Origen'].unique().tolist()),
+                label="**📂 Archivo de Origen**",
+                options=opciones_archivo,
+                format_func=lambda valor: _formatear_texto_opcional_detalle(valor, 'Sin archivo'),
                 key="filtro_cruce_archivo_origen_input",
-                help="Seleccione los archivos de origen que desea ver.",
+                help="Selecciona los archivos de origen que deseas ver.",
+            )
+        with colEtiqueta:
+            etiqueta_seleccionada = st.multiselect(
+                label="**🏷️ Etiqueta**",
+                options=opciones_etiqueta,
+                format_func=lambda valor: valor if valor else 'Sin etiqueta',
+                key="filtro_cruce_etiqueta_input",
+                help="Etiquetas del resultado del cruce.",
+            )
+        with colEstado:
+            estado_seleccionado = st.multiselect(
+                label="**🚦 Estado Actual**",
+                options=opciones_estado,
+                format_func=lambda valor: valor if valor else 'Sin estado',
+                key="filtro_cruce_estado_input",
+                help="Último estado registrado del cruce (por fecha).",
+            )
+        with colBanco:
+            banco_seleccionado = st.multiselect(
+                label="**🏦 Banco**",
+                options=opciones_banco,
+                format_func=lambda valor: _formatear_texto_opcional_detalle(valor, 'Sin banco'),
+                key="filtro_cruce_banco_input",
+                help="Selecciona los bancos de las deudas que deseas ver.",
             )
 
-    # Paso 5: Aplicar los Filtros Auxiliares Seleccionados
-    # (el Filtro de No Validados debe incluir registros con Id_Definitivo para poder Corregirlos)
-    if not incluir_con_definitivo and not filtrar_no_validados:
-        df = df[~df['_Tiene_Id_Definitivo']]
+        colTipoId, colCedula, colMontoMin, colMontoMax = st.columns(4)
+        with colTipoId:
+            tipo_id = st.selectbox(
+                label="**🆔 Id_Definitivo**",
+                options=[
+                    OPCION_FILTRO_ID_SIN,
+                    OPCION_FILTRO_ID_TODOS,
+                    OPCION_FILTRO_ID_CON,
+                    OPCION_FILTRO_ID_ADDENDUM,
+                ],
+                key="filtro_cruce_id_definitivo_input",
+                help=(
+                    "Por defecto se muestran solo los registros pendientes. Si activas "
+                    "**Solo Ids_Deuda No Validados**, se incluyen los registros con "
+                    "Id_Definitivo para poder corregirlos."
+                ),
+            )
+        with colCedula:
+            cedula_input = st.text_input(
+                label="**🪪 Cédula Exacta**",
+                placeholder="Ej: 1234567890",
+                key="filtro_cruce_cedula_input",
+                help="Escribe la cédula completa. Se compara sin puntos ni sufijo .0.",
+            )
+        with colMontoMin:
+            monto_min = st.number_input(
+                label="**💵 Monto Mínimo**",
+                value=None,
+                min_value=0.0,
+                step=1000.0,
+                format="%.0f",
+                key="filtro_cruce_monto_min_input",
+                help="Monto_Actual mínimo de la deuda.",
+            )
+        with colMontoMax:
+            monto_max = st.number_input(
+                label="**💵 Monto Máximo**",
+                value=None,
+                min_value=0.0,
+                step=1000.0,
+                format="%.0f",
+                key="filtro_cruce_monto_max_input",
+                help="Monto_Actual máximo de la deuda.",
+            )
 
-    if archivo_seleccionado:
-        df = df[df['_Archivo_Origen'].isin(archivo_seleccionado)]
+        colCampoFecha, colRangoFecha = st.columns([1, 2])
+        with colCampoFecha:
+            campo_fecha = st.selectbox(
+                label="**📅 Campo de Fecha**",
+                options=list(MAPA_CAMPOS_FECHA_FILTRO_CRUCE.keys()),
+                key="filtro_cruce_campo_fecha_input",
+                help="Fecha de cruce inicial o última actualización del registro.",
+            )
+        with colRangoFecha:
+            rango_fecha = st.date_input(
+                label="**📅 Rango de Fechas**",
+                value=(),
+                format="DD/MM/YYYY",
+                key="filtro_cruce_rango_fecha_input",
+                help="Selecciona la fecha inicial y final. Si lo dejas vacío, no se filtra por fecha.",
+            )
+        st.caption(
+            "La **fecha de cruce inicial** (`Sin Reconocer`) es cuando se cargó el registro. "
+            "La **última actualización** considera el estado más reciente."
+        )
 
-    # Paso 6: Aplicar el Ordenamiento Seleccionado
-    if ordenamiento == OPCION_ORDEN_CEDULA:
-        df = df.sort_values(by=COL_CEDULA, kind='stable')
-    elif ordenamiento == OPCION_ORDEN_NOMBRE:
-        df = df.sort_values(by=COL_NOMBRE, kind='stable', na_position='last')
-    elif ordenamiento == OPCION_ORDEN_ETIQUETA:
-        df['_Prioridad_Etiqueta'] = df['_Etiqueta'].map(PRIORIDAD_ETIQUETAS_CRUCE)
-        df = df.sort_values(by='_Prioridad_Etiqueta', kind='stable', na_position='last')
+        colNoValidados, colInfoNoValidados, colLimpiar = st.columns(
+            [1.4, 2.2, 1], vertical_alignment="bottom"
+        )
+        with colNoValidados:
+            if hay_no_validados:
+                filtrar_no_validados = st.toggle(
+                    label="**🚨 Solo Ids_Deuda No Validados**",
+                    key=LLAVE_FILTRO_NO_VALIDADOS,
+                    help=(
+                        "Muestra únicamente los registros cuyo Id_Deuda no existe en Berex, "
+                        "para su post-revisión."
+                    ),
+                )
+            else:
+                filtrar_no_validados = False
+                st.session_state.pop(LLAVE_FILTRO_NO_VALIDADOS, None)
+        with colInfoNoValidados:
+            if hay_no_validados:
+                st.caption(
+                    "Filtro de Post-Revisión: **{:,}** Id_Deuda sin validar en Berex.".format(
+                        len(ids_no_validados)
+                    )
+                )
+            else:
+                st.caption("Sin Ids_Deuda pendientes de validación en Berex.")
+        with colLimpiar:
+            st.button(
+                label="**🧹 Limpiar Filtros**",
+                key="filtro_cruce_limpiar_filtros",
+                on_click=_limpiar_filtros_cruce,
+                width="stretch",
+            )
+
+    # Aviso si el Rango de Montos está Invertido
+    if (monto_min is not None) and (monto_max is not None) and (monto_min > monto_max):
+        st.warning(
+            "El **Monto Mínimo** es mayor que el **Monto Máximo**; se invertirán los valores "
+            "para aplicar el filtro.",
+            icon="⚠️",
+        )
+
+    # Paso 4: Aplicar los Filtros
+    df_filtrado = _aplicar_filtros_cruce(
+        df=df,
+        busqueda=busqueda,
+        casas=casa_seleccionada,
+        alias=alias_seleccionado,
+        archivos=archivo_seleccionado,
+        etiquetas=etiqueta_seleccionada,
+        estados=estado_seleccionado,
+        tipo_id=tipo_id,
+        filtrar_no_validados=filtrar_no_validados,
+        ids_no_validados=ids_no_validados,
+        cedula=cedula_input,
+        bancos=banco_seleccionado,
+        monto_min=monto_min,
+        monto_max=monto_max,
+        campo_fecha=campo_fecha,
+        rango_fecha=rango_fecha,
+    )
+
+    # Paso 5: Mostrar el Ordenamiento
+    st.markdown("#### ↕️ Ordenamiento")
+    colOrden, colDireccion, colInfoOrden = st.columns([2, 1.2, 2], vertical_alignment="center")
+    with colOrden:
+        orden = st.selectbox(
+            label="**Ordenar Por**",
+            options=[
+                OPCION_ORDEN_ORIGINAL,
+                OPCION_ORDEN_CEDULA,
+                OPCION_ORDEN_BANCO,
+                OPCION_ORDEN_MONTO_ACTUAL,
+                OPCION_ORDEN_ETIQUETA,
+                OPCION_ORDEN_FECHA_CRUCE,
+                OPCION_ORDEN_ULTIMA_ACTUALIZACION,
+            ],
+            key="filtro_cruce_orden_criterio_input",
+            help="Criterio de ordenamiento de los registros.",
+        )
+    with colDireccion:
+        direccion = st.segmented_control(
+            label="**Dirección**",
+            options=[OPCION_ORDEN_DIRECCION_ASC, OPCION_ORDEN_DIRECCION_DESC],
+            default=OPCION_ORDEN_DIRECCION_ASC,
+            key="filtro_cruce_direccion_input",
+            help="Ascendente o descendente según el criterio seleccionado.",
+        ) or OPCION_ORDEN_DIRECCION_ASC
+    with colInfoOrden:
+        if orden == OPCION_ORDEN_ORIGINAL:
+            st.caption(
+                "Ascendente: fila 1 → N · Descendente: fila N → 1. "
+                "El número de fila se reinicia por archivo."
+            )
+        elif orden == OPCION_ORDEN_CEDULA:
+            st.caption("Ascendente: A → Z · Descendente: Z → A.")
+        elif orden == OPCION_ORDEN_BANCO:
+            st.caption("Ascendente: A → Z · Descendente: Z → A.")
+        elif orden == OPCION_ORDEN_MONTO_ACTUAL:
+            st.caption("Ascendente: menor monto primero · Descendente: mayor monto primero.")
+        elif orden == OPCION_ORDEN_ETIQUETA:
+            st.caption("Ascendente: EXACTO → NULO · Descendente: NULO → EXACTO.")
+        elif orden == OPCION_ORDEN_FECHA_CRUCE:
+            st.caption("Ascendente: cruce más antiguo primero · Descendente: más reciente primero.")
+        else:
+            st.caption("Ascendente: actualización más antigua primero · Descendente: más reciente primero.")
+
+    ascendente = (direccion == OPCION_ORDEN_DIRECCION_ASC)
+    df_filtrado = _ordenar_cruce(df=df_filtrado, orden=orden, ascendente=ascendente)
+
+    # Paso 6: Resumen de los Registros Filtrados
+    total = len(cruce_df)
+    filtrados = len(df_filtrado)
+    con_id = int(df_filtrado['_Tiene_Id_Definitivo_Metadata'].sum()) if filtrados else 0
+    addendums = int(df_filtrado['_Es_Addendum_Metadata'].sum()) if filtrados else 0
+    pendientes = filtrados - con_id
+    if filtrados == 0:
+        st.warning("Ningún registro coincide con los filtros seleccionados.", icon="🔍")
+    st.caption(
+        "**{:,}** de **{:,}** registros coinciden con los filtros · "
+        "Pendientes: **{:,}** · Con Id_Definitivo: **{:,}** · ADDENDUM: **{:,}**".format(
+            filtrados, total, pendientes, con_id, addendums
+        )
+    )
 
     # Paso 7: Devolver el DataFrame Filtrado y Ordenado (sin las Columnas Auxiliares)
     columnas_auxiliares = [
-        '_Casa_Cobro', '_Alias_Casa', '_Ejecutivo_Subida', '_Etiqueta',
-        '_Tiene_Id_Definitivo', '_Archivo_Origen', '_Prioridad_Etiqueta',
+        '_Metadata_Filtro', '_Casa_Cobro', '_Alias_Casa', '_Archivo_Origen',
+        '_Etiqueta', '_Prioridad_Etiqueta', '_Estado', '_Id_Definitivo_Metadata',
+        '_Tiene_Id_Definitivo_Metadata', '_Es_Addendum_Metadata',
+        '_Id_Definitivo_Actual', '_Tiene_Id_Definitivo_Actual', '_Fechas_Status',
+        '_Fecha_Sin_Reconocer', '_Ultima_Fecha', '_Id_Registro_Num',
+        '_Deudas_Posibles_Texto', '_Busqueda', '_Cedula_Filtro', '_Banco',
+        '_Monto_Actual_Num',
     ]
-    return df.drop(columns=[c for c in columnas_auxiliares if c in df.columns])
+    return df_filtrado.drop(columns=[c for c in columnas_auxiliares if c in df_filtrado.columns])
 
 # Función Auxiliar para Mostrar la Advertencia del Filtro de Ids_Deuda No Validados
 def mostrar_advertencia_ids_no_validados() -> None:
