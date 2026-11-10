@@ -178,13 +178,16 @@ class MasivasSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de masivas.
     """
-    Id_Deuda: Series[str]  # Puede haber múltiples registros por Id_Deuda (varios descuentos por deuda)
-    Referencia: Series[str]
-    Casa_Cobro: Series[str]
-    PaB_Propuesta: Series[float]
-    PaB_Estructurado: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    Plazo_Estructurado: Series[int] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
-    PaB_Portafolio: Series[float] = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Id_Deuda: str  # Puede haber múltiples registros por Id_Deuda (varios descuentos por deuda)
+    Fecha_Masiva: pa.dtypes.Timestamp
+    Referencia: str
+    Casa_Cobro: str
+    Es_Portafolio: bool
+    PaB_Propuesta: float
+    PaB_Estructurado: float = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Plazo_Estructurado: int = pa.Field(nullable=True)  # Puede ser nulo si no aplica
+    Fila_Sheets: int
+    PaB_Portafolio: float = pa.Field(nullable=True)  # Puede ser nulo si no aplica
     Metadata: Series[MasivasMetadata] = pa.Field(ignore_na=True, nullable=True)
 
     class Config:

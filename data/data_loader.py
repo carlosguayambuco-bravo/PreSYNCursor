@@ -686,22 +686,35 @@ def load_masivas() -> DataFrame[MasivasSchema]:
         'Referencia': 'Referencia',
         'Casa': 'Casa_Cobro',
         'Metadata': 'Metadata',
+        'Portafolio': 'Es_Portafolio',
+        'Fecha': 'Fecha_Masiva'
     })
 
-    # Quitamos los Datos donde Id_Deuda o Casa_Cobro sea NaN
-    masivasDF = masivasDF.dropna(subset=['Id_Deuda', 'Casa_Cobro'])
+    # Creamos la Columna Fila_Sheets como masivasDF.index + 2
+    masivasDF['Fila_Sheets'] = (masivasDF.index + 2).astype(int)
+
+    # Quitamos los Datos donde Id_Deuda o Casa_Cobro o Fecha_Masiva sea NaN
+    masivasDF = masivasDF.dropna(subset=['Id_Deuda', 'Casa_Cobro','Fecha_Masiva'])
 
     # Dejamos solo las Columnas Necesarias
     masivasDF = masivasDF[
         [
             'Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado',
-            'Referencia','Casa_Cobro','Metadata'
+            'Referencia','Casa_Cobro','Metadata', 'Es_Portafolio', 'Fecha_Masiva'
         ]
     ]
 
     # Volvemos la Id_Deuda Y Referencia a String
     masivasDF['Id_Deuda'] = masivasDF['Id_Deuda'].apply(lambda s: str(s).replace('.0','').strip())
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: str(s).replace('.0','').strip())
+
+    # Volvemos la Columna Es_Portafolio a Booleano bajo la Condición: No está vacío
+    masivasDF['Es_Portafolio'] = masivasDF['Es_Portafolio'].apply(
+        lambda pt: pd.notna(pt) and (pt != "")
+    )
+
+    # Volvemos Fecha_Masiva a Datetime con dayfirst=True
+    masivasDF['Fecha_Masiva'] = pd.to_datetime(masivasDF['Fecha_Masiva'], errors='coerce', dayfirst=True)
 
     # Aplicamos la inicialización de la Metadata
     masivasDF['Metadata'] = masivasDF['Metadata'].apply(process_masivas_metadata)
@@ -715,7 +728,7 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     masivasDF['Casa_Cobro'] = masivasDF['Casa_Cobro'].apply(lambda s: str(s).upper().strip() if pd.notnull(s) else '')
 
     # Cargamos los Cambios de Referencia y los Aplicamos
-    refChangesDict = st.session_state["changes_references_dict"]
+    refChangesDict = load_reference_changes()
     masivasDF['Referencia'] = masivasDF['Referencia'].apply(lambda s: refChangesDict.get(s,s))
 
     # Volvemos los PaB a Número
