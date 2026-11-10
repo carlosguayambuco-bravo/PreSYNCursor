@@ -496,6 +496,11 @@ def mostrar_seleccion_deuda(
             value=deuda
         )
         st.caption("DUM: **$ {}**".format(formatNumber(pab_origen)))
+        if modo == "credito":
+            # Mostramos También el PaB_Ideal
+            st.caption("PaB Ideal de Crédito: **{}**".format(formatNumber(
+                obtener_valor_pab_ideal(debt = deuda) 
+            )))
 
     with colSliders:
         st.slider(
