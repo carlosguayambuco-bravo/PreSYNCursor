@@ -1471,8 +1471,9 @@ def registrar_opp_individual(*,referencia: str, deudas: list[str], tipo_analisis
         return
 
     # Paso 4: Registrar la Oportunidad
-    register_opps_uploaded(
+    if register_opps_uploaded(
         referencia=referencia,
         deudas=deudas,
         tipo_analisis=tipo_analisis
-    )
+    ):
+        st.session_state["registro_opps_ya_subidas"].add(llave_opp)
