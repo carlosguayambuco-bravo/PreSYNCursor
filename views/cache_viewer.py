@@ -4,10 +4,10 @@
 import streamlit as st
 # Librerías Locales
 from data.data_loader import (
-    execute_query_cache, load_addendums, load_aliados_dataframe, load_app_config, load_cartera_activa,
-    load_cartera_backup, load_client_balances, load_headcount_negociacion,
-    load_liquidaciones, load_logs, load_masivas, load_pab_ideal,
-    load_pendiente_cruce, load_reference_changes, load_solicitudes_mec,
+    execute_query_cache, load_addendums, load_aliados_dataframe, load_app_config, load_cambios_masivas,
+    load_cartera_activa, load_cartera_backup, load_client_balances, load_headcount_negociacion,
+    load_liquidaciones, load_logs, load_masivas, load_masivas_control, load_pab_ideal,
+    load_pab_origen_deudas, load_pendiente_cruce, load_reference_changes, load_solicitudes_mec,
     load_special_user_permissions, obtener_datos_completos_deudas,
     obtener_deudas_activas_con_retry, obtener_referencia_por_deuda,
     obtener_ultima_actualizacion_deudas, get_solicitud_id_to_row_mapping
@@ -23,6 +23,8 @@ CACHE_FUNCS_GOOGLE_SHEETS = [
     ("load_pab_ideal", load_pab_ideal, ["pab_ideal_dict"]),
     ("load_aliados_dataframe", load_aliados_dataframe, ["aliados_dict"]),
     ("load_masivas", load_masivas, ["masivas_df"]),
+    ("load_masivas_control", load_masivas_control, ["local_masivas_changes"]),
+    ("load_cambios_masivas", load_cambios_masivas, []),
     ("load_addendums", load_addendums, ["addendums_df"]),
     ("load_liquidaciones", load_liquidaciones, ["liquidations_set"]),
     ("load_headcount_negociacion", load_headcount_negociacion, ["headcount_df"]),
@@ -41,6 +43,7 @@ CACHE_FUNCS_METABASE = [
     ("obtener_deudas_activas_con_retry", obtener_deudas_activas_con_retry, []),
     ("obtener_ultima_actualizacion_deudas", obtener_ultima_actualizacion_deudas, []),
     ("obtener_datos_completos_deudas", obtener_datos_completos_deudas, []),
+    ("load_pab_origen_deudas", load_pab_origen_deudas, []),
     ("execute_query_cache", execute_query_cache,[])
 ]
 

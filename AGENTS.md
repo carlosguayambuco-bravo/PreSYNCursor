@@ -168,6 +168,7 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | Pipeline de Crédito | Google Sheets (`Pipeline Crédito`, hoja `Pipeline`) | Del área de crédito | Flujo de los procesos de crédito con el cliente. NO SE DEBE EDITAR. Se toma el último estado por `Referencia` |
 | Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. Archivo `...-MesAA.xlsx` y hoja `Mes AAAA`; se toma el más reciente. NO SE DEBE EDITAR |
 | Feedback de la app | Google Sheets (`Feedback`, spreadsheet de Configs) | Propio | Una fila por envío: `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Solo se escribe; la app no lo lee |
+| Cambios de Masivas | Google Sheets (`Cambios_Masivas`, spreadsheet de Configs) | Propio | Trazabilidad del Mando de Operaciones: `Fecha_Cambio`, `Usuario`, `Nombre_Aliado_Cambio`, `Fecha_Aliado_Cambio`, `Num_Registros` y `Num_Cambiados`. Una fila por base procesada |
 
 ---
 
@@ -267,6 +268,7 @@ Notas:
 │   ├── forms.py               # Descuento óptimo, validación de base, bloqueo de bancos
 │   ├── gest_sols.py           # Núcleo: solicitudes, descuentos, distribución, PDFs, correos
 │   ├── oportunidades.py       # Cálculo de oportunidades y acceso a datos
+│   ├── control_masivas.py     # Metadata y distribución de portafolios en la Base del Mes
 │   ├── bank_normalizer.py     # Normalización de nombres de bancos
 │   ├── acuerdo_pdf_generator/ # Generación de acuerdos en PDF
 │   └── id_aut_deud/           # Cruce de cartera para obtener el Id Deuda interno
@@ -290,10 +292,10 @@ Notas:
 | `core/auth.py` | OAuth con Google, cookies, refresh tokens, restauración de sesión. |
 | `core/permissions.py` | Permisos, roles y mapeo permiso → página. |
 | `core/users.py` | Objeto de usuario autenticado. |
-| `data/data_loader.py` | Lecturas cacheadas de Google Sheets, Google Drive y Metabase; normalización de solicitudes, asignación, prospectos y pipeline. |
-| `data/data_uploader.py` | Escrituras/actualizaciones en Google Sheets, logs y feedback. |
+| `data/data_loader.py` | Lecturas cacheadas de Google Sheets, Google Drive y Metabase; normalización de solicitudes, asignación, prospectos, pipeline y control de masivas. |
+| `data/data_uploader.py` | Escrituras/actualizaciones en Google Sheets, logs, feedback y control de masivas. |
 | `data/data_deleter.py` | Borrados controlados (por ejemplo, bases de cruce). |
-| `data/data_models.py` | Esquemas pandera y TypedDicts de solicitudes, masivas, cruce, asignación, prospectos y pipeline. |
+| `data/data_models.py` | Esquemas pandera y TypedDicts de solicitudes, masivas, cruce, asignación, prospectos, pipeline y control de masivas. |
 | `services/google_sheets.py` | Cliente gspread con reintentos y manejo de errores. |
 | `services/google_drive.py` | Subida/descarga/borrado de archivos. La descarga usa `MediaIoBaseDownload`. |
 | `services/google_mail.py` | Envío de correos con adjuntos. |
@@ -301,12 +303,13 @@ Notas:
 | `modules/gest_sols.py` | Reglas de solicitud, comparación de descuentos, distribución de montos, PDFs y notificaciones. |
 | `modules/forms.py` | Fórmulas del monto recomendado, descuento óptimo y validaciones del formulario. |
 | `modules/oportunidades.py` | Acceso a Asignación/Headcount/Prospectos/Pipeline, fórmulas puras de oportunidades y agregador `calcular_oportunidades_referencia`. |
+| `modules/control_masivas.py` | Metadata y distribución de portafolios sobre la Base del Mes ya cargada. |
 | `modules/id_aut_deud/deuda_matcher.py` | Algoritmo de matching de cartera (etiquetas EXACTO/DUPLICADO/AMBIGUO/ADDENDUM/NULO). |
 | `modules/id_aut_deud/helpers.py` | Limpieza, índices, pagos a cuotas, portafolios y preparación de la base del mes. |
 | `ui/calculadora_components.py` | UI de la calculadora individual por Referencia: selección de deudas, simulación de PaB/descuento, viabilidad y oportunidades. |
 | `ui/forms_components.py` | Componentes del formulario de solicitudes y componente de feedback. |
 | `ui/` | Componentes de presentación y formularios reutilizables. |
-| `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, calculadora, logs, cache. |
+| `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, calculadora, logs, cache y mando de operaciones. |
 | `docs/OPORTUNIDADES.md` | Explicación funcional de oportunidades para negociadores. |
 | `docs/OPORTUNIDADES_DETALLADO.md` | Fórmulas y reglas exactas de cada oportunidad. Fuente de verdad de negocio. |
 | `utils/helpers_general.py` | Números, fechas hábiles, formato, meses operativos. |
@@ -696,6 +699,61 @@ Portafolios:
 - Caché de 1 hora. Toma `load_liquidaciones_mec()` (caché de 1 día) y calcula `Fecha_Liq.min().normalize().replace(day=1)`.
 - Si no hay liquidaciones, todas las fechas son nulas o falla la lectura, usa `getMesOperativo()` (día 5) como fallback.
 
+### 6.10 Centro de Control de Masivas (Mando de Operaciones)
+
+La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla la metadata y los portafolios de las bases que **ya están cargadas** en `Bases mes actual 2024`. No reemplaza el flujo de la pestaña **🟢 Control**: esa sube registros del cruce a la Base del Mes; esta transforma registros existentes.
+
+**Flujo:**
+
+1. Muestra el panel general de `Cambios_Masivas` (historial y métricas) y una notificación global de las bases sin metadata completa.
+2. Selectores: **Casa de Cobro** siempre específica y **Fecha de Subida** con opción `Todas` (todas las fechas de ese aliado).
+3. Si el alcance no tiene metadata completa, muestra un formulario por base (`Casa_Cobro` + `Fecha_Masiva`) con:
+   - `Tipo_Contraoferta` (valores de `TIPOS_CONTRAOFERTAS`; se sugiere según el aliado).
+   - `Fecha_Limite_Uso` (mínimo el día 5 del mes actual).
+   - `Alias` opcional.
+   El resto de la metadata se completa solo: `Id_Cruce` (UUID), `Id_Portafolio` y `PaB_Portafolio`.
+4. Si toda la metadata ya existe, solo se muestra el botón de reprocesar portafolios. Las filas con metadata completa conservan su `Tipo_Contraoferta`, `Fecha_Limite_Uso` y `Alias`.
+5. **Procesar Portafolios** no escribe en Sheets. Aplica la distribución y muestra la comparación de `PaB` total y el detalle por deuda.
+6. **Subir Cambios a Google Sheets** actualiza `Metadata`, `Propuesta Pago`, `Monto Portafolio` y `Portafolio` (solo si cambió) por fila con `batch_update`. Después muestra globos, espera 2 segundos y hace rerun.
+7. La subida registra una fila por base en `Cambios_Masivas` y guarda los cambios locales en `local_masivas_changes`.
+
+**Distribución de portafolios (`modules/control_masivas.py`):**
+
+- `GrupoCol = Masiva_ + Referencia + Casa_Cobro + Es_Portafolio + Fecha_Masiva`.
+- `%Pago = PaB_Origen / SUM(PaB_Origen)` dentro del grupo.
+- **Regla especial:** si todas las filas del grupo tienen el mismo `PaB_Propuesta`, son `Es_Portafolio` y hay más de una deuda, `PaB_Propuesta = PaB_Propuesta_Original * %Pago`.
+- **Regla JCAP:** para `Casa_Cobro == 'JCAP'`, si al menos dos filas del grupo tienen `PaB_Propuesta <= 100` y no aplicó la regla especial, `PaB_Propuesta = SUM(PaB_Propuesta_Original del grupo) * %Pago`.
+- Si algún `PaB_Propuesta` del grupo es nulo, no se aplica la regla para no inventar montos.
+- `Id_Portafolio` es la unión de `Id_Cruce` del grupo con `-`; `PaB_Portafolio` es la suma de `PaB_Propuesta` del grupo. Solo se marcan grupos con `Es_Portafolio` en todas sus filas, tamaño > 1 y montos completos.
+- `PaB_Origen` y `Referencia` se consultan en Metabase (`QUERY_DEUDAS_PAB_ORIGEN`, dbId 12, `DISTINCT ON (bcrd.id) ORDER BY bcrd.id, bcrd.inserted_at DESC NULLS LAST`). Si la consulta falla o no trae una deuda, se usa `Deuda Bravo` y `Referencia` de la hoja.
+- Los cambios se comparan por `Fila_Sheets`; `PaB_Portafolio` se mantiene sincronizado en la columna de la hoja (`Monto Portafolio`).
+
+**Hoja `Cambios_Masivas` (Configs):**
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `Fecha_Cambio` | Timestamp | Momento de la subida (hora de Bogotá). |
+| `Usuario` | str | Correo del usuario que ejecutó la subida. |
+| `Nombre_Aliado_Cambio` | str | `Casa_Cobro` de la base procesada. |
+| `Fecha_Aliado_Cambio` | Timestamp | `Fecha_Masiva` de la base procesada. |
+| `Num_Registros` | int | Registros de la base incluidos en el alcance. |
+| `Num_Cambiados` | int | Registros de esa base con al menos un cambio. |
+
+**Funciones nuevas:**
+
+- `modules/control_masivas.py`: `completar_metadata_masivas`, `distribuir_portafolios_masivas`, `actualizar_metadata_portafolios`, `construir_cambios_masivas`, `construir_log_cambios_masivas`, `resumen_bases_sin_metadata`, `metadata_masiva_completa`.
+- `data/data_loader.py`: `load_masivas_control`, `load_masivas_control_con_cambios`, `load_cambios_masivas`, `load_pab_origen_deudas`.
+- `data/data_uploader.py`: `upload_masivas_control`, `upload_cambios_masivas_log`.
+- `data/data_models.py`: `MasivasControlSchema`, `CambiosMasivasSchema`.
+
+**Gotchas:**
+
+- La hoja actual puede tener la columna `Portafolio` vacía; en ese caso no hay distribución de portafolios y solo se completa la metadata.
+- El `.title()` de pandas convierte `PaB_Origen` en `Pab_Origen`; `load_pab_origen_deudas` restaura el nombre antes de usarlo.
+- `Cambios_Masivas` puede estar vacía: el uploader crea los headers antes del primer `append`.
+- `Monto Portafolio` vive lejos en la hoja (columna AN en la versión actual); no asumas que está junto a `Portafolio`.
+- No se debe editar `Asignación de Cartera`, `Pipeline de Crédito` ni `Prospectos` desde este flujo.
+
 ---
 
 ## 7. Tests existentes
@@ -709,6 +767,7 @@ Portafolios:
 | `tests/test_archivos.py` | Nombres de archivos, metadata de PDFs, esquema de archivos subidos y soportes por deuda. |
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
 | `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, umbrales, `PaB_Actualizado` con etiquetas confiables y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
+| `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), completado y preservación de metadata, `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
 
 ### Convenciones para nuevos tests
 

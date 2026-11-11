@@ -194,6 +194,43 @@ class MasivasSchema(pa.DataFrameModel):
         strict = True  # Validación estricta de columnas
         coerce = True  # Coerción automática de tipos
 
+class MasivasControlSchema(pa.DataFrameModel):
+    """
+    Esquema para el Centro de Control de Masivas (datos ya presentes en la Base del Mes).
+
+    A diferencia de MasivasSchema, conserva la Fila_Sheets y el PaB_Origen que se usa
+    para distribuir los portafolios (Deuda Bravo de la base o consulta a Metabase).
+    """
+    Id_Deuda: str
+    Fecha_Masiva: pa.dtypes.Timestamp
+    Referencia: str = pa.Field(nullable=True)
+    Casa_Cobro: str
+    Es_Portafolio: bool
+    PaB_Propuesta: float = pa.Field(nullable=True)
+    PaB_Portafolio: float = pa.Field(nullable=True)
+    PaB_Origen: float = pa.Field(nullable=True)
+    Fila_Sheets: int
+    Metadata: Series[MasivasMetadata] = pa.Field(ignore_na=True, nullable=True)
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
+
+class CambiosMasivasSchema(pa.DataFrameModel):
+    """
+    Esquema de trazabilidad de los cambios realizados desde el Centro de Control.
+    """
+    Fecha_Cambio: pa.dtypes.Timestamp
+    Usuario: str
+    Nombre_Aliado_Cambio: str
+    Fecha_Aliado_Cambio: pa.dtypes.Timestamp
+    Num_Registros: int = pa.Field(ge=0)
+    Num_Cambiados: int = pa.Field(ge=0)
+
+    class Config:
+        strict = True  # Validación estricta de columnas
+        coerce = True  # Coerción automática de tipos
+
 class AddendumsSchema(pa.DataFrameModel):
     """
     Esquema para validar la estructura de los datos de addendums.

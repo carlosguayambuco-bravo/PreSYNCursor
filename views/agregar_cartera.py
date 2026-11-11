@@ -11,12 +11,22 @@ import streamlit as st
 from pandera.errors import SchemaErrors
 # Librerías Locales
 from data.data_deleter import eliminar_base_cruce
-from data.data_loader import load_cartera_activa, load_masivas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
+from data.data_loader import load_cambios_masivas, load_cartera_activa, load_masivas, load_masivas_control, load_masivas_control_con_cambios, load_pab_origen_deudas, load_pendiente_cruce, load_pendiente_cruce_con_cambios, obtener_datos_completos_deudas, verificar_existencias_deudas
 from data.data_models import InputCruceSchema, PendienteCruceSchema
-from data.data_uploader import upload_base_cruce_info, upload_base_mes_info
+from data.data_uploader import upload_base_cruce_info, upload_base_mes_info, upload_masivas_control
 from modules.bank_normalizer import BANCOS_UNICOS
 from modules.classes import get_cruce_identificaciones_manager
-from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPO_PORTAFOLIO_DISTRIBUCION, TIPO_PORTAFOLIO_INDIVIDUAL, TIPOS_STATUS
+from modules.constants import COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_ID_DEUDA, COL_MONTO_ACTUAL, COL_MONTO_PROPUESTO, COL_NOMBRE, COLUMNAS_MAPEABLES, ETIQUETA_ADDENDUM, ETIQUETA_EXACTO, ETIQUETAS_CRUCE, MIMETYPES, TIPO_PORTAFOLIO_DISTRIBUCION, TIPO_PORTAFOLIO_INDIVIDUAL, TIPOS_CONTRAOFERTAS, TIPOS_STATUS
+from modules.control_masivas import (
+    actualizar_metadata_portafolios,
+    completar_metadata_masivas,
+    construir_cambios_masivas,
+    construir_log_cambios_masivas,
+    distribuir_portafolios_masivas,
+    metadata_masiva_completa,
+    obtener_clave_base,
+    resumen_bases_sin_metadata,
+)
 from modules.id_aut_deud.deuda_matcher import match_deudas
 from modules.id_aut_deud.helpers import (
     agregar_resultados_a_df_original, agrupar_montos_portafolio, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, obtener_ultimo_status_cruce, resetear_widgets_columnas,
@@ -957,9 +967,165 @@ def _mostrar_selector_columnas_portafolio(
         help=help,
     )
 
+# --- Funciones Auxiliares del Centro de Control de Masivas ---
+
+# Función Auxiliar para Formatear una Fecha de la Base
+def _formatear_fecha_mando(fecha) -> str:
+    fecha_ts = pd.to_datetime(fecha, errors='coerce')
+    if pd.isna(fecha_ts):
+        return 'SIN FECHA'
+    return pd.Timestamp(fecha_ts).strftime('%d/%m/%Y')
+
+# Función Auxiliar para Formatear una Base del Mando de Operaciones
+def _formatear_base_mando(casa_cobro: str, fecha_masiva) -> str:
+    return "{} | {}".format(casa_cobro, _formatear_fecha_mando(fecha_masiva))
+
+# Función Auxiliar para Sugerir el Tipo de Contraoferta según el Aliado
+def _tipo_contraoferta_sugerido(casa_cobro: str) -> str:
+    aliado = st.session_state.get('aliados_dict', {}).get(casa_cobro)
+    if aliado is None:
+        return "ContraOferta sin Compromiso"
+    if aliado.brinda_maximo_descuento():
+        return "Descuento Máximo"
+    if aliado.pagar_co_obligatorio():
+        return "ContraOferta de Pago Obligatorio"
+    return "ContraOferta sin Compromiso"
+
+# Función Auxiliar para Mostrar el Formulario de Metadata de una Base
+def _mostrar_formulario_metadata_mando(
+    *,
+    casa_cobro: str,
+    fecha_masiva,
+    num_sin_metadata: int,
+) -> Optional[dict]:
+    fecha_ts = pd.Timestamp(fecha_masiva)
+    sufijo_key = "{}__{}".format(casa_cobro, fecha_ts.strftime('%Y_%m_%d'))
+    tipo_sugerido = _tipo_contraoferta_sugerido(casa_cobro)
+    opciones_tipo = list(get_args(TIPOS_CONTRAOFERTAS))
+    index_tipo = opciones_tipo.index(tipo_sugerido) if tipo_sugerido in opciones_tipo else 0
+    fecha_minima = (
+        pd.Timestamp.now('America/Bogota').normalize().replace(day=5).date()
+    )
+
+    with st.container(border=True):
+        st.markdown("#### 🏷️ **{}**".format(_formatear_base_mando(casa_cobro, fecha_ts)))
+        st.caption(
+            "**{:,}** registro(s) de esta base no tienen metadata completa.".format(
+                num_sin_metadata
+            )
+        )
+        colTipo, colFecha, colAlias = st.columns([2, 1, 1])
+        with colTipo:
+            tipo_contraoferta = st.selectbox(
+                label="**Tipo de Contraoferta**",
+                options=opciones_tipo,
+                index=index_tipo,
+                key="mando_tipo_{}".format(sufijo_key),
+            )
+        with colFecha:
+            fecha_limite = st.date_input(
+                label="**Fecha Límite de Uso**",
+                value=None,
+                min_value=fecha_minima,
+                key="mando_fecha_limite_{}".format(sufijo_key),
+                help="Como mínimo el día 5 del mes actual.",
+            )
+        with colAlias:
+            alias = st.text_input(
+                label="**Alias (Opcional)**",
+                value="",
+                key="mando_alias_{}".format(sufijo_key),
+            )
+
+    if (tipo_contraoferta is None) or (fecha_limite is None):
+        st.warning(
+            "Completa el **Tipo de Contraoferta** y la **Fecha Límite de Uso** de esta base.",
+            icon="⚠️",
+        )
+        return None
+    return {
+        'Tipo_Contraoferta': tipo_contraoferta,
+        'Fecha_Limite_Uso': pd.Timestamp(fecha_limite),
+        'Alias': (alias or '').strip() or None,
+    }
+
+# Función Auxiliar para Mostrar el Panel General de Cambios
+def _mostrar_panel_cambios_mando(*, cambios_df: pd.DataFrame) -> None:
+    st.markdown("### 📊 Panel General de Cambios")
+    if cambios_df.empty:
+        st.info(
+            "Aún no hay cambios registrados en la hoja **Cambios_Masivas**. "
+            "Cuando se suba el primer cambio, aquí aparecerá el historial.",
+            icon="ℹ️",
+        )
+        return
+
+    total_registros = int(cambios_df['Num_Registros'].sum())
+    total_cambiados = int(cambios_df['Num_Cambiados'].sum())
+    ultima_fecha = pd.to_datetime(
+        cambios_df['Fecha_Cambio'], errors='coerce'
+    ).max()
+    colCambios, colRegistros, colCambiados, colUltima = st.columns(4, border=True)
+    with colCambios:
+        st.metric(label="**🧾 Registros de Cambio**", value="{:,}".format(len(cambios_df)))
+    with colRegistros:
+        st.metric(label="**📄 Registros en Historial**", value="{:,}".format(total_registros))
+    with colCambiados:
+        st.metric(label="**✅ Cambiados en Historial**", value="{:,}".format(total_cambiados))
+    with colUltima:
+        st.metric(
+            label="**🕒 Último Cambio**",
+            value=(
+                pd.Timestamp(ultima_fecha).strftime('%d/%m/%Y %H:%M')
+                if pd.notna(ultima_fecha) else 'SIN REGISTRO'
+            ),
+        )
+
+    with st.expander("🔎 Ver Historial de Cambios", expanded=False):
+        historial = cambios_df.sort_values('Fecha_Cambio', ascending=False).copy()
+        for columna in ['Fecha_Cambio', 'Fecha_Aliado_Cambio']:
+            historial[columna] = pd.to_datetime(
+                historial[columna], errors='coerce'
+            ).dt.strftime('%d/%m/%Y %H:%M')
+        st.dataframe(
+            historial,
+            width="stretch",
+            hide_index=True,
+        )
+
+# Función Auxiliar para Mostrar las Bases que Aún no Tienen Metadata
+def _mostrar_resumen_pendientes_mando(*, resumen_df: pd.DataFrame) -> None:
+    if resumen_df.empty:
+        st.info(
+            "ℹ️ Todas las bases del alcance seleccionado ya tienen la metadata completa. "
+            "Puedes volver a procesar los portafolios para recalcular los montos.",
+            icon="ℹ️",
+        )
+        return
+
+    total_sin_metadata = int(resumen_df['Num_Sin_Metadata'].sum())
+    st.warning(
+        "⚠️ Hay **{:,}** registro(s) en **{:,}** base(s) sin metadata completa. "
+        "Completa los datos de cada base antes de procesar los portafolios.".format(
+            total_sin_metadata, len(resumen_df)
+        ),
+        icon="⚠️",
+    )
+    resumen_mostrar = resumen_df.copy()
+    resumen_mostrar['Fecha_Masiva'] = resumen_mostrar['Fecha_Masiva'].apply(
+        _formatear_fecha_mando
+    )
+    st.dataframe(resumen_mostrar, width="stretch", hide_index=True)
+
 # --- Página Principal ---
-tab_subida, tab_escogencia, tab_detalles, tab_control = st.tabs(
-    tabs = ["📤 Subida de Datos", "✍️ Identificación Manual", "🧾 Detalles de Cruce", "🟢 Control"],
+tab_subida, tab_escogencia, tab_detalles, tab_control, tab_mando = st.tabs(
+    tabs = [
+        "📤 Subida de Datos",
+        "✍️ Identificación Manual",
+        "🧾 Detalles de Cruce",
+        "🟢 Control",
+        "🪭Mando de Operaciones",
+    ],
     on_change="rerun"
 )
 
@@ -1520,3 +1686,429 @@ if tab_control.open:
                     # Recargamos la Página para Reflejar los Cambios Locales (Etiqueta 'Subido Alianzas')
                     sleep(1)
                     st.rerun()
+
+# ==============================
+# Tab 5: Mando de Operaciones (Centro de Control de Masivas)
+# ==============================
+if tab_mando.open:
+    with tab_mando:
+        st.markdown("### 🪭Mando de Operaciones")
+        st.info(
+            "Desde aquí se controla la metadata y la distribución de portafolios de las bases "
+            "que **ya se encuentran cargadas** en 'Bases mes actual 2024'. El procesamiento "
+            "no sube nada: primero se muestra una comparación y luego se confirman los cambios.",
+            icon="ℹ️",
+        )
+
+        # --- 1. Panel General de Cambios ---
+        cambios_historial_df = load_cambios_masivas()
+        _mostrar_panel_cambios_mando(cambios_df=cambios_historial_df)
+
+        # Mensaje de Éxito después de una Subida (se muestra una sola vez)
+        if 'mando_exito' in st.session_state:
+            exito_info = st.session_state.pop('mando_exito')
+            st.success(
+                "✅ Se actualizaron **{:,}** registro(s) de **{:,}** base(s) en Google Sheets. "
+                "Los cambios quedaron registrados en **Cambios_Masivas**.".format(
+                    exito_info.get('registros', 0),
+                    exito_info.get('bases', 0),
+                ),
+                icon="🎉",
+            )
+
+        st.divider()
+
+        # --- 2. Carga de la Base del Mes ---
+        control_df = load_masivas_control_con_cambios()
+        if control_df.empty:
+            st.warning(
+                "No se encontraron registros en la hoja 'Bases mes actual 2024'.",
+                icon="⚠️",
+            )
+            st.stop()
+
+        # Notificación Global de los Cambios que Faltan por Realizar
+        resumen_global_df = resumen_bases_sin_metadata(control_df)
+        if resumen_global_df.empty:
+            st.info(
+                "ℹ️ Toda la Base del Mes tiene la metadata completa. Solo queda reprocesar "
+                "los portafolios si necesitas recalcular los montos.",
+                icon="ℹ️",
+            )
+        else:
+            st.warning(
+                "⚠️ Faltan cambios por realizar: **{:,}** registro(s) en **{:,}** base(s) "
+                "no tienen metadata completa.".format(
+                    int(resumen_global_df['Num_Sin_Metadata'].sum()),
+                    len(resumen_global_df),
+                ),
+                icon="⚠️",
+            )
+
+        # --- 3. Selectores de la Base a Transformar ---
+        st.markdown("### 🧬 Transformación de Datos")
+        st.caption(
+            "Selecciona el aliado y la fecha de subida de la base que deseas transformar. "
+            "La fecha **Todas** aplica para todas las bases de ese aliado."
+        )
+        colCasa, colFecha = st.columns(2)
+        with colCasa:
+            casas_disponibles = sorted(
+                [
+                    str(casa) for casa in control_df['Casa_Cobro'].dropna().unique()
+                    if str(casa).strip()
+                ]
+            )
+            casa_sel = st.selectbox(
+                label="**🏦 Casa de Cobro**",
+                options=casas_disponibles,
+                key="mando_casa_cobro",
+                help="Aliado cuya base se va a transformar.",
+            )
+        with colFecha:
+            fechas_disponibles = sorted(
+                pd.to_datetime(
+                    control_df.loc[
+                        control_df['Casa_Cobro'] == casa_sel, 'Fecha_Masiva'
+                    ],
+                    errors='coerce',
+                ).dropna().dt.normalize().unique()
+            )
+            opciones_fecha = ['Todas'] + list(fechas_disponibles)
+            fecha_sel = st.selectbox(
+                label="**📅 Fecha de Subida**",
+                options=opciones_fecha,
+                index=0,
+                format_func=lambda valor: (
+                    'Todas' if isinstance(valor, str) else _formatear_fecha_mando(valor)
+                ),
+                key="mando_fecha_subida_{}".format(str(casa_sel).replace(' ', '_')),
+                help="Fecha de la base. 'Todas' procesa todas las fechas de ese aliado.",
+            )
+
+        scope_df = control_df[control_df['Casa_Cobro'] == casa_sel].copy()
+        if isinstance(fecha_sel, str) and (fecha_sel == 'Todas'):
+            fecha_texto = 'Todas'
+        else:
+            scope_df = scope_df[
+                scope_df['Fecha_Masiva'].dt.normalize() == pd.Timestamp(fecha_sel)
+            ].copy()
+            fecha_texto = _formatear_fecha_mando(fecha_sel)
+
+        if scope_df.empty:
+            st.warning("No hay registros para la selección realizada.", icon="⚠️")
+            st.stop()
+
+        st.caption(
+            "✅ Alcance seleccionado: **{:,}** registro(s) de **{}** con fecha **{}**.".format(
+                len(scope_df), casa_sel, fecha_texto
+            )
+        )
+
+        # --- 4. Notificación de Metadata Pendiente ---
+        st.divider()
+        st.markdown("### 📝 Metadata Pendiente")
+        resumen_pendientes_df = resumen_bases_sin_metadata(scope_df)
+        _mostrar_resumen_pendientes_mando(resumen_df=resumen_pendientes_df)
+
+        # --- 5. Formularios de Metadata por Base (solo si falta información) ---
+        configs_por_base = {}
+        if not resumen_pendientes_df.empty:
+            st.markdown("#### 🏷️ Completar Metadata por Base")
+            for _, fila_pendiente in resumen_pendientes_df.iterrows():
+                config = _mostrar_formulario_metadata_mando(
+                    casa_cobro=str(fila_pendiente['Casa_Cobro']),
+                    fecha_masiva=fila_pendiente['Fecha_Masiva'],
+                    num_sin_metadata=int(fila_pendiente['Num_Sin_Metadata']),
+                )
+                if config is not None:
+                    configs_por_base[
+                        obtener_clave_base(
+                            casa_cobro=fila_pendiente['Casa_Cobro'],
+                            fecha_masiva=fila_pendiente['Fecha_Masiva'],
+                        )
+                    ] = config
+
+        configs_completas = len(configs_por_base) == len(resumen_pendientes_df)
+
+        # Firma de los Selectores y Formularios (para invalidar resultados viejos)
+        firma_configs = tuple(sorted(
+            (
+                str(casa),
+                pd.Timestamp(fecha).strftime('%Y-%m-%d'),
+                str(config.get('Tipo_Contraoferta')),
+                pd.Timestamp(config.get('Fecha_Limite_Uso')).strftime('%Y-%m-%d'),
+                str(config.get('Alias') or ''),
+            )
+            for (casa, fecha), config in configs_por_base.items()
+        ))
+        firma_actual = (
+            str(casa_sel),
+            fecha_texto,
+            firma_configs,
+        )
+
+        # --- 6. Botón de Procesamiento (no sube datos) ---
+        st.divider()
+        st.markdown("### 💼 Distribución de Portafolios")
+        st.caption(
+            "El procesamiento aplica la distribución de portafolios y calcula la nueva "
+            "Metadata. **No modifica Google Sheets**; primero muestra la comparación."
+        )
+        procesar_portafolios = st.button(
+            label="💼 Procesar Portafolios",
+            type="primary",
+            key="mando_procesar_portafolios",
+            width="stretch",
+            disabled=not configs_completas,
+            help="Aplica la distribución de portafolios y prepara los cambios para revisión.",
+        )
+
+        if procesar_portafolios:
+            st.session_state.pop('mando_resultado', None)
+            with st.spinner("💼 Procesando metadata y portafolios..."):
+                df_trabajo = scope_df.copy()
+
+                # Paso 1: Completar la Metadata de las Filas que la Necesiten
+                if not resumen_pendientes_df.empty:
+                    df_trabajo = completar_metadata_masivas(
+                        df_trabajo, configs_por_base
+                    )
+
+                # Paso 2: Enriquecer con PaB_Origen y Referencia desde Metabase
+                deudas_scope = tuple(
+                    df_trabajo['Id_Deuda'].dropna().astype(str).unique().tolist()
+                )
+                try:
+                    pab_origen_df = load_pab_origen_deudas(deudas_scope)
+                except Exception as e:
+                    pab_origen_df = pd.DataFrame()
+                    st.warning(
+                        "No se pudo consultar Metabase para obtener el PaB_Origen. "
+                        "Se usará la columna **Deuda Bravo** de la base. Detalle: ```{}```".format(e),
+                        icon="⚠️",
+                    )
+                if not pab_origen_df.empty:
+                    mapa_pab_origen = dict(zip(
+                        pab_origen_df['Id_Deuda'], pab_origen_df['PaB_Origen']
+                    ))
+                    mapa_referencia = dict(zip(
+                        pab_origen_df['Id_Deuda'], pab_origen_df['Referencia']
+                    ))
+                    df_trabajo['PaB_Origen'] = (
+                        df_trabajo['Id_Deuda'].map(mapa_pab_origen)
+                        .fillna(df_trabajo['PaB_Origen'])
+                    )
+                    referencia_query = df_trabajo['Id_Deuda'].map(mapa_referencia)
+                    df_trabajo['Referencia'] = referencia_query.where(
+                        referencia_query.notna()
+                        & referencia_query.astype(str).str.strip().ne(''),
+                        df_trabajo['Referencia'],
+                    )
+
+                sin_pab_origen = int(df_trabajo['PaB_Origen'].isna().sum())
+                if sin_pab_origen > 0:
+                    st.warning(
+                        "**{:,}** deuda(s) no tienen PaB_Origen disponible; sus portafolios "
+                        "no se podrán distribuir.".format(sin_pab_origen),
+                        icon="⚠️",
+                    )
+
+                # Paso 3: Distribuir Portafolios y Actualizar la Metadata
+                df_trabajo, detalle_distribucion = distribuir_portafolios_masivas(df_trabajo)
+                df_trabajo = actualizar_metadata_portafolios(df_trabajo)
+
+                # Paso 4: Construir los Cambios y el Log
+                df_cambios = construir_cambios_masivas(
+                    df_original=scope_df,
+                    df_resultado=df_trabajo,
+                )
+                log_df = construir_log_cambios_masivas(
+                    df_original=scope_df,
+                    df_cambios=df_cambios,
+                    usuario=str(st.session_state.get('user_email') or 'Sin Correo'),
+                )
+
+                st.session_state['mando_resultado'] = {
+                    'firma': firma_actual,
+                    'scope_key': (str(casa_sel), fecha_texto),
+                    'df_resultado': df_trabajo,
+                    'df_cambios': df_cambios,
+                    'detalle_distribucion': detalle_distribucion,
+                    'log_df': log_df,
+                    'total_antes': float(pd.to_numeric(
+                        scope_df['PaB_Propuesta'], errors='coerce'
+                    ).sum()),
+                    'total_despues': float(pd.to_numeric(
+                        df_trabajo['PaB_Propuesta'], errors='coerce'
+                    ).sum()),
+                    'metadata_pendiente': int(len(scope_df) - scope_df['Metadata'].apply(
+                        metadata_masiva_completa
+                    ).sum()),
+                    'sin_pab_origen': sin_pab_origen,
+                }
+
+        # --- 7. Comparación y Tabla de Cambios ---
+        resultado_mando = st.session_state.get('mando_resultado')
+        if resultado_mando and (resultado_mando.get('firma') == firma_actual):
+            df_cambios = resultado_mando['df_cambios']
+            df_resultado = resultado_mando['df_resultado']
+            detalle_distribucion = resultado_mando['detalle_distribucion']
+            log_df = resultado_mando['log_df']
+
+            st.divider()
+            st.markdown("### 📊 Comparación de la Transformación")
+            total_antes = resultado_mando['total_antes']
+            total_despues = resultado_mando['total_despues']
+            diferencia_total = total_despues - total_antes
+            num_cambiados = len(df_cambios)
+            num_metadata = int(df_cambios['Metadata_Cambio'].sum()) if not df_cambios.empty else 0
+            num_pab = int(df_cambios['PaB_Cambio'].sum()) if not df_cambios.empty else 0
+            num_portafolio = int(df_cambios['Portafolio_Cambio'].sum()) if not df_cambios.empty else 0
+
+            colAntes, colDespues, colDiferencia, colCambiados = st.columns(4, border=True)
+            with colAntes:
+                st.metric(
+                    label="**💸 PaB Total (Antes)**",
+                    value="${:,.0f}".format(total_antes),
+                )
+            with colDespues:
+                st.metric(
+                    label="**💸 PaB Total (Después)**",
+                    value="${:,.0f}".format(total_despues),
+                    delta="${:,.0f}".format(diferencia_total),
+                    delta_color="normal" if diferencia_total == 0 else "inverse",
+                )
+            with colDiferencia:
+                st.metric(
+                    label="**🧾 Registros con Cambios**",
+                    value="{:,}".format(num_cambiados),
+                    delta="{:.1%} del Alcance".format(
+                        num_cambiados / len(df_resultado) if len(df_resultado) else 0
+                    ),
+                    delta_color="gray",
+                    delta_arrow="off",
+                )
+            with colCambiados:
+                st.metric(
+                    label="**🏷️ Metadata Cambiada**",
+                    value="{:,}".format(num_metadata),
+                    delta="Pendiente al iniciar: {:,}".format(
+                        int(resultado_mando.get('metadata_pendiente', 0))
+                    ),
+                    delta_color="gray",
+                    delta_arrow="off",
+                )
+            st.caption(
+                "Cambios: **{:,}** de Metadata · **{:,}** de Propuesta Pago · "
+                "**{:,}** de Portafolio/Monto Portafolio.".format(
+                    num_metadata, num_pab, num_portafolio
+                )
+            )
+
+            if df_cambios.empty:
+                st.info(
+                    "✅ El procesamiento no generó cambios: la base ya estaba actualizada.",
+                    icon="✅",
+                )
+            else:
+                columnas_tabla = [
+                    'Id_Deuda', 'Referencia', 'Fecha_Masiva', 'Es_Portafolio',
+                    'PaB_Propuesta_Antes', 'PaB_Propuesta_Despues', 'Diferencia_PaB',
+                    'PaB_Portafolio_Antes', 'PaB_Portafolio_Despues', 'Diferencia_Portafolio',
+                ]
+                tabla_cambios = df_cambios[columnas_tabla].copy()
+                tabla_cambios['Fecha_Masiva'] = pd.to_datetime(
+                    tabla_cambios['Fecha_Masiva'], errors='coerce'
+                ).dt.strftime('%d/%m/%Y')
+                st.markdown("#### 🧾 Detalle de Cambios por Deuda")
+                st.dataframe(
+                    tabla_cambios,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        'PaB_Propuesta_Antes': st.column_config.NumberColumn(
+                            'PaB_Propuesta_Antes', format="localized"
+                        ),
+                        'PaB_Propuesta_Despues': st.column_config.NumberColumn(
+                            'PaB_Propuesta_Despues', format="localized"
+                        ),
+                        'Diferencia_PaB': st.column_config.NumberColumn(
+                            'Diferencia_PaB', format="localized"
+                        ),
+                        'PaB_Portafolio_Antes': st.column_config.NumberColumn(
+                            'PaB_Portafolio_Antes', format="localized"
+                        ),
+                        'PaB_Portafolio_Despues': st.column_config.NumberColumn(
+                            'PaB_Portafolio_Despues', format="localized"
+                        ),
+                        'Diferencia_Portafolio': st.column_config.NumberColumn(
+                            'Diferencia_Portafolio', format="localized"
+                        ),
+                    },
+                )
+
+                if not detalle_distribucion.empty:
+                    with st.expander("🔎 Ver Detalle de la Distribución", expanded=False):
+                        st.dataframe(
+                            detalle_distribucion,
+                            width="stretch",
+                            hide_index=True,
+                            column_config={
+                                'PaB_Origen': st.column_config.NumberColumn(
+                                    'PaB_Origen', format="localized"
+                                ),
+                                'PaB_Propuesta_Antes': st.column_config.NumberColumn(
+                                    'PaB_Propuesta_Antes', format="localized"
+                                ),
+                                'PaB_Propuesta_Despues': st.column_config.NumberColumn(
+                                    'PaB_Propuesta_Despues', format="localized"
+                                ),
+                                'Diferencia': st.column_config.NumberColumn(
+                                    'Diferencia', format="localized"
+                                ),
+                            },
+                        )
+
+                # --- 8. Subida Definitiva a Google Sheets ---
+                st.divider()
+                st.markdown("### 🚀 Subida Definitiva")
+                st.warning(
+                    "Esta acción actualiza **Metadata**, **Propuesta Pago** y **Monto Portafolio** "
+                    "(y **Portafolio** si cambió) en 'Bases mes actual 2024'. No se puede deshacer.",
+                    icon="⚠️",
+                )
+                subir_cambios = st.button(
+                    label="🚀 Subir Cambios a Google Sheets",
+                    type="primary",
+                    key="mando_subir_cambios",
+                    width="stretch",
+                )
+                if subir_cambios:
+                    # La Fecha del Cambio se Registra al Momento de la Subida Definitiva
+                    log_df = log_df.copy()
+                    log_df['Fecha_Cambio'] = (
+                        pd.Timestamp.now(tz='America/Bogota').tz_localize(None)
+                    )
+                    with st.spinner("📤 Subiendo los cambios a Google Sheets..."):
+                        exito_subida = upload_masivas_control(
+                            df_cambios=df_cambios,
+                            log_df=log_df,
+                        )
+                    if exito_subida:
+                        st.session_state['mando_exito'] = {
+                            'registros': len(df_cambios),
+                            'bases': len(log_df),
+                        }
+                        st.session_state.pop('mando_resultado', None)
+                        load_masivas_control.clear()
+                        load_masivas.clear()
+                        load_cambios_masivas.clear()
+                        st.balloons()
+                        sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(
+                            "No se pudieron subir los cambios. Revisa el detalle del error.",
+                            icon="❌",
+                        )

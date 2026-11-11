@@ -13,9 +13,9 @@ import pandas as pd
 import streamlit as st
 # Librerías Locales
 from core.permissions import PERMISSIONS_DICT
-from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PipelineCreditoSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
+from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CambiosMasivasSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasControlSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PipelineCreditoSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, ESTADOS_NO_OPP_CREDITO, ESTADOS_NO_QUIERE_CREDITO, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PIPELINE_CREDITO_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VENCIMIENTO_ACTS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CAMBIO_MASIVAS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, ESTADOS_NO_OPP_CREDITO, ESTADOS_NO_QUIERE_CREDITO, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_BASE_MES_SHEET, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PIPELINE_CREDITO_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_DEUDAS_PAB_ORIGEN, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VENCIMIENTO_ACTS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -757,6 +757,215 @@ def load_masivas() -> DataFrame[MasivasSchema]:
 
     # Devolvemos el DataFrame
     return masivasDF
+
+# --> Carga de la Base del Mes para el Centro de Control (conserva Fila_Sheets y Deuda Bravo)
+@st.cache_data(show_spinner="Cargando la Base del Mes para el Centro de Control...", ttl=HOUR_WAIT)
+def load_masivas_control() -> pd.DataFrame:
+    # Paso 1: Obtener el Servicio de Google Sheets y la Hoja de la Base del Mes
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+    control_df = google_sheets_service.get_sheet_as_dataframe(
+        MASIVAS_SHEET_ID, MASIVAS_BASE_MES_SHEET
+    )
+
+    # Paso 2: Si la Hoja está Vacía, Devolvemos un DF con las Columnas Esperadas
+    columnas_esperadas = [
+        'Id_Deuda', 'Fecha_Masiva', 'Referencia', 'Casa_Cobro', 'Es_Portafolio',
+        'PaB_Propuesta', 'PaB_Portafolio', 'PaB_Origen', 'Fila_Sheets', 'Metadata',
+    ]
+    if control_df.empty:
+        return MasivasControlSchema.empty()
+
+    # Paso 3: Limpieza de Columnas y Fila de Sheets
+    control_df = control_df.loc[
+        :, ~control_df.columns.astype(str).str.startswith('Unnamed')
+    ].copy()
+    control_df['Fila_Sheets'] = (control_df.index + 2).astype(int)
+
+    # Paso 4: Renombrado de Columnas de la Hoja a los Nombres del Esquema
+    control_df = control_df.rename(columns={
+        'ID': 'Id_Deuda',
+        'Fecha': 'Fecha_Masiva',
+        'Referencia': 'Referencia',
+        'Casa': 'Casa_Cobro',
+        'Portafolio': 'Es_Portafolio',
+        'Propuesta Pago': 'PaB_Propuesta',
+        'Monto Portafolio': 'PaB_Portafolio',
+        'Deuda Bravo': 'PaB_Origen',
+        'Metadata': 'Metadata',
+    })
+
+    # Paso 5: Asegurar que Existan Todas las Columnas (las Opcionales se Crean Vacías)
+    for columna in columnas_esperadas:
+        if columna not in control_df.columns:
+            control_df[columna] = np.nan
+
+    # Paso 6: Normalizar los Tipos de Datos
+    control_df['Id_Deuda'] = control_df['Id_Deuda'].apply(
+        lambda s: str(s).replace('.0', '').strip() if pd.notna(s) else ''
+    )
+    control_df['Referencia'] = control_df['Referencia'].apply(
+        lambda s: str(s).replace('.0', '').strip() if pd.notna(s) else ''
+    )
+    control_df['Casa_Cobro'] = control_df['Casa_Cobro'].apply(
+        lambda s: str(s).upper().strip() if pd.notna(s) else ''
+    )
+    control_df['Fecha_Masiva'] = pd.to_datetime(
+        control_df['Fecha_Masiva'], errors='coerce', dayfirst=True
+    )
+    control_df['Es_Portafolio'] = control_df['Es_Portafolio'].apply(
+        lambda valor: pd.notna(valor) and (str(valor).strip() != '')
+    )
+    for columna in ['PaB_Propuesta', 'PaB_Portafolio', 'PaB_Origen']:
+        # En el Centro de Control los vacíos se conservan como NaN para no distribuirlos por error
+        control_df[columna] = control_df[columna].apply(
+            lambda valor: cleanNumber(valor, default_nan=np.nan)
+        )
+        control_df[columna] = pd.to_numeric(control_df[columna], errors='coerce')
+    control_df['Metadata'] = control_df['Metadata'].apply(process_masivas_metadata)
+
+    # Paso 7: Quitar Filas sin Id_Deuda, Casa o Fecha (no se pueden controlar)
+    control_df = control_df.dropna(subset=['Id_Deuda', 'Casa_Cobro', 'Fecha_Masiva'])
+    control_df = control_df[
+        control_df['Id_Deuda'].ne('') & control_df['Casa_Cobro'].ne('')
+    ]
+    if control_df.empty:
+        return MasivasControlSchema.empty()
+
+    # Paso 8: Aplicar los Cambios de Referencia y Dejar las Columnas del Esquema
+    ref_changes = load_reference_changes()
+    control_df['Referencia'] = control_df['Referencia'].apply(
+        lambda s: ref_changes.get(s, s)
+    )
+    columnas_salida = list(MasivasControlSchema.__fields__.keys())
+    control_df = control_df[columnas_salida].reset_index(drop=True)
+
+    # Paso 9: Validar con el Esquema del Centro de Control
+    return MasivasControlSchema.validate(control_df, lazy=True)
+
+# Función Auxiliar para Aplicar los Cambios Locales a la Base del Mes
+def _aplicar_cambios_locales_masivas(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    cambios_locales = st.session_state.get('local_masivas_changes', [])
+    if not cambios_locales:
+        return df
+    local_changes_df = pd.DataFrame(cambios_locales)
+    if ('Fila_Sheets' not in local_changes_df.columns) or local_changes_df.empty:
+        return df
+
+    # Nos Quedamos con la Última Versión de Cada Fila de Sheets
+    local_changes_df = (
+        local_changes_df
+        .drop_duplicates(subset='Fila_Sheets', keep='last')
+        .set_index('Fila_Sheets')
+    )
+    df_ajustado = df.copy().set_index('Fila_Sheets', drop=False)
+    indices_comunes = df_ajustado.index.intersection(local_changes_df.index)
+    for columna in local_changes_df.columns:
+        if columna in df_ajustado.columns:
+            df_ajustado.loc[indices_comunes, columna] = local_changes_df.loc[
+                indices_comunes, columna
+            ]
+    return df_ajustado.reset_index(drop=True)
+
+# --> Carga de la Base del Mes Aplicando los Cambios Locales
+def load_masivas_control_con_cambios() -> pd.DataFrame:
+    return _aplicar_cambios_locales_masivas(load_masivas_control())
+
+# --> Carga del Historial de Cambios Masivos
+@st.cache_data(show_spinner="Cargando Cambios de Masivas desde Google Sheets...", ttl=HOUR_WAIT)
+def load_cambios_masivas() -> DataFrame[CambiosMasivasSchema]:
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+    cambios_df = google_sheets_service.get_sheet_as_dataframe(
+        CONFIGS_SHEET_ID, CAMBIO_MASIVAS_SHEET
+    )
+    if cambios_df.empty:
+        return CambiosMasivasSchema.empty()
+
+    cambios_df = cambios_df.loc[
+        :, ~cambios_df.columns.astype(str).str.startswith('Unnamed')
+    ].copy()
+    columnas_esquema = list(CambiosMasivasSchema.__fields__.keys())
+    for columna in columnas_esquema:
+        if columna not in cambios_df.columns:
+            cambios_df[columna] = np.nan
+    cambios_df = cambios_df[columnas_esquema]
+    cambios_df = cambios_df.dropna(subset=['Fecha_Cambio'])
+    if cambios_df.empty:
+        return CambiosMasivasSchema.empty()
+
+    for columna in ['Fecha_Cambio', 'Fecha_Aliado_Cambio']:
+        cambios_df[columna] = pd.to_datetime(
+            cambios_df[columna], errors='coerce', dayfirst=True
+        )
+    for columna in ['Num_Registros', 'Num_Cambiados']:
+        cambios_df[columna] = (
+            pd.to_numeric(cambios_df[columna], errors='coerce')
+            .fillna(0)
+            .astype(int)
+        )
+    cambios_df['Usuario'] = cambios_df['Usuario'].fillna('').astype(str)
+    cambios_df['Nombre_Aliado_Cambio'] = (
+        cambios_df['Nombre_Aliado_Cambio'].fillna('').astype(str)
+    )
+    cambios_df = cambios_df.dropna(
+        subset=['Fecha_Cambio', 'Fecha_Aliado_Cambio']
+    )
+    if cambios_df.empty:
+        return CambiosMasivasSchema.empty()
+
+    return CambiosMasivasSchema.validate(cambios_df, lazy=True)
+
+# --> Carga del PaB_Origen y la Referencia de las Deudas desde Metabase
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando Deuda Bravo y Referencia de las deudas...")
+def load_pab_origen_deudas(deudas: tuple[str, ...], batch_size: int = 250) -> pd.DataFrame:
+    deudas_limpias = sorted({
+        str(deuda).replace('.0', '').strip()
+        for deuda in deudas
+        if (deuda is not None)
+        and pd.notna(deuda)
+        and str(deuda).replace('.0', '').strip().isdigit()
+    })
+    if not deudas_limpias:
+        return pd.DataFrame(columns=['Id_Deuda', 'Referencia', 'PaB_Origen'])
+
+    resultados = []
+    for inicio in range(0, len(deudas_limpias), batch_size):
+        batch = deudas_limpias[inicio:inicio + batch_size]
+        query = QUERY_DEUDAS_PAB_ORIGEN.format(debt_ids=','.join(batch))
+        resultado = execute_query_cache(query, dbId=12)
+        if resultado.empty:
+            continue
+        resultado.columns = [col.title() for col in resultado.columns]
+        # 'PaB_Origen'.title() se convierte en 'Pab_Origen'; restauramos el nombre del esquema
+        resultado = resultado.rename(columns={'Pab_Origen': 'PaB_Origen'})
+        if ('Id_Deuda' not in resultado.columns) or ('PaB_Origen' not in resultado.columns):
+            continue
+        if 'Referencia' not in resultado.columns:
+            resultado['Referencia'] = ''
+        resultados.append(resultado)
+
+    columnas_salida = ['Id_Deuda', 'Referencia', 'PaB_Origen']
+    if not resultados:
+        return pd.DataFrame(columns=columnas_salida)
+
+    resultado_df = pd.concat(resultados, ignore_index=True)
+    resultado_df['Id_Deuda'] = resultado_df['Id_Deuda'].apply(
+        lambda s: str(s).replace('.0', '').strip()
+    )
+    resultado_df['Referencia'] = resultado_df['Referencia'].apply(
+        lambda s: str(s).replace('.0', '').strip() if pd.notna(s) else ''
+    )
+    resultado_df['PaB_Origen'] = pd.to_numeric(
+        resultado_df['PaB_Origen'], errors='coerce'
+    )
+    resultado_df = resultado_df.drop_duplicates(subset=['Id_Deuda'], keep='first')
+
+    ref_changes = load_reference_changes()
+    resultado_df['Referencia'] = resultado_df['Referencia'].apply(
+        lambda s: ref_changes.get(s, s)
+    )
+    return resultado_df[columnas_salida].reset_index(drop=True)
 
 # --> Carga de Addendums de Aliados
 @st.cache_data(show_spinner="Cargando Addendums de Aliados desde Google Sheets...", ttl=HOUR_WAIT)

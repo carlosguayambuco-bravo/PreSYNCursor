@@ -272,6 +272,20 @@ SELECT
 FROM credit_repair_debts AS bcrd
 WHERE bcrd.id IN ({debt_ids})"""
 
+# Query de dbId = 12
+# Se usa DISTINCT ON para evitar duplicados por Id_Deuda y quedarse con el registro más reciente.
+QUERY_DEUDAS_PAB_ORIGEN = """
+SELECT DISTINCT ON (bcrd.id)
+    bcrd.id AS Id_Deuda,
+    bcr.bank_reference AS Referencia,
+    CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS PaB_Origen
+FROM credit_repair_debts AS bcrd
+INNER JOIN credit_repairs AS bcr
+    ON bcr.id = bcrd.credit_repair_id
+WHERE bcrd.id IN ({debt_ids})
+ORDER BY bcrd.id, bcrd.inserted_at DESC NULLS LAST
+"""
+
 ESTADOS_LIQUIDACION = ['liquidation_structured_payment','paid_outside_of_program','liquidation','liquidation_portfolio_payment','client_settled_outside']
 SUB_ESTADOS_LIQUIDACION = ['drop_requested','cancelled','liquidated','liquidation_in_process','liquidation_structured_payment']
 
@@ -496,6 +510,16 @@ TIPO_PORTAFOLIO_INDIVIDUAL = 'Monto Individual de Portafolio'
 # Configuraciones de Subida de Datos de Masivas
 # Configuraciones de la Subida a la Base del Mes
 MASIVAS_BASE_MES_SHEET = 'Bases mes actual 2024'
+# Hoja de Trazabilidad de los Cambios Masivos (Spreadsheet de Configs)
+CAMBIO_MASIVAS_SHEET = 'Cambios_Masivas'
+CAMBIO_MASIVAS_COLUMNS = [
+    'Fecha_Cambio',
+    'Usuario',
+    'Nombre_Aliado_Cambio',
+    'Fecha_Aliado_Cambio',
+    'Num_Registros',
+    'Num_Cambiados',
+]
 MASIVAS_BASE_MES_COLUMNS = [
     'Metadata',
     'Fecha',

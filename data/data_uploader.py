@@ -15,7 +15,7 @@ import streamlit as st
 # Librerías Locales
 from data.data_loader import get_solicitud_row_in_google_sheets, load_data_archivos_subidos, normalizeMetadata, parse_metadata_cruce
 from data.data_models import MetadataSolicitud, SolicitudesSchema, PendienteCruceSchema
-from modules.constants import ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, COL_ID_CRUCE, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
+from modules.constants import ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CAMBIO_MASIVAS_COLUMNS, CAMBIO_MASIVAS_SHEET, COL_ID_CRUCE, MASIVAS_BASE_MES_COLUMNS, MASIVAS_BASE_MES_SHEET, MASIVAS_EXISTENTES_COLUMNS, MASIVAS_MAX_ROWS_PER_BATCH, SOLICITUDES_ID_DELAY, SOLICITUDES_SHEET_ID, CONFIGS_SHEET_ID, MASIVAS_SHEET_ID
 from modules.id_aut_deud.helpers import preparar_datos_base_mes
 from utils.helpers_sheets import _retry, appendDataFrameToEnd, applyChanges, build_column_batch_updates, col_to_letter, convert_data_to_string, get_column_letter, getWorksheet, uploadToSheets, update_sheet_data_batch
 from services.google_sheets import GoogleSheetsService
@@ -665,6 +665,175 @@ def upload_base_mes_info(
             "**'Subido Alianzas'**.".format(len(df_nuevos), len(df_existentes)),
         )
     return exito
+
+# =====================================================================
+# Centro de Control de Masivas
+# =====================================================================
+
+# Función Auxiliar para Obtener (o Crear) la Hoja de Cambios Masivos
+def _obtener_o_crear_hoja_cambios_masivas(*, sheets_service: GoogleSheetsService) -> gspread.Worksheet:
+    spreadsheet = sheets_service.get_spreadsheet(CONFIGS_SHEET_ID)
+    try:
+        return _retry(
+            lambda: spreadsheet.worksheet(CAMBIO_MASIVAS_SHEET),
+            label="Get Cambios Masivas Worksheet",
+        )
+    except WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(
+            title=CAMBIO_MASIVAS_SHEET,
+            rows=1000,
+            cols=len(CAMBIO_MASIVAS_COLUMNS),
+        )
+        ws.update(range_name='A1', values=[CAMBIO_MASIVAS_COLUMNS])
+        return ws
+
+# Función para Registrar el Historial de Cambios en la Hoja Cambios_Masivas
+def upload_cambios_masivas_log(*, log_df: pd.DataFrame) -> bool:
+    if log_df.empty:
+        return True
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    try:
+        ws = _obtener_o_crear_hoja_cambios_masivas(sheets_service=sheets_service)
+        headers = _retry(lambda: ws.row_values(1), label="Get Cambios Masivas Headers")
+        if not headers:
+            ws.update(range_name='A1', values=[CAMBIO_MASIVAS_COLUMNS])
+        else:
+            columnas_faltantes = [
+                col for col in CAMBIO_MASIVAS_COLUMNS if col not in headers
+            ]
+            if columnas_faltantes:
+                st.error(
+                    "La hoja '{}' no tiene las columnas requeridas: **{}**".format(
+                        CAMBIO_MASIVAS_SHEET, ', '.join(columnas_faltantes)
+                    ),
+                    title="Error de Columnas",
+                )
+                return False
+        log_df = log_df[CAMBIO_MASIVAS_COLUMNS].copy()
+        for columna in ['Fecha_Cambio', 'Fecha_Aliado_Cambio']:
+            log_df[columna] = pd.to_datetime(
+                log_df[columna], errors='coerce'
+            ).dt.strftime('%Y-%m-%d %H:%M:%S')
+        appendDataFrameToEnd(ws, log_df, retry_label="Cambios Masivas")
+        return True
+    except Exception as e:
+        st.error(
+            "Los cambios se actualizaron, pero no se pudo registrar el historial en "
+            "'{}': ```{}```".format(CAMBIO_MASIVAS_SHEET, e),
+            title="Error de Trazabilidad",
+        )
+        return False
+
+# Función para Subir los Cambios del Centro de Control a la Base del Mes
+def upload_masivas_control(
+    *,
+    df_cambios: pd.DataFrame,
+    log_df: pd.DataFrame,
+) -> bool:
+    """Actualiza Metadata, Propuesta Pago, Monto Portafolio y Portafolio en la Base del Mes.
+
+    La actualización se hace por columna y por fila de Sheets con batch_update, para no
+    tocar las columnas intermedias que contienen fórmulas.
+    """
+    if df_cambios.empty:
+        st.warning("No hay cambios pendientes por subir.", icon="ℹ️")
+        return False
+
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+    try:
+        base_mes_ws = sheets_service.get_worksheet(MASIVAS_SHEET_ID, MASIVAS_BASE_MES_SHEET)
+        headers = _retry(lambda: base_mes_ws.row_values(1), label="Get Base Mes Headers")
+    except Exception as e:
+        st.error(
+            "No se pudo abrir la hoja '{}' de Masivas: ```{}```".format(
+                MASIVAS_BASE_MES_SHEET, e
+            ),
+            title="Error de Subida",
+        )
+        return False
+
+    columnas_requeridas = ['Metadata', 'Propuesta Pago', 'Monto Portafolio']
+    columnas_faltantes = [col for col in columnas_requeridas if col not in headers]
+    if columnas_faltantes:
+        st.error(
+            "No se puede realizar la actualización porque no se encontraron las columnas: **{}**".format(
+                ', '.join(columnas_faltantes)
+            ),
+            title="Error de Columnas",
+        )
+        return False
+
+    # Paso 1: Construir los Valores por Columna y por Fila
+    values_by_column: dict[str, dict[int, Any]] = {}
+    filas = df_cambios.set_index('Fila_Sheets', drop=False)
+
+    columna_metadata = col_to_letter(headers.index('Metadata') + 1)
+    values_by_column[columna_metadata] = {
+        int(fila_sheets): convert_data_to_string(fila['Metadata_Despues'])
+        for fila_sheets, fila in filas.iterrows()
+    }
+
+    columna_propuesta = col_to_letter(headers.index('Propuesta Pago') + 1)
+    values_by_column[columna_propuesta] = {
+        int(fila_sheets): fila['PaB_Propuesta_Despues']
+        for fila_sheets, fila in filas.iterrows()
+    }
+
+    columna_portafolio_monto = col_to_letter(headers.index('Monto Portafolio') + 1)
+    values_by_column[columna_portafolio_monto] = {
+        int(fila_sheets): fila['PaB_Portafolio_Despues']
+        for fila_sheets, fila in filas.iterrows()
+    }
+
+    if ('Portafolio' in headers) and ('Portafolio_Cambio' in df_cambios.columns):
+        filas_portafolio = df_cambios[df_cambios['Portafolio_Cambio'].fillna(False).astype(bool)]
+        if not filas_portafolio.empty:
+            columna_portafolio = col_to_letter(headers.index('Portafolio') + 1)
+            values_by_column[columna_portafolio] = {
+                int(fila['Fila_Sheets']): ('SI' if bool(fila['Es_Portafolio_Despues']) else '')
+                for _, fila in filas_portafolio.iterrows()
+            }
+
+    # Paso 2: Enviar los Cambios en Lotes
+    try:
+        batches = build_column_batch_updates(
+            values_by_column=values_by_column,
+            row_chunk_size=MASIVAS_MAX_ROWS_PER_BATCH,
+        )
+        for idx, batch in enumerate(batches, start=1):
+            _retry(
+                lambda batch=batch: base_mes_ws.batch_update(
+                    batch, value_input_option="USER_ENTERED"
+                ),
+                label="Update Centro Control Masivas (Lote {}/{})".format(idx, len(batches)),
+            )
+            if idx < len(batches):
+                sleep(0.5)
+    except Exception as e:
+        st.error(
+            "Error al actualizar la Base del Mes en Google Sheets: ```{}```".format(e),
+            title="Error de Subida",
+        )
+        return False
+
+    # Paso 3: Registrar la Trazabilidad por Base (antes de reflejar los cambios locales)
+    exito_log = upload_cambios_masivas_log(log_df=log_df)
+    if not exito_log:
+        return False
+
+    # Paso 4: Guardar los Cambios Locales (para reflejarlos sin esperar la caché)
+    cambios_locales = pd.DataFrame({
+        'Fila_Sheets': df_cambios['Fila_Sheets'].astype(int),
+        'Metadata': df_cambios['Metadata_Despues'],
+        'PaB_Propuesta': df_cambios['PaB_Propuesta_Despues'],
+        'PaB_Portafolio': df_cambios['PaB_Portafolio_Despues'],
+        'Es_Portafolio': df_cambios['Es_Portafolio_Despues'],
+    })
+    add_cambios_locales_to_session_state(
+        cambios_locales=cambios_locales,
+        cambios_key='local_masivas_changes',
+    )
+    return True
 
 # Función para Enviar feedback
 def send_feedback(*, origin: str, configs: dict, result: bool, commentary: str) -> bool:
