@@ -446,6 +446,8 @@ def obtener_pab_actualizado_deuda(id_deuda: str, pab_origen: Optional[float] = N
     - Se toma la actualización más reciente.
     - Si su etiqueta no es confiable (CAMBIO DE PAB, ACUERDO, DEPOSITO o
       ACTUALIZADO_ALIANZAS), se usa ``PaB_Origen`` (Descuento Actual = 0).
+    - Si la actualización confiable deja el PaB en 0, se usa ``PaB_Origen``:
+      un pago en 0 se interpreta como dato faltante, no como descuento total.
     - Para ACTUALIZADO_ALIANZAS se cruza el último descuento en base y la última
       solicitud exitosa, prevaleciendo la fuente más reciente por fecha.
 
@@ -492,7 +494,12 @@ def obtener_pab_actualizado_deuda(id_deuda: str, pab_origen: Optional[float] = N
             pab_actualizado_fila=pab_fila,
         )
 
-    # Paso 4: Acotar el valor al rango válido
+    # Paso 4: Si no hay un descuento real, el PaB vuelve al Origen.
+    # Un PaB_Actualizado en 0 suele ser un dato faltante, no un descuento del 100%.
+    if pab_origen > 0 and pab_fila <= 0:
+        return pab_origen
+
+    # Paso 5: Acotar el valor al rango válido
     if pab_origen > 0:
         return max(0.0, min(pab_fila, pab_origen))
     return max(pab_fila, 0.0)
@@ -709,19 +716,23 @@ def calcular_deposito_extra_credito(
     *,
     pab_ideal_total: float,
     pab_actualizado_total: float,
+    deposito_extra: float = 0.0,
 ) -> float:
     """Calcula el Depósito Extra necesario para Crédito.
 
     El PaB Ideal es el cupo aprobado por Crédito. Si el pago actual
     (``PaB_Actualizado``) supera ese cupo, el cliente debe cubrir la
-    diferencia para que el crédito quede aprobado:
+    diferencia para que el crédito quede aprobado. El ``deposito_extra``
+    simulado hace parte de los recursos disponibles y reduce el depósito
+    requerido:
 
-    ``Depósito Extra = SUM(PaB_Actualizado) + 20k - SUM(PaB_Ideal)``.
+    ``Depósito Extra = SUM(PaB_Actualizado) + 20k - SUM(PaB_Ideal) - Depósito_Extra``.
     """
     return (
         _a_float(pab_actualizado_total)
         + MONTO_ADICIONAL_DEPOSITO
         - _a_float(pab_ideal_total)
+        - max(_a_float(deposito_extra), 0.0)
     )
 
 def calcular_deposito_extra_tradicional(
@@ -731,8 +742,13 @@ def calcular_deposito_extra_tradicional(
     pricing: float,
     ahorro: float,
     por_cobrar: float,
+    deposito_extra: float = 0.0,
 ) -> float:
-    """Calcula el Depósito Extra necesario para Tradicional."""
+    """Calcula el Depósito Extra necesario para Tradicional.
+
+    El ``deposito_extra`` simulado se suma al Ahorro del cliente, porque
+    representa el ahorro nuevo que se proyecta conseguir a futuro.
+    """
     pab_origen_total = _a_float(pab_origen_total)
     pab_actualizado_total = _a_float(pab_actualizado_total)
     comision = max(
@@ -743,7 +759,11 @@ def calcular_deposito_extra_tradicional(
         pab_actualizado_total
         + comision
         + MONTO_ADICIONAL_DEPOSITO
-        - (_a_float(ahorro) - _a_float(por_cobrar))
+        - (
+            _a_float(ahorro)
+            + max(_a_float(deposito_extra), 0.0)
+            - _a_float(por_cobrar)
+        )
     )
 
 def calcular_contraoferta_credito(
@@ -868,7 +888,11 @@ def evaluar_viabilidad_cliente(
     viable_tradicional = pago_total <= disponible_tradicional
     viable_credito = False
     if es_opp_cred and _a_float(pab_ideal_total) > 0:
-        viable_credito = pab_total <= (_a_float(pab_ideal_total) + MONTO_ADICIONAL_DEPOSITO)
+        viable_credito = pab_total <= (
+            _a_float(pab_ideal_total)
+            + MONTO_ADICIONAL_DEPOSITO
+            + max(_a_float(deposito_extra), 0.0)
+        )
     return {
         "pago_total": pago_total,
         "disponible_tradicional": disponible_tradicional,
@@ -954,8 +978,9 @@ def _obtener_totales_deudas(
         deuda = _normalizar_id_deuda(fila["Id_Deuda"])
         pab_origen = max(_a_float(fila.get("PaB_Origen")), 0.0)
         if deuda in pab_simulado:
-            # El PaB del input nunca puede superar el PaB_Origen de la deuda
-            pab_actualizado = min(pab_simulado[deuda], pab_origen) if pab_origen > 0 else 0.0
+            # El PaB simulado puede superar el PaB_Origen cuando el usuario
+            # distribuye un monto de portafolio mayor al DUM total.
+            pab_actualizado = max(pab_simulado[deuda], 0.0)
         else:
             pab_actualizado = obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
         pab_origen_por_deuda[deuda] = pab_origen
@@ -1002,6 +1027,7 @@ def oportunidad_dep_extra_credito(
     return calcular_deposito_extra_credito(
         pab_ideal_total=totales["pab_ideal_total"],
         pab_actualizado_total=totales["pab_actualizado_total"],
+        deposito_extra=deposito_extra,
     )
 
 def oportunidad_dep_extra_tradicional(
@@ -1030,6 +1056,7 @@ def oportunidad_dep_extra_tradicional(
         pricing=totales["pricing"],
         ahorro=ahorro,
         por_cobrar=porcobrar,
+        deposito_extra=deposito_extra,
     )
 
 def oportunidad_dep_extra(
@@ -1259,11 +1286,15 @@ def calcular_oportunidades_referencia(
         es_opp_cred (bool): True si el análisis es por Crédito.
         ahorro (Optional[float]): Ahorro a usar. Si es None, se toma el oficial.
         porcobrar (Optional[float]): Por Cobrar a usar. Si es None, se toma el oficial.
-        deposito_extra (float): Depósito Extra simulado en la calculadora.
+        deposito_extra (float): Depósito Extra simulado en la calculadora. Hace
+            parte de los recursos disponibles: reduce el depósito requerido y
+            aumenta el disponible para la ContraOferta.
         pab_por_deuda (Optional[dict[str, float]]): PaB simulado por deuda desde
             los inputs de la calculadora. Reemplaza el PaB_Actualizado oficial
             para el Depósito Extra, el Descuento Actual y la evaluación de la
-            ContraOferta. Las deudas ausentes usan el PaB_Actualizado oficial.
+            ContraOferta. Puede superar el PaB_Origen cuando el monto de
+            portafolio distribuido es mayor al DUM. Las deudas ausentes usan el
+            PaB_Actualizado oficial.
 
     Returns:
         dict[str, dict[str, Any]]: Diccionario por oportunidad con
@@ -1329,6 +1360,7 @@ def calcular_oportunidades_referencia(
             calcular_deposito_extra_credito(
                 pab_ideal_total=totales["pab_ideal_total"],
                 pab_actualizado_total=totales["pab_actualizado_total"],
+                deposito_extra=deposito_extra,
             )
             if credito_habilitado
             else 0.0
@@ -1340,6 +1372,7 @@ def calcular_oportunidades_referencia(
             pricing=totales["pricing"],
             ahorro=ahorro,
             por_cobrar=porcobrar,
+            deposito_extra=deposito_extra,
         )
     deposito_extra_aplica = credito_habilitado and evaluar_deposito_extra(
         deposito_extra=deposito_extra_calculado,
@@ -1372,11 +1405,11 @@ def calcular_oportunidades_referencia(
     )
 
     # Paso 5: Evaluar Liquidación Instantánea
-    deposito_extra_neto = deposito_extra_calculado - max(_a_float(deposito_extra), 0.0)
+    # El depósito calculado ya descuenta el depósito extra simulado.
     liq_insta_aplica = credito_habilitado and evaluar_liq_insta(
         descuento_actual=descuento_actual,
         contraoferta=contraoferta,
-        deposito_extra=deposito_extra_neto,
+        deposito_extra=deposito_extra_calculado,
     )
 
     # Paso 6: Acuerdos para Robo
@@ -1401,7 +1434,7 @@ def calcular_oportunidades_referencia(
     )
 
     # Paso 8: Construir los resultados
-    detalle_deposito = "Depósito necesario: ${:,.0f}; {:.2f} apartados netos.".format(
+    detalle_deposito = "Depósito necesario (neto de Depósito Extra): ${:,.0f}; {:.2f} apartados netos.".format(
         deposito_extra_calculado,
         (deposito_extra_calculado / totales["apartado_neto"]) if totales["apartado_neto"] > 0 else 0.0,
     )

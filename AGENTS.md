@@ -577,10 +577,14 @@ Portafolios:
 
 - Se analiza un conjunto de deudas seleccionadas. En la calculadora individual se asume que **las deudas escogidas son el portafolio**.
 - `PaB_Origen`: monto original de la deuda.
-- `PaB_Actualizado`: monto de pago de la última actualización confiable. Se carga en `ActualizacionesSchema` desde `payment_to_bank`; el loader toma el primer número y lo divide entre 100 porque la fuente viene en **centavos** y el resultado queda en **COP**. Se toma la actualización **más reciente**: si su etiqueta no es confiable, se usa `PaB_Origen` (Descuento Actual = 0). Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base (masivas) con la última solicitud exitosa; si ambas fuentes tienen fecha, prevalece la más reciente, y si no hay fechas comparables se usa el valor de la fila de actualización.
+- `PaB_Actualizado`: monto de pago de la última actualización confiable. Se carga en `ActualizacionesSchema` desde `payment_to_bank`; el loader toma el primer número y lo divide entre 100 porque la fuente viene en **centavos** y el resultado queda en **COP**. Se toma la actualización **más reciente**: si su etiqueta no es confiable, se usa `PaB_Origen` (Descuento Actual = 0). Si la actualización confiable deja el PaB en 0, también se usa `PaB_Origen`: un pago en 0 se interpreta como dato faltante, no como descuento total. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base (masivas) con la última solicitud exitosa; si ambas fuentes tienen fecha, prevalece la más reciente, y si no hay fechas comparables se usa el valor de la fila de actualización.
 - `PaB_Ideal_Credito`: cupo aprobado por crédito. Para análisis por crédito, **todas** las deudas seleccionadas deben tener PaB Ideal > 0.
 - `Ahorro` y `Por_Cobrar`: valores del cliente desde SALDOS/TOTAL. En la calculadora individual se pueden simular con los inputs editables.
-- `PaB simulado`: en la calculadora individual, el input de PaB de cada deuda inicia con `PaB_Actualizado` (o `PaB_Origen` si no hay actualización confiable) y reemplaza el `PaB_Actualizado` oficial en Depósito Extra, Descuento Actual, Liquidación Instantánea y la comparación de la ContraOferta. La fórmula de la ContraOferta no cambia. La calculadora pasa el diccionario `pab_por_deuda` a `calcular_oportunidades_referencia`.
+- `PaB simulado`: en la calculadora individual, el input de PaB de cada deuda inicia con `PaB_Actualizado` (o `PaB_Origen` si no hay actualización confiable o si el PaB confiable viene en 0) y reemplaza el `PaB_Actualizado` oficial en Depósito Extra, Descuento Actual, Liquidación Instantánea y la comparación de la ContraOferta. La fórmula de la ContraOferta no cambia. La calculadora pasa el diccionario `pab_por_deuda` a `calcular_oportunidades_referencia`. El PaB simulado **puede superar el `PaB_Origen`** cuando se distribuye un monto de portafolio mayor al DUM total; en ese caso el descuento se muestra como 0% y el pago/ingreso se calculan con el valor simulado.
+- `Depósito Extra` simulado: el input de la calculadora representa el ahorro nuevo que se proyecta a futuro y **hace parte del ahorro disponible**. Se suma al Ahorro para calcular la ContraOferta y la viabilidad, y se resta del Depósito Extra requerido en Tradicional y Crédito. No se cuenta dos veces: el depósito calculado ya queda neto del input.
+- `Portafolio Total`: la columna de Resultados tiene un input de texto (`st.text_input`) para escribir un monto total del portafolio. Se limpia y formatea con `cleanNumber` igual que Ahorro, Por Cobrar y Depósito Extra. Se inicializa y recalcula con la suma de los PaB actuales cuando cambia el conjunto de deudas seleccionadas. Se distribuye automáticamente entre las deudas seleccionadas con `distribuir_monto_por_deuda` y **siempre por `PaB_Origen`** (`aliado=None`). No tiene tope: si el monto supera el DUM, los PaB simulados pueden superar su `PaB_Origen`.
+- `Descuentos en Base`: cada deuda muestra un popover con `get_descuento_en_base` para comparar y copiar el valor al input de PaB. La casa de cobro solo se muestra si el usuario es `admin`; para los demás se muestra como `Directo Base`.
+- La lista de deudas tiene una altura máxima fija (`ALTO_MAXIMO_LISTA_DEUDAS = 600` px, ajustable) con scroll. Si las deudas no llenan ese alto, el espacio restante se rellena con el bloque azul "Espacio para Reflexionar".
 - `Apartado_Neto = max(Apartado_Mensual - Comision_Mensual, 0)`. Es un dato del cliente que se repite por deuda; para el cálculo se toma un **único valor** (el máximo de las filas seleccionadas), no la suma.
 - `Pricing`: 0.15, 0.20 o 0.25 (`AsignacionSchema` lo valida estrictamente). `IVA = 1.19`.
 - `Descuento_Esperado`: descuento esperado por deuda (modelo de ML, columna `Descuento` de la Asignación).
@@ -599,7 +603,7 @@ Portafolios:
 - **Depósito Extra (Crédito):**
 
   ```text
-  deposito_extra = SUM(PaB_Actualizado) + 20_000 - SUM(PaB_Ideal_Credito)
+  deposito_extra = SUM(PaB_Actualizado) + 20_000 - SUM(PaB_Ideal_Credito) - Deposito_Extra
   ```
 
 - **Depósito Extra (Tradicional):**
@@ -608,29 +612,29 @@ Portafolios:
   deposito_extra = SUM(PaB_Actualizado)
                    + max((SUM(PaB_Origen) - SUM(PaB_Actualizado)) * Pricing * 1.19, 0)
                    + 20_000
-                   - (Ahorro - Por_Cobrar)
+                   - (Ahorro + Deposito_Extra - Por_Cobrar)
   ```
 
 - **ContraOferta Viable (Crédito):**
 
   ```text
-  contraoferta = 1 - (SUM(PaB_Ideal_Credito) + 20_000) / SUM(PaB_Origen)
+  contraoferta = 1 - (SUM(PaB_Ideal_Credito) + 20_000 + Deposito_Extra) / SUM(PaB_Origen)
   ```
 
 - **ContraOferta Viable (Tradicional):**
 
   ```text
-  contraoferta = (Ahorro - Por_Cobrar - SUM(PaB_Origen) - 20_000)
+  contraoferta = (Ahorro + Deposito_Extra - Por_Cobrar - SUM(PaB_Origen) - 20_000)
                  / (SUM(PaB_Origen) * (Pricing * 1.19 - 1))
   ```
 
-- **Depósito Extra como oportunidad:** se cumple si `deposito_extra / Apartado_Neto <= 3` **o** `deposito_extra <= 1_000_000`. Si `deposito_extra < 0`, no es oportunidad de depósito extra: pasa a evaluarse como Liquidación Instantánea. Si `Apartado_Neto == 0`, solo aplica la condición de `deposito_extra <= 1_000_000`.
+- **Depósito Extra como oportunidad:** se cumple si `deposito_extra / Apartado_Neto <= 3` **o** `deposito_extra <= 1_000_000`. El `deposito_extra` evaluado ya viene neto del input de Depósito Extra simulado. Si `deposito_extra < 0`, no es oportunidad de depósito extra: pasa a evaluarse como Liquidación Instantánea. Si `Apartado_Neto == 0`, solo aplica la condición de `deposito_extra <= 1_000_000`.
 - **ContraOferta Viable como oportunidad:** se cumplen **todas**:
   - `contraoferta > Descuento Actual`
   - `contraoferta <= 0.95`
   - `contraoferta <= Descuento_Esperado + 0.2`
   Para varias deudas, `Descuento_Esperado = SUM(Descuento_Esperado_i * PaB_Origen_i) / SUM(PaB_Origen_i)`.
-- **Liquidación Instantánea:** se cumple si `Descuento Actual >= contraoferta` y `Descuento Actual != 0`. También aplica si `deposito_extra < 0` (no hace falta depósito extra). Un descuento actual mayor es mejor: el pago es menor y cabe en el cupo/ahorro.
+- **Liquidación Instantánea:** se cumple si `Descuento Actual >= contraoferta` y `Descuento Actual != 0`. También aplica si `deposito_extra < 0` (no hace falta depósito extra). El `deposito_extra` evaluado ya viene neto del input de Depósito Extra simulado. Un descuento actual mayor es mejor: el pago es menor y cabe en el cupo/ahorro.
 - **Acuerdo para Robo:** acuerdos de pago del MEC ya vencidos, no liquidados y **sin gestión posterior**. Se considera que no hay gestión posterior si no existe ninguna actualización de la deuda con `Fecha_Act` posterior a la fila que registró el `ACUERDO`. La fecha de vencimiento sale de:
   1. Alianzas: `Fecha_Limite_Pago` de la solicitud exitosa. Si existe y está vigente, no se consulta Metabase.
   2. Si no existe, Metabase: `QUERY_VENCIMIENTO_ACTS` (`bda.expiration`, `type = 'agreement'`, últimos 30 días).
@@ -766,7 +770,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 | `tests/test_filtros_cruce.py` | Construcción de columnas internas, filtros de Identificación Manual (Casa de Cobro, Alias, archivo, etiqueta, estado, Id_Definitivo, No Validados, búsqueda global, banco, cédula, monto y fechas) y ordenamiento ascendente/descendente. |
 | `tests/test_archivos.py` | Nombres de archivos, metadata de PDFs, esquema de archivos subidos y soportes por deuda. |
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
-| `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, umbrales, `PaB_Actualizado` con etiquetas confiables y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
+| `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, Depósito Extra simulado como parte del ahorro, portafolio distribuido por `PaB_Origen`, PaB simulado mayor al Origen, umbrales, `PaB_Actualizado` con etiquetas confiables, fallback a `PaB_Origen` cuando el PaB es 0 y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
 | `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), completado y preservación de metadata, `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
 
 ### Convenciones para nuevos tests
@@ -830,8 +834,8 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 14. **`Pago_Total_Obligatorio` se fuerza en `Bajo Comité`.** La UI lo pone en `True` y deshabilita el toggle; no es una elección libre en ese estado.
 15. **Bloqueos duros del formulario.** El envío se detiene si hay bancos no habilitados o si se excede la contrapropuesta máxima relativa. `Brindan Máx. Descuento` sigue siendo solo una advertencia.
 16. **Conteo de liquidaciones en reportes.** Las fórmulas oficiales se definen sobre solicitudes exitosas, pero `obtener_resumen_liquidaciones` y `obtener_tops_negociadores` todavía pueden contar liquidaciones de solicitudes No Exitosas o Validadas por Fuera. Revisa el filtro antes de usar esos números en decisiones.
-17. **La calculadora individual ya está implementada; la masiva no.** `modules/oportunidades.py` contiene las fórmulas, el agregador y el acceso a datos; `ui/calculadora_components.py` ya conecta sliders, inputs manuales, viabilidad y oportunidades. La pestaña `Oportunidades Masivas` sigue vacía.
-18. **`PaB_Actualizado` viene de `payment_to_bank` en centavos.** El loader toma el primer número, lo divide entre 100 y descarta filas sin valor válido; el resultado queda en COP. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base con la última solicitud exitosa y prevalece la fuente con fecha más reciente.
+17. **La calculadora individual ya está implementada; la masiva no.** `modules/oportunidades.py` contiene las fórmulas, el agregador y el acceso a datos; `ui/calculadora_components.py` ya conecta sliders, inputs manuales, viabilidad y oportunidades. La pestaña `Oportunidades Masivas` sigue vacía. El input de **Portafolio Total** se aplica con un callback `on_change` y distribuye por `PaB_Origen`; si el total supera el DUM, los PaB simulados quedan por encima de su `PaB_Origen` y el descuento se muestra como 0%.
+18. **`PaB_Actualizado` viene de `payment_to_bank` en centavos.** El loader toma el primer número, lo divide entre 100 y descarta filas sin valor válido; el resultado queda en COP. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base con la última solicitud exitosa y prevalece la fuente con fecha más reciente. Si la actualización confiable deja el PaB en 0, `obtener_pab_actualizado_deuda` devuelve `PaB_Origen` para no interpretar un dato faltante como descuento del 100%.
 19. **`AsignacionSchema` es estricto con `Pricing` y `Id_Deuda`.** Solo acepta `Pricing` 0.15, 0.20 o 0.25; si el Excel trae otro valor (o 15/20/25 sin dividir entre 100), la validación falla. `Id_Deuda` debe ser único. Conserva `Banco`; `Fecha_Cartera` es temporal y se descarta antes de validar.
 20. **Formato de la Asignación de Cartera.** El archivo debe terminar en `-MesAA.xlsx` (mes de 3 letras + año de 2 dígitos) y la hoja debe llamarse `Mes AAAA` (por ejemplo, `Octubre 2025`). Si el nombre no cumple, `obtener_prioridad_archivo`/`obtener_prioridad_hoja` devuelven prioridad 0 y el loader puede caer a un archivo anterior. El MEC ya no depende de la Asignación.
 21. **Descarga de Google Drive.** `GoogleDriveService.obtain_file` usa `MediaIoBaseDownload` y devuelve un `BytesIO` con el puntero al inicio. Si la descarga falla, `_obtener_df_asignacion` devuelve un DataFrame vacío y la calculadora muestra advertencia; revisa el archivo/carpeta antes de asumir que no hay asignación.

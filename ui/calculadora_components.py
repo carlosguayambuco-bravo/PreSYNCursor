@@ -1,6 +1,6 @@
 # Estándar usando PEP8
 # Librerías de Python
-from typing import Optional
+from typing import Any, Optional
 # Librerías de Terceros
 import numpy as np
 import streamlit as st
@@ -13,7 +13,11 @@ from modules.constants import (
     IVA,
     OPORTUNIDADES,
 )
-from modules.gest_sols import obtener_valor_pab_ideal
+from modules.gest_sols import (
+    distribuir_monto_por_deuda,
+    get_descuento_en_base,
+    obtener_valor_pab_ideal,
+)
 from modules.oportunidades import (
     calcular_oportunidades_referencia,
     evaluar_viabilidad_cliente,
@@ -31,6 +35,47 @@ from modules.oportunidades import (
 )
 from ui.forms_components import mostrar_componente_feedback
 from utils.helpers_general import cleanNumber, formatNumber
+
+# --- Configuración visual de la lista de deudas ---
+# Alto máximo (px) de la lista de deudas. El usuario puede ajustarlo.
+ALTO_MAXIMO_LISTA_DEUDAS = 600
+# Alto estimado (px) de cada fila de deuda para calcular el espacio sobrante.
+ALTO_ESTIMADO_FILA_DEUDA = 300
+# Alto mínimo (px) para mostrar el bloque "Espacio para Reflexionar".
+ALTO_MINIMO_ESPACIO_REFLEXION = 60
+
+# Función Auxiliar para Normalizar un Id de Deuda en la UI
+def _normalizar_id_deuda_ui(valor: Any) -> str:
+    """Normaliza un Id de Deuda para usarlo como llave de diccionario."""
+    return str(valor).replace(".0", "").strip()
+
+# Función Auxiliar para Saber si el Usuario Actual es Admin
+def _usuario_es_admin() -> bool:
+    """Devuelve True si el usuario de la sesión tiene rol admin."""
+    user_obj = st.session_state.get("user_obj", None)
+    if user_obj is not None and hasattr(user_obj, "is_admin"):
+        try:
+            return bool(user_obj.is_admin())
+        except Exception:
+            pass
+    return st.session_state.get("user_role", None) == "admin"
+
+# Función Auxiliar para Mostrar el Bloque de Espacio para Reflexionar
+def _mostrar_espacio_para_reflexion(*, alto: int) -> None:
+    """Muestra un bloque con gradiente azul que llena el espacio sobrante."""
+    st.markdown(
+        (
+            '<div style="height:{alto}px; min-height:{alto}px; border-radius:12px; '
+            'background:linear-gradient(180deg,#e3f2fd 0%,#64b5f6 45%,#0d47a1 100%); '
+            'display:flex; align-items:center; justify-content:center; '
+            'color:#ffffff; font-weight:800; letter-spacing:.5px; '
+            'text-shadow:0 1px 3px rgba(0,0,0,.35); font-size:.95rem; '
+            'box-shadow:0 4px 14px rgba(13,71,161,.18);">'
+            'Espacio para Reflexionar'
+            '</div>'
+        ).format(alto=int(alto)),
+        unsafe_allow_html=True,
+    )
 
 # Función Auxiliar para Reiniciar la Selección de las Deudas
 def reiniciar_seleccion_deudas(deudas: list[str], seleccionado: bool):
@@ -267,7 +312,8 @@ def mostrar_oportunidades_referencia(
         es_opp_cred (bool): True si el análisis es por Crédito.
         ahorro (Optional[float]): Ahorro simulado.
         porcobrar (Optional[float]): Por Cobrar simulado.
-        deposito_extra (float): Depósito Extra simulado.
+        deposito_extra (float): Depósito Extra simulado; hace parte del
+            Ahorro Total y reduce el depósito requerido.
         pab_por_deuda (Optional[dict[str, float]]): PaB simulado por deuda
             desde los inputs de la calculadora.
     """
@@ -292,12 +338,14 @@ def mostrar_oportunidades_referencia(
         float((pab_por_deuda or {}).get(deuda, 0.0))
         for deuda in debts_selected
     )
+    ahorro_total = (ahorro or 0) + max(deposito_extra or 0, 0)
     st.caption(
-        "Análisis: **{}** | Ahorro: **\\$ {:,.0f}** | Por Cobrar: **\\$ {:,.0f}** | Depósito Extra: **\\$ {:,.0f}** | PaB simulado: **\\$ {:,.0f}**".format(
+        "Análisis: **{}** | Ahorro: **\\$ {:,.0f}** | Depósito Extra: **\\$ {:,.0f}** | Ahorro Total: **\\$ {:,.0f}** | Por Cobrar: **\\$ {:,.0f}** | PaB simulado: **\\$ {:,.0f}**".format(
             "Crédito" if es_opp_cred else "Tradicional",
             ahorro or 0,
-            porcobrar or 0,
             deposito_extra or 0,
+            ahorro_total,
+            porcobrar or 0,
             pab_simulado_total,
         )
     )
@@ -381,6 +429,99 @@ def _paso_slider_pab(pab_origen: float) -> float:
         return 100.0
     return 1.0
 
+# Función Auxiliar para Limpiar el Monto del Portafolio
+def _limpiar_monto_portafolio(valor: Any) -> tuple[float, bool]:
+    """Limpia un monto de portafolio y devuelve si el valor era numérico."""
+    monto = cleanNumber(valor, default_nan=np.nan)
+    try:
+        monto_float = float(monto)
+    except (TypeError, ValueError):
+        return 0.0, False
+    if np.isnan(monto_float):
+        return 0.0, False
+    return monto_float, True
+
+# Función Auxiliar para Sincronizar el Total del Portafolio con las Deudas
+def _sincronizar_total_portafolio(
+    *,
+    session_state,
+    clave_total: str,
+    clave_deudas: str,
+    deudas: list[str],
+    pab_total: float,
+) -> None:
+    """Inicializa o recalcula el total cuando cambia el conjunto de deudas."""
+    deudas_actuales = tuple(
+        sorted(_normalizar_id_deuda_ui(d) for d in deudas)
+    )
+    if (
+        session_state.get(clave_deudas) != deudas_actuales
+        or clave_total not in session_state
+    ):
+        session_state[clave_deudas] = deudas_actuales
+        session_state[clave_total] = "{:,.0f}".format(pab_total)
+
+# Función Auxiliar para Distribuir un Monto de Portafolio por PaB_Origen
+def _distribuir_portafolio_por_pab_origen(
+    *,
+    deudas: list[str],
+    pab_origen_por_deuda: dict[str, float],
+    monto_total: float,
+) -> dict[str, float]:
+    """Distribuye un monto total entre las deudas usando SIEMPRE el PaB_Origen.
+
+    Se reutiliza ``distribuir_monto_por_deuda`` sin aliado, de modo que la
+    función toma ``montos_actuales`` (aquí el PaB_Origen) como pesos.
+    """
+    montos_actuales = {
+        _normalizar_id_deuda_ui(deuda): float(pab_origen_por_deuda.get(
+            _normalizar_id_deuda_ui(deuda), 0.0
+        ))
+        for deuda in deudas
+    }
+    resultado = distribuir_monto_por_deuda(
+        deudas=[_normalizar_id_deuda_ui(deuda) for deuda in deudas],
+        montos_actuales=montos_actuales,
+        monto_total=monto_total,
+        aliado=None,
+    )
+    return {
+        _normalizar_id_deuda_ui(deuda): float(monto)
+        for deuda, monto in resultado.get("montos", {}).items()
+    }
+
+# Función Auxiliar para Aplicar el Monto de Portafolio a las Deudas
+def _aplicar_monto_portafolio(
+    *,
+    clave_total: str,
+    deudas: list[str],
+    pab_origen_por_deuda: dict[str, float],
+    modo: str,
+) -> None:
+    """Callback: distribuye el monto total y actualiza los PaB de cada deuda."""
+    texto = st.session_state.get(clave_total, "")
+    monto_total, es_valido = _limpiar_monto_portafolio(texto)
+    if not es_valido or monto_total <= 0:
+        return
+
+    montos = _distribuir_portafolio_por_pab_origen(
+        deudas=deudas,
+        pab_origen_por_deuda=pab_origen_por_deuda,
+        monto_total=monto_total,
+    )
+
+    for deuda in deudas:
+        deuda_norm = _normalizar_id_deuda_ui(deuda)
+        pab = max(float(montos.get(deuda_norm, 0.0)), 0.0)
+        pab_origen = max(float(pab_origen_por_deuda.get(deuda_norm, 0.0)), 0.0)
+        clave = "{}_{}".format(modo, deuda)
+        descuento = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab)
+        st.session_state[f"calc_ind_pab_{clave}"] = pab
+        st.session_state[f"calc_ind_pab_slider_{clave}"] = pab
+        st.session_state[f"calc_ind_pab_text_{clave}"] = _formatear_pab_texto(pab)
+        st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento * 100
+        st.session_state[f"calc_ind_disc_text_{clave}"] = _formatear_descuento_texto(descuento)
+
 def _sincronizar_desde_slider_descuento(*, clave: str, pab_origen: float):
     """Sincroniza los controles cuando cambia el slider de descuento."""
     descuento_pct = float(st.session_state.get(f"calc_ind_disc_slider_{clave}", 0.0))
@@ -393,7 +534,8 @@ def _sincronizar_desde_slider_descuento(*, clave: str, pab_origen: float):
 def _sincronizar_desde_slider_pab(*, clave: str, pab_origen: float):
     """Sincroniza los controles cuando cambia el slider de PaB."""
     pab = float(st.session_state.get(f"calc_ind_pab_slider_{clave}", 0.0))
-    pab = min(max(pab, 0.0), pab_origen)
+    # El PaB puede superar el Origen si el portafolio distribuido es mayor al DUM
+    pab = max(pab, 0.0)
     descuento = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab)
     st.session_state[f"calc_ind_pab_{clave}"] = pab
     st.session_state[f"calc_ind_disc_slider_{clave}"] = descuento * 100
@@ -421,7 +563,8 @@ def _sincronizar_desde_texto_pab(*, clave: str, pab_origen: float):
     pab = cleanNumber(texto, default_nan=np.nan)
     if np.isnan(pab):
         pab = float(st.session_state.get(f"calc_ind_pab_{clave}", pab_origen))
-    pab = min(max(float(pab), 0.0), pab_origen)
+    # El PaB puede superar el Origen si el portafolio distribuido es mayor al DUM
+    pab = max(float(pab), 0.0)
     descuento = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab)
     st.session_state[f"calc_ind_pab_{clave}"] = pab
     st.session_state[f"calc_ind_pab_slider_{clave}"] = pab
@@ -433,10 +576,14 @@ def _sincronizar_desde_texto_pab(*, clave: str, pab_origen: float):
 def _obtener_pab_inicial_deuda(*, deuda: str, pab_origen: float) -> float:
     """Obtiene el PaB inicial de una deuda: su descuento actual.
 
-    Si la deuda no tiene una actualización confiable, se devuelve el
-    ``PaB_Origen`` (0% de descuento), nunca el PaB Ideal de Crédito.
+    Si la deuda no tiene una actualización confiable, o el PaB_Actualizado
+    confiable viene en 0, se devuelve el ``PaB_Origen`` (0% de descuento),
+    nunca el PaB Ideal de Crédito ni un PaB en 0.
     """
-    return obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
+    pab_inicial = obtener_pab_actualizado_deuda(deuda, pab_origen=pab_origen)
+    if pab_origen > 0 and pab_inicial <= 0:
+        return float(pab_origen)
+    return float(pab_inicial)
 
 # Función Auxiliar para Mostrar la Selección de una Deuda
 def mostrar_seleccion_deuda(
@@ -450,7 +597,9 @@ def mostrar_seleccion_deuda(
     """Función para mostrar la selección de una deuda.
 
     Muestra el ID, el DUM (PaB_Origen), sliders sincronizados de Descuento y
-    PaB, inputs manuales de Descuento y PaB, y el ingreso que dejaría la deuda.
+    PaB, inputs manuales de Descuento y PaB, el ingreso que dejaría la deuda y
+    un popover con los descuentos en base de alianzas. El PaB puede superar el
+    PaB_Origen cuando el portafolio distribuido es mayor al DUM.
 
     Args:
         deuda (str): El Id de la Deuda Seleccionada.
@@ -470,7 +619,14 @@ def mostrar_seleccion_deuda(
 
     # Paso 2: Inicializar el estado de la deuda
     clave = "{}_{}".format(modo, deuda)
-    init_pab = pab_origen if init_pab is None else min(max(float(init_pab), 0.0), pab_origen)
+    if init_pab is None:
+        init_pab = pab_origen
+    else:
+        init_pab = max(float(init_pab), 0.0)
+        # Si no hay descuento actual, el PaB inicial debe ser el Origen
+        if init_pab <= 0 and pab_origen > 0:
+            init_pab = pab_origen
+        init_pab = min(init_pab, pab_origen)
     key_init = f"calc_ind_init_{clave}"
     if st.session_state.get(key_init) != init_pab:
         descuento_inicial = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=init_pab)
@@ -486,6 +642,8 @@ def mostrar_seleccion_deuda(
     pab_final = float(st.session_state[f"calc_ind_pab_{clave}"])
     descuento_final = _calcular_descuento_desde_pab(pab_origen=pab_origen, pab=pab_final)
     ingreso = max((pab_origen - pab_final) * float(pricing), 0.0)
+    # El slider debe permitir el PaB distribuido aunque supere el Origen
+    max_pab_slider = max(float(pab_origen), max(pab_final, 0.0))
 
     colIdDum, colSliders, colManual, colDiscPayment, colIngreso = st.columns(
         [2, 3, 1, 2, 2], vertical_alignment="center", gap="small"
@@ -503,6 +661,26 @@ def mostrar_seleccion_deuda(
                 obtener_valor_pab_ideal(debt = deuda) 
             )))
 
+        # Mostramos los Descuentos en Base de Alianzas para Comparación
+        try:
+            descuentos_base = get_descuento_en_base(
+                debt=deuda,
+                original_amount=pab_origen,
+                show_casa=_usuario_es_admin(),
+            )
+        except Exception:
+            descuentos_base = []
+        with st.popover(
+            "💼 Descuentos en Base",
+            help="Descuentos actuales de alianzas para comparar y copiar al input de PaB.",
+        ):
+            if descuentos_base:
+                st.caption("Copia el valor y pégalo en **PaB ($)**.")
+                for descuento in descuentos_base:
+                    st.markdown(descuento)
+            else:
+                st.info("No hay descuentos en base para esta deuda.", icon="ℹ️")
+
     with colSliders:
         st.slider(
             label="**Descuento (%)**",
@@ -516,8 +694,8 @@ def mostrar_seleccion_deuda(
         st.slider(
             label="**PaB ($)**",
             min_value=0.0,
-            max_value=float(pab_origen),
-            step=min(_paso_slider_pab(pab_origen), max(pab_origen, 1.0)),
+            max_value=max_pab_slider,
+            step=min(_paso_slider_pab(pab_origen), max(max_pab_slider, 1.0)),
             key=f"calc_ind_pab_slider_{clave}",
             on_change=_sincronizar_desde_slider_pab,
             kwargs={"clave": clave, "pab_origen": pab_origen},
@@ -735,6 +913,12 @@ def mostrar_calculadora_individual():
     ahorro_val = _limpiar_input_numerico(ahorro_input, ahorro)
     porcobrar_val = _limpiar_input_numerico(porcobrar_input, porcobrar)
     dep_extra_val = _limpiar_input_numerico(dep_extra_input, 0.0)
+    st.caption(
+        "💡 El **Depósito Extra** hace parte del ahorro disponible. "
+        "Ahorro Total: **\\$ {:,.0f}**".format(
+            ahorro_val + max(dep_extra_val, 0.0)
+        )
+    )
 
     # Actualizamos las Configuraciones con los valores finales de los inputs
     configs.update({
@@ -747,8 +931,14 @@ def mostrar_calculadora_individual():
     # Traemos el PaB_Origen de cada deuda seleccionada
     datos_ref = obtener_asignacion_para_referencia(ref_escogida).copy()
     mapa_pab_origen = {
-        str(row["Id_Deuda"]).replace(".0", "").strip(): float(row["PaB_Origen"])
+        _normalizar_id_deuda_ui(row["Id_Deuda"]): float(row["PaB_Origen"])
         for _, row in datos_ref.iterrows()
+    }
+    pab_origen_por_deuda = {
+        _normalizar_id_deuda_ui(d): float(mapa_pab_origen.get(
+            _normalizar_id_deuda_ui(d), 0.0
+        ))
+        for d in debts_selected
     }
 
     # Mostramos una alerta para disminuir el tamaño
@@ -765,36 +955,49 @@ def mostrar_calculadora_individual():
     pab_ideal_deudas = {}
 
     with colDetallesDeudas:
-        for d in debts_selected:
-            with st.container(border=True):
-                pab_origen_deuda = float(mapa_pab_origen.get(str(d), 0.0))
-                # El PaB inicial siempre refleja el descuento actual de la deuda.
-                # Si no hay actualización confiable, devuelve el PaB_Origen
-                # (0% de descuento), no el PaB Ideal.
-                init_pab = _obtener_pab_inicial_deuda(
-                    deuda=d,
-                    pab_origen=pab_origen_deuda,
-                )
-                pab_ideal_deudas[d] = (
-                    obtener_valor_pab_ideal(debt=d) if opp_credito else 0.0
-                )
+        with st.container(height=ALTO_MAXIMO_LISTA_DEUDAS, border=False):
+            for d in sorted(debts_selected):
+                with st.container(border=True):
+                    pab_origen_deuda = float(mapa_pab_origen.get(
+                        _normalizar_id_deuda_ui(d), 0.0
+                    ))
+                    # El PaB inicial siempre refleja el descuento actual de la deuda.
+                    # Si no hay actualización confiable, devuelve el PaB_Origen
+                    # (0% de descuento), no el PaB Ideal.
+                    init_pab = _obtener_pab_inicial_deuda(
+                        deuda=d,
+                        pab_origen=pab_origen_deuda,
+                    )
+                    pab_ideal_deudas[d] = (
+                        obtener_valor_pab_ideal(debt=d) if opp_credito else 0.0
+                    )
 
-                pab_deudas[d] = mostrar_seleccion_deuda(
-                    deuda=d,
-                    pab_origen=pab_origen_deuda,
-                    init_pab=init_pab,
-                    pricing=pricing_ref,
-                    modo="credito" if opp_credito else "tradicional",
-                )
+                    pab_deudas[d] = mostrar_seleccion_deuda(
+                        deuda=d,
+                        pab_origen=pab_origen_deuda,
+                        init_pab=init_pab,
+                        pricing=pricing_ref,
+                        modo="credito" if opp_credito else "tradicional",
+                    )
+
+            # Si las deudas no llenan el alto máximo, mostramos el espacio restante
+            alto_contenido = len(debts_selected) * ALTO_ESTIMADO_FILA_DEUDA
+            alto_sobrante = ALTO_MAXIMO_LISTA_DEUDAS - alto_contenido
+            if alto_sobrante >= ALTO_MINIMO_ESPACIO_REFLEXION:
+                _mostrar_espacio_para_reflexion(alto=alto_sobrante)
 
     # Calculamos los totales y la viabilidad del cliente
     dum_total = sum(
-        float(mapa_pab_origen.get(str(d), 0.0)) for d in debts_selected
+        float(mapa_pab_origen.get(_normalizar_id_deuda_ui(d), 0.0))
+        for d in debts_selected
     )
     pab_total = sum(pab_deudas.values())
     ingreso_total = sum(
         max(
-            (float(mapa_pab_origen.get(str(d), 0.0)) - pab_deudas[d]) * pricing_ref,
+            (
+                float(mapa_pab_origen.get(_normalizar_id_deuda_ui(d), 0.0))
+                - pab_deudas[d]
+            ) * pricing_ref,
             0.0,
         )
         for d in debts_selected
@@ -810,8 +1013,60 @@ def mostrar_calculadora_individual():
         es_opp_cred=opp_credito,
     )
 
+    # Llave del input de monto total del portafolio (por Referencia y tipo de análisis)
+    modo_analisis = "credito" if opp_credito else "tradicional"
+    clave_total_portafolio = "portafolio_total_{}_{}_calc_opps".format(
+        ref_escogida, modo_analisis
+    )
+    clave_deudas_portafolio = "portafolio_deudas_{}_{}_calc_opps".format(
+        ref_escogida, modo_analisis
+    )
+
+    # Si cambió el conjunto de deudas seleccionadas, el total se recalcula
+    # porque cambian las deudas y sus respectivos PaB.
+    _sincronizar_total_portafolio(
+        session_state=st.session_state,
+        clave_total=clave_total_portafolio,
+        clave_deudas=clave_deudas_portafolio,
+        deudas=debts_selected,
+        pab_total=pab_total,
+    )
+
+    # Limpiamos y formateamos el input igual que Ahorro, Por Cobrar y Depósito Extra
+    valor_portafolio, portafolio_valido = _limpiar_monto_portafolio(
+        st.session_state[clave_total_portafolio]
+    )
+    if not portafolio_valido:
+        st.error(
+            "No se puede convertir el valor {} a Númerico".format(
+                st.session_state[clave_total_portafolio]
+            )
+        )
+    st.session_state[clave_total_portafolio] = "{:,.0f}".format(valor_portafolio)
+
     with colResultados:
         with st.container(border=True):
+            # El input de portafolio va primero para que sea accesible con muchas deudas
+            st.text_input(
+                label="**📦 Portafolio Total**",
+                key=clave_total_portafolio,
+                help=(
+                    "Monto total para todas las deudas seleccionadas. Se distribuye "
+                    "proporcionalmente al PaB_Origen de cada deuda y se recalcula al "
+                    "cambiar la selección de deudas. No tiene tope: puede superar el "
+                    "DUM total."
+                ),
+                on_change=_aplicar_monto_portafolio,
+                kwargs={
+                    "clave_total": clave_total_portafolio,
+                    "deudas": debts_selected,
+                    "pab_origen_por_deuda": pab_origen_por_deuda,
+                    "modo": modo_analisis,
+                },
+            )
+            st.caption("Distribución por **PaB_Origen**.")
+            st.divider()
+
             # Mostramos Dum Total, PaB, Ingreso, Pago Total del Cliente y si es Viable
             st.metric(
                 label="**💰 DUM Total**",

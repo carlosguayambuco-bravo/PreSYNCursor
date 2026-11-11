@@ -34,12 +34,18 @@ from modules.oportunidades import (
     obtener_ultima_actualizacion_deuda,
 )
 from ui.calculadora_components import (
+    _aplicar_monto_portafolio,
     _calcular_descuento_desde_pab,
     _calcular_pab_desde_descuento,
+    _distribuir_portafolio_por_pab_origen,
+    _limpiar_monto_portafolio,
+    _normalizar_id_deuda_ui,
     _obtener_pab_inicial_deuda,
     _sincronizar_desde_slider_descuento,
     _sincronizar_desde_slider_pab,
     _sincronizar_desde_texto_pab,
+    _sincronizar_total_portafolio,
+    _usuario_es_admin,
 )
 
 
@@ -257,6 +263,15 @@ class TestCalculosOportunidades(unittest.TestCase):
             ),
             10_020_000,
         )
+        # El depósito extra simulado reduce el depósito requerido
+        self.assertEqual(
+            calcular_deposito_extra_credito(
+                pab_ideal_total=80_000_000,
+                pab_actualizado_total=90_000_000,
+                deposito_extra=4_000_000,
+            ),
+            6_020_000,
+        )
 
     def test_deposito_extra_tradicional(self):
         self.assertAlmostEqual(
@@ -268,6 +283,18 @@ class TestCalculosOportunidades(unittest.TestCase):
                 por_cobrar=5_000_000,
             ),
             22_160_000,
+        )
+        # El depósito extra simulado hace parte del ahorro disponible
+        self.assertAlmostEqual(
+            calcular_deposito_extra_tradicional(
+                pab_origen_total=100_000_000,
+                pab_actualizado_total=60_000_000,
+                pricing=0.15,
+                ahorro=50_000_000,
+                por_cobrar=5_000_000,
+                deposito_extra=10_000_000,
+            ),
+            12_160_000,
         )
 
     def test_contraoferta_credito(self):
@@ -303,6 +330,14 @@ class TestCalculosOportunidades(unittest.TestCase):
             calcular_descuento_actual(
                 pab_origen_total=0,
                 pab_actualizado_total=60_000_000,
+            ),
+            0.0,
+        )
+        # Un PaB mayor al Origen deja el descuento en 0
+        self.assertEqual(
+            calcular_descuento_actual(
+                pab_origen_total=100_000_000,
+                pab_actualizado_total=150_000_000,
             ),
             0.0,
         )
@@ -435,6 +470,18 @@ class TestCalculosOportunidades(unittest.TestCase):
         )
         self.assertFalse(sin_credito["viable"])
 
+        # El depósito extra simulado amplía el cupo disponible de Crédito
+        credito_con_deposito = evaluar_viabilidad_cliente(
+            pab_total=90_000_000,
+            pab_ideal_total=80_000_000,
+            ingreso_total=0,
+            ahorro=0,
+            por_cobrar=0,
+            deposito_extra=10_000_000,
+            es_opp_cred=True,
+        )
+        self.assertTrue(credito_con_deposito["viable_credito"])
+
 
 class TestPaBActualizado(unittest.TestCase):
     def _acts(self, fechas, etiquetas, pabs):
@@ -473,6 +520,16 @@ class TestPaBActualizado(unittest.TestCase):
             "modules.oportunidades.load_actualizacines_negos",
             return_value=pd.DataFrame(columns=["Id_Deuda", "Fecha_Act", "Etiqueta_Act", "PaB_Actualizado"]),
         ):
+            resultado = obtener_pab_actualizado_deuda("D1", pab_origen=100_000_000)
+        self.assertEqual(resultado, 100_000_000)
+
+    def test_pab_actualizado_cero_usa_pab_origen(self):
+        acts = self._acts(
+            fechas=[pd.Timestamp("2026-02-01")],
+            etiquetas=["CAMBIO DE PAB"],
+            pabs=[0],
+        )
+        with patch("modules.oportunidades.load_actualizacines_negos", return_value=acts):
             resultado = obtener_pab_actualizado_deuda("D1", pab_origen=100_000_000)
         self.assertEqual(resultado, 100_000_000)
 
@@ -744,7 +801,151 @@ class TestSincronizacionDeudaUI(unittest.TestCase):
         self.assertEqual(fake_st.session_state["calc_ind_pab_D1"], 60_000_000)
         self.assertEqual(fake_st.session_state["calc_ind_pab_text_D1"], "60,000,000")
 
+    def test_texto_pab_permite_superar_el_origen(self):
+        fake_st = self._fake_st()
+        fake_st.session_state["calc_ind_pab_text_D1"] = "150,000,000"
+        with patch("ui.calculadora_components.st", fake_st):
+            _sincronizar_desde_texto_pab(clave="D1", pab_origen=100_000_000)
+        self.assertEqual(fake_st.session_state["calc_ind_pab_D1"], 150_000_000)
+        self.assertEqual(fake_st.session_state["calc_ind_pab_slider_D1"], 150_000_000)
 
+    def test_slider_pab_permite_superar_el_origen(self):
+        fake_st = self._fake_st()
+        fake_st.session_state["calc_ind_pab_slider_D1"] = 150_000_000
+        with patch("ui.calculadora_components.st", fake_st):
+            _sincronizar_desde_slider_pab(clave="D1", pab_origen=100_000_000)
+        self.assertEqual(fake_st.session_state["calc_ind_pab_D1"], 150_000_000)
+        self.assertEqual(fake_st.session_state["calc_ind_pab_text_D1"], "150,000,000")
+
+
+class TestPortafolioCalculator(unittest.TestCase):
+    def test_normaliza_id_deuda_con_sufijo(self):
+        self.assertEqual(_normalizar_id_deuda_ui(123.0), "123")
+        self.assertEqual(_normalizar_id_deuda_ui("123.0"), "123")
+        self.assertEqual(_normalizar_id_deuda_ui(" 123 "), "123")
+
+    def test_limpia_monto_portafolio(self):
+        self.assertEqual(
+            _limpiar_monto_portafolio("60,000,000"),
+            (60_000_000.0, True),
+        )
+        self.assertEqual(
+            _limpiar_monto_portafolio("60000000"),
+            (60_000_000.0, True),
+        )
+        self.assertEqual(
+            _limpiar_monto_portafolio("no-numero"),
+            (0.0, False),
+        )
+
+    def test_sincroniza_total_al_inicializar(self):
+        session_state = {}
+        _sincronizar_total_portafolio(
+            session_state=session_state,
+            clave_total="total",
+            clave_deudas="deudas",
+            deudas=["D2", "D1"],
+            pab_total=60_000_000,
+        )
+        self.assertEqual(session_state["deudas"], ("D1", "D2"))
+        self.assertEqual(session_state["total"], "60,000,000")
+
+    def test_sincroniza_total_conserva_valor_si_no_cambian_deudas(self):
+        session_state = {
+            "deudas": ("D1", "D2"),
+            "total": "75,000,000",
+        }
+        _sincronizar_total_portafolio(
+            session_state=session_state,
+            clave_total="total",
+            clave_deudas="deudas",
+            deudas=["D1", "D2"],
+            pab_total=60_000_000,
+        )
+        self.assertEqual(session_state["total"], "75,000,000")
+
+    def test_sincroniza_total_recalcula_si_cambian_deudas(self):
+        session_state = {
+            "deudas": ("D1", "D2"),
+            "total": "75,000,000",
+        }
+        _sincronizar_total_portafolio(
+            session_state=session_state,
+            clave_total="total",
+            clave_deudas="deudas",
+            deudas=["D1", "D2", "D3"],
+            pab_total=120_000_000,
+        )
+        self.assertEqual(session_state["deudas"], ("D1", "D2", "D3"))
+        self.assertEqual(session_state["total"], "120,000,000")
+
+    def test_distribuye_por_pab_origen(self):
+        montos = _distribuir_portafolio_por_pab_origen(
+            deudas=["D1", "D2"],
+            pab_origen_por_deuda={"D1": 100_000_000, "D2": 50_000_000},
+            monto_total=60_000_000,
+        )
+        self.assertEqual(montos["D1"], 40_000_000)
+        self.assertEqual(montos["D2"], 20_000_000)
+        self.assertEqual(sum(montos.values()), 60_000_000)
+
+    def test_distribuye_sin_tope_sobre_el_dum(self):
+        montos = _distribuir_portafolio_por_pab_origen(
+            deudas=["D1", "D2"],
+            pab_origen_por_deuda={"D1": 100_000_000, "D2": 50_000_000},
+            monto_total=180_000_000,
+        )
+        self.assertEqual(montos["D1"], 120_000_000)
+        self.assertEqual(montos["D2"], 60_000_000)
+        self.assertEqual(sum(montos.values()), 180_000_000)
+
+    def test_aplicar_monto_portafolio_actualiza_estados(self):
+        fake_st = MagicMock()
+        fake_st.session_state = {"total_portafolio": "60,000,000"}
+        with patch("ui.calculadora_components.st", fake_st):
+            _aplicar_monto_portafolio(
+                clave_total="total_portafolio",
+                deudas=["D1", "D2"],
+                pab_origen_por_deuda={"D1": 100_000_000, "D2": 50_000_000},
+                modo="tradicional",
+            )
+        self.assertEqual(
+            fake_st.session_state["calc_ind_pab_tradicional_D1"], 40_000_000
+        )
+        self.assertEqual(
+            fake_st.session_state["calc_ind_pab_text_tradicional_D2"], "20,000,000"
+        )
+        self.assertEqual(
+            fake_st.session_state["calc_ind_disc_slider_tradicional_D1"], 60.0
+        )
+
+    def test_aplicar_monto_invalido_no_cambia_estados(self):
+        fake_st = MagicMock()
+        fake_st.session_state = {"total_portafolio": "no-numero"}
+        with patch("ui.calculadora_components.st", fake_st):
+            _aplicar_monto_portafolio(
+                clave_total="total_portafolio",
+                deudas=["D1"],
+                pab_origen_por_deuda={"D1": 100_000_000},
+                modo="tradicional",
+            )
+        self.assertNotIn("calc_ind_pab_tradicional_D1", fake_st.session_state)
+
+    def test_usuario_es_admin(self):
+        fake_st = MagicMock()
+        fake_st.session_state = {
+            "user_obj": SimpleNamespace(is_admin=lambda: True)
+        }
+        with patch("ui.calculadora_components.st", fake_st):
+            self.assertTrue(_usuario_es_admin())
+
+        fake_st.session_state = {"user_role": "admin"}
+        with patch("ui.calculadora_components.st", fake_st):
+            self.assertTrue(_usuario_es_admin())
+
+        fake_st.session_state = {"user_role": "nego"}
+        with patch("ui.calculadora_components.st", fake_st):
+            self.assertFalse(_usuario_es_admin())
 class TestCalcularOportunidadesReferencia(unittest.TestCase):
     def _asignacion(self):
         return pd.DataFrame({
@@ -788,7 +989,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
             ),
         ]
 
-    def _calcular(self, es_opp_cred, pab_por_deuda=None):
+    def _calcular(self, es_opp_cred, pab_por_deuda=None, deposito_extra=0):
         patches = self._patches(es_opp_cred)
         for p in patches:
             p.start()
@@ -799,7 +1000,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
                 es_opp_cred=es_opp_cred,
                 ahorro=50_000_000,
                 porcobrar=5_000_000,
-                deposito_extra=0,
+                deposito_extra=deposito_extra,
                 pab_por_deuda=pab_por_deuda,
             )
         finally:
@@ -883,14 +1084,40 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
         )
         self.assertEqual(opps_id_con_sufijo["Depósito Extra"]["valor"], 5_730_000)
 
-    def test_pab_simulado_se_acota_al_pab_origen(self):
+    def test_pab_simulado_puede_superar_el_pab_origen(self):
         opps = self._calcular(
             es_opp_cred=False,
             pab_por_deuda={"D1": 150_000_000},
         )
-        # El input no puede superar el PaB_Origen: 100M + 20k - 45M
-        self.assertEqual(opps["Depósito Extra"]["valor"], 55_020_000)
+        # El portafolio puede distribuir un PaB mayor al Origen:
+        # 150M + 20k - 45M
+        self.assertEqual(opps["Depósito Extra"]["valor"], 105_020_000)
         self.assertAlmostEqual(opps["Liquidación Instantánea"]["valor"], 0.0)
+        self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
+
+    def test_deposito_extra_simulado_reduce_el_deposito_tradicional(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            deposito_extra=10_000_000,
+        )
+        # 22.16M - 10M
+        self.assertEqual(opps["Depósito Extra"]["valor"], 12_160_000)
+
+    def test_deposito_extra_simulado_reduce_el_deposito_credito(self):
+        opps = self._calcular(
+            es_opp_cred=True,
+            deposito_extra=10_000_000,
+        )
+        # -19.98M - 10M
+        self.assertEqual(opps["Depósito Extra"]["valor"], -29_980_000)
+
+    def test_deposito_extra_simulado_activa_liquidacion_instantanea(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            deposito_extra=23_000_000,
+        )
+        # El depósito requerido (22.16M) queda cubierto por el depósito simulado
+        self.assertTrue(opps["Liquidación Instantánea"]["aplica"])
 
     def test_sin_deudas_no_hay_oportunidades(self):
         opps = calcular_oportunidades_referencia(
@@ -966,6 +1193,18 @@ class TestPabInicialCalculadora(unittest.TestCase):
 
         self.assertEqual(pab_inicial, 60_000_000)
         mock_actualizado.assert_called_once_with("D1", pab_origen=100_000_000)
+
+    def test_pab_inicial_cero_usa_pab_origen(self):
+        with patch(
+            "ui.calculadora_components.obtener_pab_actualizado_deuda",
+            return_value=0,
+        ):
+            pab_inicial = _obtener_pab_inicial_deuda(
+                deuda="D1",
+                pab_origen=100_000_000,
+            )
+
+        self.assertEqual(pab_inicial, 100_000_000)
 
 
 if __name__ == "__main__":
