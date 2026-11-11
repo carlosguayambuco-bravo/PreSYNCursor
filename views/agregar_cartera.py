@@ -1853,7 +1853,9 @@ if tab_mando.open:
         st.markdown("### 💼 Distribución de Portafolios")
         st.caption(
             "El procesamiento aplica la distribución de portafolios y calcula la nueva "
-            "Metadata. **No modifica Google Sheets**; primero muestra la comparación."
+            "Metadata. **No modifica Google Sheets**; primero muestra la comparación. "
+            "La columna **Portafolio** ya no requiere marcarse manualmente: los grupos "
+            "con pagos iguales o regla JCAP se detectan y marcan automáticamente."
         )
         procesar_portafolios = st.button(
             label="💼 Procesar Portafolios",

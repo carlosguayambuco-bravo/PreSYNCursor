@@ -791,12 +791,12 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 
 **Distribución de portafolios (`modules/control_masivas.py`):**
 
-- `GrupoCol = Masiva_ + Referencia + Casa_Cobro + Es_Portafolio + Fecha_Masiva`.
+- `GrupoCol = Masiva_ + Referencia + Casa_Cobro + Fecha_Masiva`. La marca `Es_Portafolio` **no** forma parte de la llave: filas marcadas y no marcadas del mismo cliente/base se agrupan y distribuyen juntas.
 - `%Pago = PaB_Origen / SUM(PaB_Origen)` dentro del grupo.
-- **Regla especial:** si todas las filas del grupo tienen el mismo `PaB_Propuesta`, son `Es_Portafolio` y hay más de una deuda, `PaB_Propuesta = PaB_Propuesta_Original * %Pago`.
-- **Regla JCAP:** para `Casa_Cobro == 'JCAP'`, si al menos dos filas del grupo tienen `PaB_Propuesta <= 100` y no aplicó la regla especial, `PaB_Propuesta = SUM(PaB_Propuesta_Original del grupo) * %Pago`.
+- **Regla especial:** si todas las filas del grupo tienen el mismo `PaB_Propuesta` y hay más de una deuda, `PaB_Propuesta = PaB_Propuesta_Original * %Pago`. No se exige que las filas estén marcadas como portafolio; el grupo se marca automáticamente cuando aplica la regla.
+- **Regla JCAP:** para `Casa_Cobro == 'JCAP'`, si al menos dos filas del grupo tienen `PaB_Propuesta <= 100` y no aplicó la regla especial, `PaB_Propuesta = SUM(PaB_Propuesta_Original del grupo) * %Pago`. Este grupo también se marca automáticamente como portafolio.
 - Si algún `PaB_Propuesta` del grupo es nulo, no se aplica la regla para no inventar montos.
-- `Id_Portafolio` es la unión de `Id_Cruce` del grupo con `-`; `PaB_Portafolio` es la suma de `PaB_Propuesta` del grupo. Solo se marcan grupos con `Es_Portafolio` en todas sus filas, tamaño > 1 y montos completos.
+- `Id_Portafolio` es la unión de `Id_Cruce` del grupo con `-`; `PaB_Portafolio` es la suma de `PaB_Propuesta` del grupo. La marca `Es_Portafolio` se escribe automáticamente en los grupos donde aplicó la regla especial o JCAP; la metadata solo se completa para grupos con la marca en todas sus filas, tamaño > 1 y montos completos. La columna `Portafolio` de Sheets deja de ser un requisito manual y pasa a ser un resultado del proceso.
 - `PaB_Origen` y `Referencia` se consultan en Metabase (`QUERY_DEUDAS_PAB_ORIGEN`, dbId 12, `DISTINCT ON (bcrd.id) ORDER BY bcrd.id, bcrd.inserted_at DESC NULLS LAST`). Si la consulta falla o no trae una deuda, se usa `Deuda Bravo` y `Referencia` de la hoja.
 - Los cambios se comparan por `Fila_Sheets`; `PaB_Portafolio` se mantiene sincronizado en la columna de la hoja (`Monto Portafolio`).
 

@@ -108,16 +108,14 @@ def _montos_diferentes(antes: Any, despues: Any, tolerancia: float = 0.01) -> bo
 
 # Función Auxiliar para Construir la Columna de Agrupación de Portafolios
 def _construir_grupo_col(df: pd.DataFrame) -> pd.Series:
+    # La Marca Es_Portafolio No Forma Parte del Grupo: se Detecta Automáticamente
     fechas = pd.to_datetime(df['Fecha_Masiva'], errors='coerce').dt.strftime('%Y-%m-%d')
     fechas = fechas.fillna('SIN_FECHA')
-    es_portafolio = df['Es_Portafolio'].fillna(False).astype(bool).astype(str)
     return (
         'Masiva_'
         + df['Referencia'].fillna('').astype(str).str.strip()
         + '_'
         + df['Casa_Cobro'].fillna('').astype(str).str.strip()
-        + '_'
-        + es_portafolio
         + '_'
         + fechas
     )
@@ -182,10 +180,13 @@ def distribuir_portafolios_masivas(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     """Aplica la distribución de portafolios sobre la Base del Mes.
 
     Reglas:
-    1. Si todas las filas de un grupo tienen el mismo PaB_Propuesta, son portafolio y
-       hay más de una deuda, se redistribuye el pago según PaB_Origen.
+    1. Si todas las filas de un grupo tienen el mismo PaB_Propuesta y hay más de
+       una deuda, se redistribuye el pago según PaB_Origen. La marca
+       ``Es_Portafolio`` no se exige como entrada: el grupo se marca
+       automáticamente cuando aplica esta regla.
     2. Para JCAP, si al menos dos filas del grupo tienen PaB_Propuesta <= 100 y no
        aplicó la regla anterior, se redistribuye la suma de los pagos originales.
+       Este grupo también se marca automáticamente como portafolio.
 
     Returns:
         tuple: (DataFrame con los nuevos PaB_Propuesta, DataFrame con el detalle
@@ -232,7 +233,6 @@ def distribuir_portafolios_masivas(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     mask_especial = (
         grupo['_Igual'].transform('all')
         & (grupo['_Igual'].transform('sum') > 1)
-        & grupo['Es_Portafolio'].transform('all')
         & df['%Pago'].notna()
     )
     df.loc[mask_especial, 'PaB_Propuesta'] = (
@@ -257,7 +257,13 @@ def distribuir_portafolios_masivas(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
         suma_original_grupo[mask_cambio] * df.loc[mask_cambio, '%Pago']
     ).round(2)
 
-    # Paso 5: Construir el Detalle de las Deudas que Cambiaron
+    # Paso 5: Marcar Automáticamente como Portafolio los Grupos Detectados
+    mask_portafolio_auto = (mask_especial | mask_cambio).groupby(
+        df['GrupoCol'], dropna=False, sort=False
+    ).transform('all')
+    df.loc[mask_portafolio_auto, 'Es_Portafolio'] = True
+
+    # Paso 6: Construir el Detalle de las Deudas que Cambiaron
     mask_cambio_pago = df.apply(
         lambda fila: _montos_diferentes(
             fila['PaB_Act_Original'],
@@ -280,13 +286,17 @@ def distribuir_portafolios_masivas(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     detalle['Regla_Especial'] = mask_especial[mask_cambio_pago].to_numpy()
     detalle['Regla_JCAP'] = mask_cambio[mask_cambio_pago].to_numpy()
 
-    # Paso 6: Limpiar las Columnas Auxiliares (se conserva GrupoCol para la Metadata)
+    # Paso 7: Limpiar las Columnas Auxiliares (se conserva GrupoCol para la Metadata)
     df = df.drop(columns=['PaB_Act_Original', '%Pago', '_Igual', 'Cond'])
     return df, detalle.reset_index(drop=True)
 
 # Función para Actualizar el Id_Portafolio y el PaB_Portafolio en la Metadata
 def actualizar_metadata_portafolios(df: pd.DataFrame) -> pd.DataFrame:
-    """Recalcula Id_Portafolio y PaB_Portafolio de cada fila según su grupo."""
+    """Recalcula Id_Portafolio y PaB_Portafolio de cada fila según su grupo.
+
+    La marca ``Es_Portafolio`` ya viene resuelta por ``distribuir_portafolios_masivas``:
+    los grupos detectados automáticamente se marcan allí antes de llamar esta función.
+    """
     df = df.copy()
     if df.empty:
         return df

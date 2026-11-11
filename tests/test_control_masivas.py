@@ -36,7 +36,7 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         referencia="REF1",
         casa="ALIADO A",
         fecha="2026-11-06",
-        es_portafolio=True,
+        es_portafolio=False,
         pab_origen=600000,
         pab_propuesta=500000,
         id_cruce=None,
@@ -76,6 +76,7 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         distribuido, detalle = distribuir_portafolios_masivas(df)
 
         self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [105.0, 45.0])
+        self.assertTrue(distribuido["Es_Portafolio"].all())
         self.assertTrue(detalle["Regla_JCAP"].all())
         self.assertFalse(detalle["Regla_Especial"].any())
 
@@ -90,7 +91,7 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [100.0, 50.0])
         self.assertTrue(detalle.empty)
 
-    def test_no_modifica_grupos_sin_portafolio(self):
+    def test_distribuye_sin_marca_portafolio(self):
         df = self._df([
             self._fila(fila=2, id_deuda="D1", es_portafolio=False, pab_origen=600000, pab_propuesta=500000),
             self._fila(fila=3, id_deuda="D2", es_portafolio=False, pab_origen=400000, pab_propuesta=500000),
@@ -98,7 +99,33 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
 
         distribuido, detalle = distribuir_portafolios_masivas(df)
 
-        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [500000.0, 500000.0])
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [300000.0, 200000.0])
+        self.assertTrue(distribuido["Es_Portafolio"].all())
+        self.assertEqual(len(detalle), 2)
+        self.assertTrue(detalle["Es_Portafolio"].all())
+
+    def test_agrupa_y_distribuye_con_marca_mixta(self):
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", es_portafolio=True, pab_origen=600000, pab_propuesta=500000),
+            self._fila(fila=3, id_deuda="D2", es_portafolio=False, pab_origen=400000, pab_propuesta=500000),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [300000.0, 200000.0])
+        self.assertTrue(distribuido["Es_Portafolio"].all())
+        self.assertEqual(len(detalle), 2)
+
+    def test_no_marca_si_no_aplica_ninguna_regla(self):
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", es_portafolio=False, pab_origen=600000, pab_propuesta=500000),
+            self._fila(fila=3, id_deuda="D2", es_portafolio=False, pab_origen=400000, pab_propuesta=300000),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [500000.0, 300000.0])
+        self.assertFalse(distribuido["Es_Portafolio"].any())
         self.assertTrue(detalle.empty)
 
     def test_no_falla_si_falta_pab_origen(self):
@@ -251,14 +278,31 @@ class TestMetadataPortafolios(unittest.TestCase):
         self.assertEqual(resultado.loc[0, "Metadata"]["PaB_Portafolio"], 1000000.0)
         self.assertEqual(resultado.loc[1, "Metadata"]["PaB_Portafolio"], 1000000.0)
 
-    def test_no_marca_portafolio_si_una_fila_no_lo_es(self):
+    def test_flujo_automatico_marca_y_actualiza_metadata(self):
         df = pd.DataFrame([
-            self._fila(fila=2, id_deuda="D1", id_cruce="C1", es_portafolio=True, pab=600000),
-            self._fila(fila=3, id_deuda="D2", id_cruce="C2", es_portafolio=False, pab=400000),
+            self._fila(fila=2, id_deuda="D1", id_cruce="C1", es_portafolio=False, pab=500000),
+            self._fila(fila=3, id_deuda="D2", id_cruce="C2", es_portafolio=False, pab=500000),
         ])
 
-        resultado = actualizar_metadata_portafolios(df)
+        distribuido, _ = distribuir_portafolios_masivas(df)
+        resultado = actualizar_metadata_portafolios(distribuido)
 
+        self.assertTrue(resultado["Es_Portafolio"].all())
+        self.assertEqual(resultado.loc[0, "Metadata"]["Id_Portafolio"], "C1-C2")
+        self.assertEqual(resultado.loc[1, "Metadata"]["Id_Portafolio"], "C1-C2")
+        self.assertEqual(resultado.loc[0, "Metadata"]["PaB_Portafolio"], 500000.0)
+        self.assertEqual(resultado.loc[1, "Metadata"]["PaB_Portafolio"], 500000.0)
+
+    def test_no_marca_portafolio_si_no_aplica_ninguna_regla(self):
+        df = pd.DataFrame([
+            self._fila(fila=2, id_deuda="D1", id_cruce="C1", es_portafolio=False, pab=500000),
+            self._fila(fila=3, id_deuda="D2", id_cruce="C2", es_portafolio=False, pab=300000),
+        ])
+
+        distribuido, _ = distribuir_portafolios_masivas(df)
+        resultado = actualizar_metadata_portafolios(distribuido)
+
+        self.assertFalse(resultado["Es_Portafolio"].any())
         self.assertEqual(resultado.loc[0, "Metadata"]["Id_Portafolio"], "")
         self.assertIsNone(resultado.loc[0, "Metadata"]["PaB_Portafolio"])
         self.assertEqual(resultado.loc[1, "Metadata"]["Id_Portafolio"], "")
@@ -323,6 +367,22 @@ class TestCambiosYLog(unittest.TestCase):
         self.assertTrue(cambios["Metadata_Cambio"].all())
         self.assertTrue(cambios["Portafolio_Cambio"].all())
         self.assertEqual(cambios["Diferencia_PaB"].tolist(), [-200000.0, -300000.0])
+
+    def test_cambios_incluyen_marca_automatica_de_portafolio(self):
+        original = self._df_base()
+        original["Es_Portafolio"] = False
+        original["PaB_Origen"] = [600000, 400000]
+        resultado, _ = distribuir_portafolios_masivas(original)
+        resultado = actualizar_metadata_portafolios(resultado)
+
+        cambios = construir_cambios_masivas(df_original=original, df_resultado=resultado)
+
+        self.assertEqual(len(cambios), 2)
+        self.assertTrue(cambios["Es_Portafolio_Despues"].all())
+        self.assertTrue(cambios["Portafolio_Cambio"].all())
+        self.assertTrue(cambios["Metadata_Cambio"].all())
+        self.assertTrue(cambios["PaB_Cambio"].all())
+        self.assertEqual(cambios["PaB_Propuesta_Despues"].tolist(), [300000.0, 200000.0])
 
     def test_construye_log_por_base_incluso_sin_cambios(self):
         original = pd.concat([
