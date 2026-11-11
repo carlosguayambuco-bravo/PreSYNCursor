@@ -723,7 +723,7 @@ def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Li
     # Creamos el Expander
     with container_fb:
         # Hay 2 Opciones a Mostrar: Like o Dislike ,Espacio para Comentario y Botón de Envío
-        colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="center", border=True)
+        colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="top", border=True)
 
         with colGusto:
             st.markdown("**¿Te fue útil lo que vez?**")

@@ -751,8 +751,15 @@ def mostrar_calculadora_individual():
         for _, row in datos_ref.iterrows()
     }
 
+    # Mostramos una alerta para disminuir el tamaño
+    st.info(
+        "Para que puedas ver mejor la página, **debes de disminuir el tamaño y cerrar la pestaña lateral**",
+        title="**Mejorar Vista**",
+        icon="😁"
+    )
+
     # Se crean 2 Columnas: Columna de Detalles de Deudas y Columna de Resultados
-    colDetallesDeudas, colResultados = st.columns([4, 1], vertical_alignment="center", gap="small")
+    colDetallesDeudas, colResultados = st.columns([4, 1], vertical_alignment="top", gap="small")
 
     pab_deudas = {}
     pab_ideal_deudas = {}
