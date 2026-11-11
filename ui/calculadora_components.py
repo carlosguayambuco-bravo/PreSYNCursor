@@ -27,6 +27,7 @@ from modules.oportunidades import (
     obtener_prospecto_tradicional_para_referencia,
     obtener_referencias_habilitadas,
     obtener_ultima_actualizacion_deuda,
+    registrar_opp_individual,
 )
 from ui.forms_components import mostrar_componente_feedback
 from utils.helpers_general import cleanNumber, formatNumber
@@ -61,7 +62,7 @@ def mostrar_datos_por_deuda_referencia(referencia: str) -> list[str]:
     for d in datos_ref['Id_Deuda'].unique():
         key_deuda_select = f"select_calc_ind_debt_{d}"
         if not (key_deuda_select in st.session_state):
-            st.session_state[key_deuda_select] = True
+            st.session_state[key_deuda_select] = False
 
     # Creamos las Columnas para los Headers
     colSelect, colIdDebt, colBanco, colPaB, colAct = st.columns([1,2,2,2,3])
@@ -651,11 +652,36 @@ def mostrar_calculadora_individual():
     if opp_credito:
         mostrar_alertas_credito(referencia=ref_escogida,deudas=debts_selected)
 
+    # Agregamos un Botón de Continuar
+    continuar_opp_calc = st.button(
+        label="**Continuar con Cálculo**",
+        type="primary",
+        width="stretch",
+        key="button_continuar_calc_opps",
+        icon="🔅"
+    )
+    llave_continuar_opp_ref = f'continuar_calc_opp_{ref_escogida}'
+
+    if continuar_opp_calc:
+        st.session_state[llave_continuar_opp_ref] = True
+
+    if not st.session_state.get(llave_continuar_opp_ref,False):
+        st.stop()
+
+    st.divider()
+
     # Creamos las Configuraciones Iniciales (para el Feedback)
     configs = {
         "Referencia": ref_escogida,
         "Deudas": debts_selected
     }
+
+    # Guardamos la Oportunidad
+    registrar_opp_individual(
+        referencia=ref_escogida,
+        deudas=debts_selected,
+        tipo_analisis=tipo_analisis
+    )
 
     # Creamos 3 Columnas: Columna Ahorro, Columna Por Cobrar y Columna Depósito Extra
     colAhorroInput, colPorCobrarInput, colDEInput = st.columns(3, border=True)
@@ -831,4 +857,4 @@ def mostrar_calculadora_individual():
 
     st.divider()
     # Mostramos Componente de Feedback
-    mostrar_componente_feedback(origin="Calculadora_Individual_Opps",configs=configs)
+    mostrar_componente_feedback(origin="Calculadora_Individual_Opps",configs=configs, type_container="container")

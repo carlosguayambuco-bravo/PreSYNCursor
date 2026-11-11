@@ -1,6 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, Literal
 from time import sleep
 # Librerías de Terceros
 from pandera.typing import DataFrame
@@ -704,19 +704,29 @@ def mostrar_dialogo_alerta_saldo(*,
             st.rerun()
 
 # Función Auxiliar para mostrar un Componente de Feedback
-def mostrar_componente_feedback(*,origin: str, configs: dict):
+def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Literal["expander","container"] = "expander"):
     """Función para mostrar un pequeño componente que sirva para dar feedback de la configuración interna del app
 
     Args:
         origin (str): El origen del Feedback
         configs (dict): Las Configuraciones que se usaron al momento de dar el Feedback
+        type_container (str): El tipo de Contenedor a usar entre expander y container con Borde
     """
+    # Definimos el Contenedor
+    if (type_container == "expander"):
+        container_fb = st.expander("**♻️ Dar FeedBack del App**", expanded=False)
+    elif (type_container == "container"):
+        container_fb = st.container(border=True)
+    else:
+        raise LookupError("Tipo de Contenedor no válido")
+
     # Creamos el Expander
-    with st.expander("**♻️ Dar FeedBack del App**", expanded=False):
+    with container_fb:
         # Hay 2 Opciones a Mostrar: Like o Dislike ,Espacio para Comentario y Botón de Envío
         colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="center", border=True)
 
         with colGusto:
+            st.markdown("**¿Te fue útil lo que vez?**")
             gusto_fb = st.feedback(
                 "thumbs",
                 key=origin+"_feedback_gusto",

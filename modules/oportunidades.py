@@ -20,6 +20,7 @@ from data.data_loader import (
     load_solicitudes_mec,
     obtener_fecha_expiracion_acuerdo,
 )
+from data.data_uploader import register_opps_uploaded
 from modules.constants import (
     ETIQUETAS_ACT_CONFIABLES,
     IVA,
@@ -1453,3 +1454,25 @@ def calcular_oportunidades_referencia(
             tipo_valor="porcentaje",
         ),
     }
+
+# Función para registrar la oportunidad calculada (Solo aplica para cálculos individuales)
+def registrar_opp_individual(*,referencia: str, deudas: list[str], tipo_analisis: str):
+    # Paso 1: Crear la llave que manejará las Opps ya subidas
+    if not ("registro_opps_ya_subidas" in st.session_state):
+        st.session_state["registro_opps_ya_subidas"] = set()
+    # Paso 2: Crear la llave que va a definir nuestra oportunidad
+    llave_opp = '_'.join([
+        referencia,
+        '-'.join(sorted(deudas)),
+        tipo_analisis
+    ])
+    # Paso 3: Verificamos si la Opp ya fue subida
+    if llave_opp in st.session_state["registro_opps_ya_subidas"]:
+        return
+
+    # Paso 4: Registrar la Oportunidad
+    register_opps_uploaded(
+        referencia=referencia,
+        deudas=deudas,
+        tipo_analisis=tipo_analisis
+    )

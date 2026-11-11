@@ -700,7 +700,8 @@ def load_masivas() -> DataFrame[MasivasSchema]:
     masivasDF = masivasDF[
         [
             'Id_Deuda', 'PaB_Propuesta', 'PaB_Estructurado', 'Plazo_Estructurado',
-            'Referencia','Casa_Cobro','Metadata', 'Es_Portafolio', 'Fecha_Masiva'
+            'Referencia','Casa_Cobro','Metadata', 'Es_Portafolio', 'Fecha_Masiva',
+            'Fila_Sheets'
         ]
     ]
 

@@ -705,3 +705,42 @@ def send_feedback(*, origin: str, configs: dict, result: bool, commentary: str) 
         st.error("Error al Subir Feedback, Intentar de Nuevo",icon="❌")
         st.caption(str(e))
         return False
+
+# Función para Registrar las Oportunidades Calculadas en Google Sheets
+def register_opps_uploaded(*,referencia: str, deudas: list[str], tipo_analisis: str) -> bool:
+    """Función para Registrar el Cálculo de una Oportunidad a Google Sheets
+
+    Args:
+        referencia (str): La Referencia que se analizó
+        deudas (list[str]): Los Ids de deuda que se analizaron
+        tipo_analisis (str): El Tipo de análisis que se realizó (Por tradicional o Crédito)
+
+    Returns:
+        bool: True si la ejecución fue exitosa, de lo contrario False
+    """
+    # Obtenemos el Servicio de Google Sheets desde el Session State de Streamlit
+    sheets_service: GoogleSheetsService = st.session_state['google_sheets_service']
+
+    # Abrimos la Hoja "Opps_Calc" de las Configuraciones
+    opps_ws = sheets_service.get_worksheet(CONFIGS_SHEET_ID, 'Opps_Calc')
+
+    # Ahora vamos a Crear el DF de Subida
+    subida_info = {
+        "Fecha_Opp": pd.Timestamp.now("America/Bogota").strftime("%Y-%m-%d %X"),
+        "Usuario": st.session_state.get("user_email","not_found"),
+        "Referencia": referencia,
+        "Deudas": '-'.join(sorted(deudas)),
+        "Tipo_Analisis": tipo_analisis,
+    }
+
+    # Creamos el DF de Subida
+    subida_df = pd.DataFrame([subida_info])
+
+    # Agregamos los Datos
+    try:
+        appendDataFrameToEnd(opps_ws, subida_df, "Feedback Sent")
+        return True
+    except Exception as e:
+        st.warning("La Oportunidad no se pudo registrar, PERO PUEDES CONTINUAR 😁",icon="❔")
+        st.caption(str(e))
+        return False
