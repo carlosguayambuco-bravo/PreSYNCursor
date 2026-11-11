@@ -34,7 +34,7 @@ from modules.oportunidades import (
     registrar_opp_individual,
 )
 from ui.forms_components import mostrar_componente_feedback
-from utils.helpers_general import cleanNumber, formatNumber
+from utils.helpers_general import cleanNumber, escapar_dolar_markdown, formatNumber
 
 # --- Configuración visual de la lista de deudas ---
 # Alto máximo (px) de la lista de deudas. El usuario puede ajustarlo.
@@ -391,11 +391,11 @@ def mostrar_oportunidades_referencia(
                     icon=ICONOS_OPORTUNIDADES[oportunidad],
                 )
             with colDescripcion:
-                st.markdown(DESCRIPCION_OPORTUNIDADES[oportunidad])
+                st.markdown(escapar_dolar_markdown(DESCRIPCION_OPORTUNIDADES[oportunidad]))
             with colValor:
                 st.markdown("**{}**".format(_formatear_valor_oportunidad(oportunidad=resultado)))
                 if resultado.get("detalle"):
-                    st.caption(resultado["detalle"])
+                    st.caption(escapar_dolar_markdown(resultado["detalle"]))
 
 # Funciones Auxiliares para Sincronizar los Controles de una Deuda
 def _formatear_pab_texto(pab: float) -> str:
@@ -654,7 +654,7 @@ def mostrar_seleccion_deuda(
             label="🆔Id Deuda",
             value=deuda
         )
-        st.caption("DUM: **$ {}**".format(formatNumber(pab_origen)))
+        st.caption("DUM: **\\$ {}**".format(formatNumber(pab_origen)))
         if modo == "credito":
             # Mostramos También el PaB_Ideal
             st.caption("PaB Ideal de Crédito: **{}**".format(formatNumber(

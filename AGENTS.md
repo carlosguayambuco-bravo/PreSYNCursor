@@ -65,11 +65,11 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 1. El negociador entra a **Calculadora de Oportunidades** y selecciona una Referencia habilitada (propias; el líder también ve las de su equipo; el admin ve todas).
 2. Revisa el ahorro neto, el pricing, el prospecto de crédito (`Batch`/`Cr Parcial`) y el prospecto de tradicional (`Trad 1-4`).
 3. Selecciona las deudas a analizar. La app bloquea deudas ya liquidadas.
-4. Elige el tipo de análisis: **Tradicional** (ahorro del cliente) o **Crédito** (PaB Ideal). Crédito exige PaB Ideal para todas las deudas y un estado apto en el Pipeline de Crédito.
+4. Elige el tipo de análisis: **Tradicional** (ahorro del cliente) o **Crédito** (PaB Ideal). Crédito exige un estado apto en el Pipeline de Crédito y analiza únicamente las deudas con PaB Ideal > 0. Los prospectos `Cr Parcial` solo pueden analizarse por Crédito y los `Tradicional` solo por Tradicional.
 5. La app muestra las oportunidades aplicables: Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora. También permite enviar feedback.
 6. El resultado es informativo: no crea ni modifica solicitudes por sí solo.
 
-> **Estado actual:** la calculadora individual está implementada (fórmulas en `modules/oportunidades.py`, UI en `ui/calculadora_components.py` y tests en `tests/test_oportunidades.py`). La calculadora masiva sigue pendiente. Ver sección 6.8.
+> **Estado actual:** la calculadora individual y la calculadora masiva están implementadas. Las fórmulas puras viven en `modules/oportunidades.py`, la UI individual en `ui/calculadora_components.py`, la UI masiva en `ui/calculadora_masiva_components.py` y los tests en `tests/test_oportunidades.py` y `tests/test_oportunidades_masivas.py`. La calculadora masiva usa Masivas cuando el toggle está activo y Actualizaciones cuando está inactivo, y calcula las oportunidades por portafolio/unidad de análisis. Ver sección 6.8.
 
 ### 1.4 Glosario de negocio
 
@@ -130,10 +130,13 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 - **Reasignable:** un acuerdo solicitado por un asesor cuyo pago no se ha reflejado puede ser tomado por otro negociador cuando vence la fecha límite de pago. Aplica a Acuerdos y Ofertas de Acuerdo no liquidados; excluye Validaciones. Cualquier negociador puede tomarlo.
 - **Aprobaciones de comité / titular ilocalizable:** `Estado_Comite` y `Estado_Titular_Ilocalizable` usan `1 = pendiente de aprobación`, `2 = rechazado`, `3 = aprobado pendiente de finalizar`. El **negociador** aprueba o rechaza con base en lo hablado con el cliente; si aprueba, la solicitud vuelve a la cola del ejecutivo para finalizarla. `Bajo Comité` suele implicar pago obligatorio y `Titular Ilocalizable` se usa para informar la situación de localización del titular.
 - **Contrapropuesta máxima relativa:** llega un descuento en base del aliado y ya se hizo un estudio de hasta qué porcentaje se puede mejorar. El código calcula `1 - monto_solicitado / monto_en_base` y **detiene el envío** si supera `Contrapropuesta_Maxima_Relativa`; aplica a Validación/Oferta y cuando el aliado se resolvió por `Directo Base`.
-- **Descuento Actual**: `1 - PaB_Actualizado / PaB_Origen` para el conjunto de deudas analizado. De las actualizaciones solo se confía en las etiquetas `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`; se toma la actualización más reciente y, si su etiqueta no es confiable, el descuento actual es 0%. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base con la última solicitud exitosa y prevalece la fuente con fecha más reciente. En el cálculo individual se asume que las deudas escogidas son el portafolio. `PaB_Actualizado` ya está en `ActualizacionesSchema` y se alimenta de `payment_to_bank` (centavos convertidos a COP).
+- **Prospecto de Crédito y tipo de pago:** los clientes con `Prospecto de Crédito = "Cr Parcial"` solo pueden aplicar a pagos/oportunidades por **Crédito**. Los clientes con `Prospecto de Crédito = "Tradicional"` solo pueden aplicar a pagos/oportunidades por **Tradicional**. Los `Batch 1-4` pueden usar ambos, siempre que Crédito sea viable.
+- **Descuento Actual**: `1 - PaB_Actualizado / PaB_Origen` para el conjunto de deudas analizado. En la calculadora individual, de las actualizaciones solo se confía en las etiquetas `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`; se toma la actualización más reciente y, si su etiqueta no es confiable, el descuento actual es 0%. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base con la última solicitud exitosa y prevalece la fuente con fecha más reciente. En el cálculo individual se asume que las deudas escogidas son el portafolio. `PaB_Actualizado` ya está en `ActualizacionesSchema` y se alimenta de `payment_to_bank` (centavos convertidos a COP). **En la calculadora masiva el descuento sale de Masivas con el toggle activo y de Actualizaciones con el toggle inactivo; nunca usa PaB simulado.**
 - **Búsqueda de Portafolios**: para definir las deudas que se agrupan como portafolio existen 2 reglas:
   1. **Con Actualización:** se toman solo las deudas con una actualización dentro de la ventana configurable `VENTANA_PORTAFOLIO_SEGUNDOS` (por defecto `45` segundos) y que además compartan la misma etiqueta. Las deudas que cumplan se consideran en portafolio.
   2. **Sin Actualizaciones:** si no existen actualizaciones, se agrupan las deudas por los bancos exclusivamente listados en `BANCOS_PORTAFOLIO`: `BBVA Colombia`, `Itaú`, `Banco de Occidente` y `Banco Popular`.
+
+  En la **calculadora masiva** cada portafolio es una unidad de análisis y las oportunidades se calculan por unidad; las deudas que no caen en un portafolio se analizan individualmente. En Masivas, `Metadata.Id_Portafolio` vacío significa deuda individual. Para Crédito, una unidad solo entra si todas sus deudas tienen PaB Ideal.
 
 ### 1.6 SLA y métricas
 
@@ -183,7 +186,7 @@ PreSYNCursor es una aplicación **Streamlit** que gestiona solicitudes de pago e
 - Generar acuerdos de pago y soportes PDF, subirlos a Google Drive y enviarlos por correo.
 - Consultar cartera, liquidaciones, logs y métricas.
 - Cruzar la cartera de un aliado contra la cartera interna para obtener el **Id Deuda interno** (pestaña "Agregar Cartera").
-- Calcular **oportunidades por Referencia** (Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora) en la calculadora individual. La calculadora masiva sigue pendiente; ver sección 6.8.
+- Calcular **oportunidades por Referencia** (Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora) en la calculadora individual y en la **calculadora masiva vectorizada**. La masiva usa Masivas o Actualizaciones según el toggle, calcula por portafolio/unidad de análisis y presenta tarjetas paginadas por cliente; ver sección 6.8.
 - Cargar **Asignación de Cartera**, **Prospectos de Tradicional** y **Pipeline de Crédito** como fuentes nuevas de la calculadora.
 - Enviar **feedback de la app** a la hoja `Feedback` del spreadsheet de Configs.
 
@@ -307,6 +310,7 @@ Notas:
 | `modules/id_aut_deud/deuda_matcher.py` | Algoritmo de matching de cartera (etiquetas EXACTO/DUPLICADO/AMBIGUO/ADDENDUM/NULO). |
 | `modules/id_aut_deud/helpers.py` | Limpieza, índices, pagos a cuotas, portafolios y preparación de la base del mes. |
 | `ui/calculadora_components.py` | UI de la calculadora individual por Referencia: selección de deudas, simulación de PaB/descuento, viabilidad y oportunidades. |
+| `ui/calculadora_masiva_components.py` | UI de la calculadora masiva: filtros, tarjetas por cliente, oportunidades por portafolio/unidad, ingreso estimado, detalle por portafolio, redirección a la calculadora individual y paginación entera. |
 | `ui/forms_components.py` | Componentes del formulario de solicitudes y componente de feedback. |
 | `ui/` | Componentes de presentación y formularios reutilizables. |
 | `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, calculadora, logs, cache y mando de operaciones. |
@@ -571,14 +575,14 @@ Portafolios:
 
 ### 6.8 Cálculo de oportunidades (calculadora)
 
-> **Estado actual:** la **calculadora individual** está implementada. `modules/oportunidades.py` contiene las fórmulas puras (`calcular_*`, `evaluar_*`), el agregador `calcular_oportunidades_referencia` y el acceso a datos; `ui/calculadora_components.py` conecta los sliders, los inputs manuales, la viabilidad y las oportunidades. La **calculadora masiva** sigue pendiente. Los tests de las fórmulas y umbrales están en `tests/test_oportunidades.py`. La fuente de verdad de negocio es `docs/OPORTUNIDADES_DETALLADO.md`.
+> **Estado actual:** la **calculadora individual** y la **calculadora masiva** están implementadas. `modules/oportunidades.py` contiene las fórmulas puras (`calcular_*`, `evaluar_*`), el agregador individual `calcular_oportunidades_referencia`, el motor vectorizado `calcular_oportunidades_masivas_datos` y la envoltura de datos `calcular_oportunidades_masivas`. La UI individual vive en `ui/calculadora_components.py` y la masiva en `ui/calculadora_masiva_components.py`. Los tests están en `tests/test_oportunidades.py` y `tests/test_oportunidades_masivas.py`. La fuente de verdad de negocio es `docs/OPORTUNIDADES_DETALLADO.md`.
 
 **Fuentes y supuestos:**
 
 - Se analiza un conjunto de deudas seleccionadas. En la calculadora individual se asume que **las deudas escogidas son el portafolio**.
 - `PaB_Origen`: monto original de la deuda.
 - `PaB_Actualizado`: monto de pago de la última actualización confiable. Se carga en `ActualizacionesSchema` desde `payment_to_bank`; el loader toma el primer número y lo divide entre 100 porque la fuente viene en **centavos** y el resultado queda en **COP**. Se toma la actualización **más reciente**: si su etiqueta no es confiable, se usa `PaB_Origen` (Descuento Actual = 0). Si la actualización confiable deja el PaB en 0, también se usa `PaB_Origen`: un pago en 0 se interpreta como dato faltante, no como descuento total. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base (masivas) con la última solicitud exitosa; si ambas fuentes tienen fecha, prevalece la más reciente, y si no hay fechas comparables se usa el valor de la fila de actualización.
-- `PaB_Ideal_Credito`: cupo aprobado por crédito. Para análisis por crédito, **todas** las deudas seleccionadas deben tener PaB Ideal > 0.
+- `PaB_Ideal_Credito`: cupo aprobado por crédito. En la calculadora individual, para análisis por crédito **todas** las deudas seleccionadas deben tener PaB Ideal > 0. En la calculadora masiva, una **unidad de análisis** (portafolio o deuda individual) solo se analiza por Crédito si **todas** sus deudas tienen PaB Ideal > 0; si falta una, la unidad completa queda fuera de Crédito y sigue participando de Tradicional. Las deudas individuales sin PaB Ideal quedan fuera de Crédito.
 - `Ahorro` y `Por_Cobrar`: valores del cliente desde SALDOS/TOTAL. En la calculadora individual se pueden simular con los inputs editables.
 - `PaB simulado`: en la calculadora individual, el input de PaB de cada deuda inicia con `PaB_Actualizado` (o `PaB_Origen` si no hay actualización confiable o si el PaB confiable viene en 0) y reemplaza el `PaB_Actualizado` oficial en Depósito Extra, Descuento Actual, Liquidación Instantánea y la comparación de la ContraOferta. La fórmula de la ContraOferta no cambia. La calculadora pasa el diccionario `pab_por_deuda` a `calcular_oportunidades_referencia`. El PaB simulado **puede superar el `PaB_Origen`** cuando se distribuye un monto de portafolio mayor al DUM total; en ese caso el descuento se muestra como 0% y el pago/ingreso se calculan con el valor simulado.
 - `Depósito Extra` simulado: el input de la calculadora representa el ahorro nuevo que se proyecta a futuro y **hace parte del ahorro disponible**. Se suma al Ahorro para calcular la ContraOferta y la viabilidad, y se resta del Depósito Extra requerido en Tradicional y Crédito. No se cuenta dos veces: el depósito calculado ya queda neto del input.
@@ -593,9 +597,10 @@ Portafolios:
 
 **Bloqueos y validaciones:**
 
-- Si alguna deuda seleccionada está liquidada (`obtener_estado_liquidacion_deudas`), la calculadora se detiene.
-- Análisis por crédito: se bloquea si el cliente está en `ESTADOS_NO_OPP_CREDITO` (`NO_PERFILA`, `NO_VIABLE_MEC`, `DTO_INSUFICIENTE`) o si alguna deuda no tiene PaB Ideal. Si está en `ESTADOS_NO_QUIERE_CREDITO` (`NO_LE_INTERESA`) solo se advierte. No estar en el Pipeline no bloquea.
-- `Prospectos de Crédito`: si el prospecto es `Tradicional`, la UI deshabilita el análisis por crédito; si contiene `parcial` (`Cr Parcial`), fuerza crédito y deshabilita el cambio.
+- Si alguna deuda seleccionada está liquidada (`obtener_estado_liquidacion_deudas`), la calculadora individual se detiene. La calculadora masiva excluye las deudas liquidadas y no analiza clientes cuyas deudas activas queden vacías.
+- Análisis por crédito en la calculadora individual: se bloquea si el cliente está en `ESTADOS_NO_OPP_CREDITO` (`NO_PERFILA`, `NO_VIABLE_MEC`, `DTO_INSUFICIENTE`) o si alguna deuda no tiene PaB Ideal. Si está en `ESTADOS_NO_QUIERE_CREDITO` (`NO_LE_INTERESA`) solo se advierte. No estar en el Pipeline no bloquea.
+- Análisis por crédito en la calculadora masiva: si el cliente no tiene fila en el Pipeline de Crédito **no** se bloquea; se asume viable porque aún no ha sido analizado. Si tiene fila, se considera no apto cuando el estado es `ESTADOS_NO_OPP_CREDITO` o `ESTADOS_NO_QUIERE_CREDITO`. No se exige que el estado sea exactamente `CERRADO`.
+- `Prospectos de Crédito`: si el prospecto es `Tradicional`, no se permite Crédito; si contiene `parcial` (`Cr Parcial`), solo se permite Crédito y se deshabilita Tradicional. Los `Batch 1-4` permiten ambos análisis.
 - `Prospectos de Tradicional`: `IA Liquidadora` usa `Prob_Liq >= 0.5` (probabilidad total, no `Prob_Liq_Cred` ni `Prob_Liq_Trad`).
 
 **Fórmulas:**
@@ -642,15 +647,73 @@ Portafolios:
   La unión con Alianzas/Metabase es por deuda (`Id_Deuda`), no por referencia.
 - **IA Liquidadora:** no requiere cálculo; se activa con `Prospectos de Tradicional` y `Prob_Liq >= 0.5`. Para varias deudas, basta con que **al menos una** cumpla el umbral. Tener categoría `Trad 1-4` da prioridad, pero el umbral es la probabilidad.
 
-**Portafolios:**
+### 6.8.1 Calculadora masiva de oportunidades
 
-- Con actualizaciones: solo deudas con actualización dentro de `VENTANA_PORTAFOLIO_SEGUNDOS` (45 s por defecto) y con la **misma etiqueta**.
-- Sin actualizaciones: agrupar por los bancos de `BANCOS_PORTAFOLIO` (`BBVA Colombia`, `Itaú`, `Banco de Occidente`, `Banco Popular`).
-- Las etiquetas confiables para descuento son `CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO` y `ACTUALIZADO_ALIANZAS`; el resto se trata como 0% en el cálculo masivo.
+La pestaña **🛠️ Oportunidades Masivas** de `views/calculadora_opps.py` ejecuta el cálculo para todas las Referencias habilitadas del usuario (mismo alcance de `obtener_referencias_habilitadas`). La UI está en `ui/calculadora_masiva_components.py` y el motor en `modules/oportunidades.py`.
+
+**Fuente del descuento:**
+
+- El cálculo se hace por **unidad de análisis**: cada portafolio detectado o cada deuda individual. Luego se consolidan las unidades a nivel de cliente.
+- `Solo de Masivas de Alianzas` (toggle activo por defecto):
+  - **Activo:** el `PaB_Actualizado` sale **exclusivamente de la Base del Mes de Masivas** (`load_masivas`). Solo se analizan deudas con descuento vigente; los clientes sin deudas en Masivas no aparecen.
+  - **Inactivo:** el `PaB_Actualizado` sale de **Actualizaciones**, con las etiquetas confiables (`CAMBIO DE PAB`, `ACUERDO`, `DEPOSITO`, `ACTUALIZADO_ALIANZAS`) y la regla individual de `ACTUALIZADO_ALIANZAS` (cruce con Masivas y Solicitudes). Se analizan todas las deudas activas; las deudas sin actualización usan `PaB_Origen` (Descuento Actual = 0%).
+- `seleccionar_descuentos_masivas` elige un único registro por deuda:
+  - Solo considera `PaB_Propuesta > 0`.
+  - Descarta registros con `Metadata.Fecha_Limite_Uso` vencida.
+  - Los registros sin metadata (o con metadata inválida) se consideran vigentes.
+  - Si hay varios vigentes, toma el **menor `PaB_Propuesta`** (mejor descuento). Los empates se resuelven por la masiva más reciente (`Fecha_Masiva` y luego `Fila_Sheets`).
+  - Devuelve `Id_Portafolio`, `PaB_Portafolio` y `Portafolio_Completo` para armar las unidades.
+- Las deudas liquidadas se excluyen del análisis. `Tiene_Deudas_Liquidaciones` queda disponible como filtro.
+
+**Portafolios y pago actual:**
+
+- **Masivas:** una deuda pertenece a un portafolio cuando `Metadata.Id_Portafolio` no está vacío; si está vacío, es una unidad individual. Para el portafolio se usa `PaB_Portafolio` como total y se distribuye por `PaB_Origen`. Si falta el total o el portafolio está incompleto (no están todas las deudas que reporta la base), se usa la suma de `PaB_Propuesta` de las deudas disponibles.
+- **Actualizaciones:** se agrupan las actualizaciones confiables consecutivas con la misma etiqueta y a ≤ `VENTANA_PORTAFOLIO_SEGUNDOS` (45 s por defecto). Si todas las deudas del grupo tienen el mismo `PaB_Actualizado`, el pago se usa **una sola vez**; si difieren, se **suman**. Las actualizaciones no confiables no forman portafolio de pago.
+- **Sin actualizaciones:** si el cliente no tiene ninguna actualización, se agrupan las deudas por cada banco de `BANCOS_PORTAFOLIO` (`BBVA Colombia`, `Itaú`, `Banco de Occidente`, `Banco Popular`). Cada banco forma su propio grupo; si el grupo tiene una sola deuda, queda individual. Si el cliente tiene al menos una actualización, esta regla no se aplica.
+- Las deudas que no quedan en un portafolio se analizan **individualmente**.
+- El pago de un portafolio se distribuye por `PaB_Origen` entre sus deudas para que la suma por deuda coincida con el total de la unidad. `Pago_Compartido` indica si el pago se usó una sola vez (Masivas con `PaB_Portafolio` o Actualizaciones con valores iguales).
+
+**Reglas de Crédito:**
+
+- `Credito_Viable` se determina con el estado del Pipeline cuando existe: es falso si el estado es `ESTADOS_NO_OPP_CREDITO` o `ESTADOS_NO_QUIERE_CREDITO`. Si no hay fila en el Pipeline se asume viable, porque la ausencia de gestión no implica inviabilidad. No se exige `CERRADO`.
+- `Tradicional_Habilitado = prospecto no Cr Parcial`.
+- `Cr Parcial` solo permite Crédito; `Tradicional` solo permite Tradicional; `Batch 1-4` permite ambos.
+- Una unidad se analiza por Crédito solo si **todas** sus deudas tienen `PaB Ideal > 0`. Si falta una, la unidad completa queda fuera de Crédito (no se analiza con un subconjunto). Las deudas individuales sin PaB Ideal quedan fuera de Crédito y siguen en Tradicional.
+- `Credito_Habilitado` es verdadero si al menos una unidad del cliente se analiza por Crédito.
+- `Credito_Detalle` informa cuántas unidades entran y cuántas quedan fuera por deudas sin PaB Ideal.
+
+**Oportunidades y resultado:**
+
+- Se aplican las mismas fórmulas de Depósito Extra, ContraOferta Viable y Liquidación Instantánea de la calculadora individual, sin PaB simulado ni Depósito Extra simulado. El cálculo se hace **por unidad** (Tradicional y Crédito).
+- Acuerdo para Robo e IA Liquidadora son oportunidades generales por cliente:
+  - Acuerdo para Robo se calcula de forma vectorizada sobre las actualizaciones del MEC. Primero resuelve Alianzas; para las deudas sin fecha de Alianza hace **una consulta batch** a Metabase con `load_vencimientos_acuerdos` y `QUERY_VENCIMIENTO_ACTS`. Si la consulta falla, no se asume la oportunidad; si trae datos pero no un acuerdo para la deuda/correo, se reporta "Sin fecha".
+  - IA Liquidadora usa la máxima `Prob_Liq` de las deudas analizadas y aplica si `>= 0.5`.
+- El resultado es un DataFrame con una fila por Referencia. Incluye métricas globales, métricas `Trad_*` y `Cred_*`, banderas por unidad, `Portafolios_Detalle`, `Oportunidades`, `Oportunidades_Generales`, `Num_Oportunidades`, `Num_Oportunidades_Calculadas`, `Num_Oportunidades_Generales`, `Es_Viable`, `Viable_Por`, `Tipos_Analisis` y `Deudas_Detalle`.
+- `Num_Oportunidades` cuenta **incidencias por unidad** para las oportunidades calculadas (por ejemplo, Liquidación Instantánea en 3 portafolios suma 3) y **una vez** cada oportunidad general (Robo o IA). Los badges del encabezado muestran los tipos únicos.
+- `Es_Viable` es verdadero si al menos una unidad es viable; `Viable_Por` indica si es por Tradicional, Crédito o ambos.
+- El cálculo reporta avance con `st.progress` a través de `progreso_callback`.
+
+**Filtros y visualización:**
+
+- Los filtros se muestran dentro de un `st.container(border=True)`.
+- Filtros: búsqueda por Referencia/Cliente, Negociador, Prospecto de Crédito, Tipo de Análisis (Tradicional/Crédito/ambos), multiselect de Oportunidad, Solo con oportunidades, Solo viables, rango de Descuento Actual, rango de DUM Total y exclusión de clientes con deudas liquidadas.
+- Ordenamiento: **Mayor Ingreso Estimado (por defecto)**, más oportunidades, mayor Descuento Actual, mayor DUM, mayor Ahorro Neto, Referencia A-Z o Nombre del Cliente A-Z.
+- Debajo del ordenamiento hay un toggle **Invertir orden** (desactivado por defecto). Cada criterio conserva su orden natural (numéricos de mayor a menor, A-Z de A a Z); el toggle lo invierte.
+- `Ingreso Estimado = max((DUM - PaB Actual) * Pricing, 0)`, sin IVA. Reemplaza a `Apartado_Neto` como quinto KPI y es el orden por defecto.
+- La tarjeta del cliente muestra:
+  - Un primer `st.container(horizontal=True)` con el número de oportunidades, si es viable y por dónde.
+  - Un segundo `st.container(horizontal=True)` con los badges de todos los tipos de oportunidad.
+  - Métricas: DUM, PaB Actual (Masivas o Actualizaciones según la fuente), Descuento Actual, Ahorro Neto e Ingreso Estimado.
+  - Los bloques **Tradicional** y **Crédito lado a lado, con borde**, con una fila por unidad y oportunidad en 4 columnas: Oportunidad, Descripción, Valor y Deudas Involucradas. Las deudas muestran el nombre de la unidad y su cantidad como `st.caption` y los Ids como badges `🆔`; se inserta `st.divider()` entre oportunidades.
+  - El bloque **Oportunidades Generales** con Robo/IA y sus deudas, con el mismo esquema de columnas, captions y separadores.
+  - El expander **🔎 Ver deudas analizadas**.
+  - El expander **📦 Detalle por portafolio / unidad de análisis**, con altura fija y scroll, que muestra cada unidad, sus deudas y sus oportunidades.
+  - Un popover **🔁 Analizar en la calculadora individual** para escoger la unidad y el tipo de análisis. El botón deja la pestaña individual con la Referencia, las deudas del portafolio en `True`, las demás deudas del cliente en `False`, el tipo de análisis y `Continuar con Cálculo` listos. Limpia la simulación previa de PaB/descuento y el portafolio total.
+- La paginación es local y **siempre usa enteros**: `_normalizar_pagina_actual` convierte strings/floats y `_calcular_slice_pagina` devuelve inicio/fin enteros antes de `iloc`. Los clientes por página se configuran en 10/20/30/50.
+- Las descripciones y los detalles con montos se renderizan escapando `$` como `\$` para que Markdown no los interprete como LaTeX (`escapar_dolar_markdown`).
 
 **Pendientes de definición/implementación:**
 
-- Implementar la calculadora masiva de oportunidades (hoy la pestaña `Oportunidades Masivas` está vacía).
 - Validar con negocio si la regla de "sin gestión posterior" del Acuerdo para Robo debe excluir también actualizaciones que no sean de pago (hoy excluye cualquier actualización posterior al `ACUERDO`).
 - Validar el comportamiento de `ACTUALIZADO_ALIANZAS` cuando la metadata de masivas no trae `Fecha_Limite_Uso` y la solicitud exitosa tampoco tiene `Fecha_Respuesta`: hoy se usa el valor de la fila de actualización.
 
@@ -697,6 +760,11 @@ Portafolios:
 - Renombra `end/debt_id/inserted_at/bank_reference/Status_Act/payment_to_bank` a `Correo/Id_Deuda/Fecha_Act/Referencia/Etiqueta_Act/PaB_Actualizado`.
 - Resta 5 horas a `Fecha_Act` (UTC → Bogotá), limpia `Etiqueta_Act` con `cleanText` (mayúsculas, sin tildes; los espacios se conservan), filtra correos no relevantes y hace `left join` con Headcount para obtener `Nombre`.
 - `PaB_Actualizado` se extrae de `payment_to_bank`: se toma el primer número y se divide entre 100. Las filas sin valor válido se descartan para cumplir el esquema.
+
+**Vencimientos de acuerdos masivos (`load_vencimientos_acuerdos`):**
+
+- Consulta `QUERY_VENCIMIENTO_ACTS` en bloques de 500 `debt_ids` para evitar una consulta por deuda en la calculadora masiva.
+- Devuelve el DataFrame crudo de actividades del último mes, un DataFrame vacío si no hay datos, o `None` si Metabase falla. El filtro por `Correo_Act`, etiqueta `agreement` y la selección de la máxima `Fecha_Expiracion` se hace en `_construir_fechas_metabase_acuerdos`.
 
 **MEC (`load_mes_operativo_liquidaciones`):**
 
@@ -771,6 +839,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 | `tests/test_archivos.py` | Nombres de archivos, metadata de PDFs, esquema de archivos subidos y soportes por deuda. |
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
 | `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, Depósito Extra simulado como parte del ahorro, portafolio distribuido por `PaB_Origen`, PaB simulado mayor al Origen, umbrales, `PaB_Actualizado` con etiquetas confiables, fallback a `PaB_Origen` cuando el PaB es 0 y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
+| `tests/test_oportunidades_masivas.py` | Selección del mejor descuento vigente de Masivas (fechas vencidas, metadata ausente, empates), metadatos y completitud de portafolios, pago de portafolios de Masivas y de Actualizaciones (valores iguales vs. distintos), regla de bancos, cálculo por unidad de Tradicional y Crédito, Crédito por portafolio (todas las deudas con PaB Ideal), `Cr Parcial`/`Tradicional` como restricción de tipo de pago, incidencias de oportunidades, ingreso estimado y orden, redirección a la calculadora individual, filtros de la vista masiva, escape de `$` en Markdown y paginación entera. |
 | `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), completado y preservación de metadata, `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
 
 ### Convenciones para nuevos tests
@@ -811,7 +880,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 - Regla de aliados / normalización → `modules/classes.py`, `modules/bank_normalizer.py`.
 - Cruce de cartera → `modules/id_aut_deud/`.
 - Lectura/escritura de datos → `data/data_loader.py` / `data/data_uploader.py`.
-- Componente visual → `ui/`. La calculadora vive en `ui/calculadora_components.py`.
+- Componente visual → `ui/`. La calculadora individual vive en `ui/calculadora_components.py` y la masiva en `ui/calculadora_masiva_components.py`.
 - Página → `views/` y registrar permiso en `core/permissions.py`.
 
 ---
@@ -834,7 +903,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 14. **`Pago_Total_Obligatorio` se fuerza en `Bajo Comité`.** La UI lo pone en `True` y deshabilita el toggle; no es una elección libre en ese estado.
 15. **Bloqueos duros del formulario.** El envío se detiene si hay bancos no habilitados o si se excede la contrapropuesta máxima relativa. `Brindan Máx. Descuento` sigue siendo solo una advertencia.
 16. **Conteo de liquidaciones en reportes.** Las fórmulas oficiales se definen sobre solicitudes exitosas, pero `obtener_resumen_liquidaciones` y `obtener_tops_negociadores` todavía pueden contar liquidaciones de solicitudes No Exitosas o Validadas por Fuera. Revisa el filtro antes de usar esos números en decisiones.
-17. **La calculadora individual ya está implementada; la masiva no.** `modules/oportunidades.py` contiene las fórmulas, el agregador y el acceso a datos; `ui/calculadora_components.py` ya conecta sliders, inputs manuales, viabilidad y oportunidades. La pestaña `Oportunidades Masivas` sigue vacía. El input de **Portafolio Total** se aplica con un callback `on_change` y distribuye por `PaB_Origen`; si el total supera el DUM, los PaB simulados quedan por encima de su `PaB_Origen` y el descuento se muestra como 0%.
+17. **La calculadora individual y la masiva están implementadas.** La individual usa PaB simulado y Actualizaciones; la masiva usa Masivas con el toggle activo y Actualizaciones con el toggle inactivo, calcula por portafolio/unidad de análisis y no acepta PaB simulado. El input de **Portafolio Total** de la individual se aplica con un callback `on_change` y distribuye por `PaB_Origen`; si el total supera el DUM, los PaB simulados quedan por encima de su `PaB_Origen` y el descuento se muestra como 0%. La masiva pagina las tarjetas y normaliza la página a entero antes de hacer `iloc`.
 18. **`PaB_Actualizado` viene de `payment_to_bank` en centavos.** El loader toma el primer número, lo divide entre 100 y descarta filas sin valor válido; el resultado queda en COP. Para `ACTUALIZADO_ALIANZAS` se cruza el último descuento en base con la última solicitud exitosa y prevalece la fuente con fecha más reciente. Si la actualización confiable deja el PaB en 0, `obtener_pab_actualizado_deuda` devuelve `PaB_Origen` para no interpretar un dato faltante como descuento del 100%.
 19. **`AsignacionSchema` es estricto con `Pricing` y `Id_Deuda`.** Solo acepta `Pricing` 0.15, 0.20 o 0.25; si el Excel trae otro valor (o 15/20/25 sin dividir entre 100), la validación falla. `Id_Deuda` debe ser único. Conserva `Banco`; `Fecha_Cartera` es temporal y se descarta antes de validar.
 20. **Formato de la Asignación de Cartera.** El archivo debe terminar en `-MesAA.xlsx` (mes de 3 letras + año de 2 dígitos) y la hoja debe llamarse `Mes AAAA` (por ejemplo, `Octubre 2025`). Si el nombre no cumple, `obtener_prioridad_archivo`/`obtener_prioridad_hoja` devuelven prioridad 0 y el loader puede caer a un archivo anterior. El MEC ya no depende de la Asignación.
@@ -863,6 +932,8 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 - [ ] ¿Si cambiaste reglas de estado/SLA, actualizaste las constantes, los tests y este documento?
 - [ ] ¿Si cambiaste una fórmula de oportunidad, actualizaste `docs/OPORTUNIDADES_DETALLADO.md`, `docs/OPORTUNIDADES.md` y `AGENTS.md`?
 - [ ] ¿Agregaste tests de la fórmula, los umbrales y los bordes (sin deudas, deuda liquidada, sin PaB Ideal, `Apartado_Neto = 0`, sin actualizaciones) antes de conectar una oportunidad a la UI?
+- [ ] ¿Si tocaste la calculadora masiva, probaste el toggle `Solo de Masivas`, la selección del mejor descuento vigente, la fuente de Actualizaciones con toggle inactivo, los portafolios de Masivas/Actualizaciones/Bancos, `Cr Parcial`/`Tradicional`, Crédito por unidad solo si todas las deudas tienen PaB Ideal, el orden por ingreso y la paginación entera?
+- [ ] ¿Verificaste que la calculadora masiva use Masivas con el toggle activo y Actualizaciones con el toggle inactivo (nunca PaB simulado) y que calcule por portafolio/unidad?
 - [ ] ¿Verificaste que la Asignación de Cartera tenga `Banco`, `Pricing` válido e `Id_Deuda` único?
 - [ ] ¿Verificaste que `load_liquidaciones_mec()` tenga `Fecha_Liq` válida para calcular el MEC?
 - [ ] ¿Verificaste que `PaB_Actualizado` se extraiga correctamente de `payment_to_bank` (centavos → COP) antes de usarlo en oportunidades?

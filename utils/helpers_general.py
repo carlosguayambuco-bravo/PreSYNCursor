@@ -327,3 +327,22 @@ def replaceNaN(*,value, nan_replace):
 # Función Auxiliar para realizar un formato con un NaN
 def formatNaN(*,value,nan_replace, format_str: str = "{}"):
     return format_str.format(value) if pd.notna(value) and value != "" and value != "nan" else nan_replace
+
+# Función Auxiliar para Escapar el Símbolo de Peso en Markdown
+def escapar_dolar_markdown(texto) -> str:
+    """Escapa los ``$`` para que Streamlit no los interprete como LaTeX.
+
+    Markdown trata un par de ``$`` como una expresión matemática. Cuando se
+    muestran varios montos en un mismo texto, todo el contenido intermedio se
+    renderiza como código. Anteponer ``\\`` mantiene el símbolo visible como
+    texto normal.
+
+    Args:
+        texto: Texto que puede contener montos o descripciones.
+
+    Returns:
+        str: Texto con cada ``$`` escapado como ``\\$``.
+    """
+    if texto is None:
+        return ""
+    return str(texto).replace("$", "\\$")

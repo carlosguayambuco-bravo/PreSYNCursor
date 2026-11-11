@@ -540,3 +540,9 @@ MASIVAS_MAX_ROWS_PER_BATCH = 3000
 BANCOS_PORTAFOLIO = ["BBVA Colombia", "Itaú", "Banco de Occidente", "Banco Popular"]
 # Ventana configurable para agrupar actualizaciones de una misma gestión como portafolio.
 VENTANA_PORTAFOLIO_SEGUNDOS = 45
+
+# --- Navegación de la Calculadora de Oportunidades ---
+ETIQUETA_TAB_CALCULADORA_INDIVIDUAL = "😁 Calculadora por Referencia"
+ETIQUETA_TAB_CALCULADORA_MASIVA = "🛠️ Oportunidades Masivas"
+LLAVE_TAB_CALCULADORA = "calc_opps_tabs"
+LLAVE_REDIRECCION_CALCULADORA = "calc_opps_redir_pendiente"

@@ -2472,6 +2472,49 @@ def obtener_fecha_expiracion_acuerdo(*, debt_ids: list[str], end: str) -> Option
         # Ante cualquier error, devolvemos None
         return None
 
+# Función Auxiliar para Obtener los Vencimientos de Acuerdos de Varias Deudas en una sola Consulta
+@st.cache_data(ttl=HOUR_WAIT, show_spinner="Buscando vencimientos de acuerdos en Metabase...")
+def load_vencimientos_acuerdos(*, debt_ids: tuple[str, ...]) -> Optional[pd.DataFrame]:
+    """Obtiene las actividades de acuerdo de varias deudas desde Metabase.
+
+    Se usa en la calculadora masiva para evitar una consulta por deuda. La
+    consulta original filtra por ``debt_id`` y devuelve las actividades del
+    último mes; el filtro por correo y etiqueta se hace después en memoria.
+
+    Args:
+        debt_ids (tuple[str, ...]): Ids de deuda a consultar.
+
+    Returns:
+        Optional[pd.DataFrame]: DataFrame con las columnas de la consulta, un
+        DataFrame vacío si no hay datos, o ``None`` si Metabase falló.
+    """
+    # Paso 1: Limpiar y Validar los Ids
+    ids_limpios = [
+        str(deuda).replace('.0', '').strip()
+        for deuda in debt_ids
+        if str(deuda).replace('.0', '').strip()
+    ]
+    if not ids_limpios:
+        return pd.DataFrame()
+
+    # Paso 2: Consultar en Bloques para no Exceder el Tamaño de la Query
+    bloques = []
+    try:
+        for inicio in range(0, len(ids_limpios), 500):
+            bloque = ids_limpios[inicio:inicio + 500]
+            query = QUERY_VENCIMIENTO_ACTS.format(debt_ids=','.join(bloque))
+            df_bloque = execute_query_cache(query, dbId=12)
+            if df_bloque is not None and not df_bloque.empty:
+                bloques.append(df_bloque)
+    except Exception:
+        # Ante cualquier error, la calculadora masiva no debe asumir vencimientos
+        return None
+
+    # Paso 3: Unir los Bloques
+    if not bloques:
+        return pd.DataFrame()
+    return pd.concat(bloques, ignore_index=True)
+
 # Función Auxiliar para obtener todos los datos necesarios de las deudas de reparadoras activas
 @st.cache_data(ttl=WEEK_WAIT, show_spinner="Buscando los Datos de las Reparadoras Activas")
 def obtener_datos_completos_deudas() -> DataFrame[InputCruceSchema]:
