@@ -167,11 +167,11 @@ class AliadosSchema(pa.DataFrameModel):
 
 
 class MasivasMetadata(TypedDict):
-    Id_Cruce: str
+    Id_Cruce: str # UUID
     Tipo_Contraoferta: TIPOS_CONTRAOFERTAS
     Fecha_Limite_Uso: datetime
     Alias: Optional[str]
-    Id_Portafolio: str
+    Id_Portafolio: str # Unión de UUIds por '-'
     PaB_Portafolio: Optional[float]
 
 class MasivasSchema(pa.DataFrameModel):
