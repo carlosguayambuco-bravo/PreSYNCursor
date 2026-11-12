@@ -15,7 +15,7 @@ import streamlit as st
 from core.permissions import PERMISSIONS_DICT
 from data.data_models import ActualizacionesSchema, AddendumsSchema, AhorroSchema, AliadosSchema, ArchivosSubidosSchema, AsignacionSchema, CambiosMasivasSchema, CarteraActivaSchema, ConfigsSchema, DeudasActivasSchema, DeudasPosiblesCruce, DeudasSolicitud, HeadCountSchema, InputCruceSchema, LiquidationsSchema, LogsSchema, MasivasControlSchema, MasivasMetadata, MasivasSchema, MetadataPendienteCruce, MetadataSolicitud, PaBIdealSchema, PagosCuotasCruce, PendienteCruceSchema, PipelineCreditoSchema, PorCobrarSchema, ProspectosCreditoSchema, ProspectosTradicionalSchema, SolicitudesSchema, UltimaActualizacionSchema, UserPermissionsSchema
 from modules.bank_normalizer import normalizar_banco, normalizar_bancos_vectorizado
-from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CAMBIO_MASIVAS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, ESTADOS_NO_OPP_CREDITO, ESTADOS_NO_QUIERE_CREDITO, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_BASE_MES_SHEET, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PIPELINE_CREDITO_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_DEUDAS_PAB_ORIGEN, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VENCIMIENTO_ACTS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
+from modules.constants import ACTUALIZACIONES_SHEET_ID, ALIADOS_SHEET_ID, ARCHIVOS_SUBIDOS_COLUMNS, ARCHIVOS_SUBIDOS_SHEET, CAMBIO_MASIVAS_SHEET, CARTERA_ACTIVA_SHEET_ID, COL_MAPPER_ASIGNACION, COL_MAPPER_LIQ, COL_MAPPER_LIQ, CONFIGS_SHEET_ID, CORREOS_NO_RELEVANTES, DEFAULT_DISCOUNT_PL, ESTADOS_LIQUIDACION, ESTADOS_NO_OPP_CREDITO, ESTADOS_NO_QUIERE_CREDITO, HCNEGO_SHEET_ID, HOUR_WAIT, DAY_WAIT, LIQUIDACIONES_SHEET_ID, MAP_MORA_CREDITO, MAP_MORA_ESTRUCTURADO, MASIVAS_BASE_MES_SHEET, MASIVAS_SHEET_ID, PABIDEAL_SHEET_ID, PERMITTED_USERS, PIPELINE_CREDITO_SHEET_ID, PROSPECTOS_CREDITO_SHEET_ID, PROSPECTOS_TRADICIONAL_SHEET_ID, QUERY_BUSCAR_MONTO_ACTUAL, QUERY_DEBT_TO_REFERENCE, QUERY_DEUDAS, QUERY_DEUDAS_CEDULA, QUERY_DEUDAS_PAB_ORIGEN, QUERY_INFO_BASICA_POR_DEUDA, QUERY_LAST_UPDATE, QUERY_PLANES, QUERY_TOTAL_REPARADORAS, QUERY_VENCIMIENTO_ACTS, QUERY_VERIFICAR_DEUDAS, REFCHANGES_SHEET_ID, SALDOS_SHEET_ID, SUB_ESTADOS_LIQUIDACION, TIPOS_STATUS, WEEK_WAIT, MIN_10_WAIT, SOLICITUDES_SHEET_ID
 from services.google_drive import GoogleDriveService
 from services.google_sheets import GoogleSheetsService
 from services.metabase import MetabaseService
@@ -1296,6 +1296,49 @@ def load_app_config() -> dict:
     # Devolvemos el Diccionario de Configuración
     return config_dict
 
+# Función Auxiliar para Normalizar el Cargo Interno de un Usuario
+def _normalizar_cargo_interno(cargo: object) -> Optional[str]:
+    """Convierte el valor de Cargo_Interno en un rol válido de la aplicación.
+
+    Se aceptan mayúsculas/minúsculas y espacios alrededor. Si el valor no es
+    uno de los roles permitidos, devuelve None para que el usuario conserve el
+    rol que le asigna el headcount.
+    """
+    if pd.isna(cargo):
+        return None
+    cargo_normalizado = str(cargo).strip().lower()
+    return cargo_normalizado if cargo_normalizado in get_args(PERMITTED_USERS) else None
+
+# Función Auxiliar para Construir el Mapa de Roles Especiales
+def _construir_roles_especiales(usuarios_df: pd.DataFrame) -> dict[str, str]:
+    """Construye el mapa Correo -> Cargo_Interno de la hoja "Usuarios"."""
+    columnas = ['Correo', 'Cargo_Interno']
+    if usuarios_df.empty or any(col not in usuarios_df.columns for col in columnas):
+        return {}
+
+    # Quitamos Filas sin Correo o sin Cargo y Normalizamos el Correo
+    roles_df = usuarios_df[columnas].dropna(subset=columnas)
+    roles_especiales: dict[str, str] = {}
+    for correo, cargo in zip(roles_df['Correo'], roles_df['Cargo_Interno']):
+        correo_normalizado = str(correo).strip().lower()
+        cargo_normalizado = _normalizar_cargo_interno(cargo)
+        if correo_normalizado and cargo_normalizado:
+            roles_especiales[correo_normalizado] = cargo_normalizado
+
+    return roles_especiales
+
+# Función Auxiliar para Cargar los Roles Especiales de los Usuarios
+@st.cache_data(show_spinner="Cargando Roles Especiales desde Google Sheets...", ttl=HOUR_WAIT, show_time=True)
+def load_permisos_especiales() -> dict[str, str]:
+    # Paso 1: Obtener el Servicio de Google Sheets
+    google_sheets_service: GoogleSheetsService = st.session_state["google_sheets_service"]
+
+    # Paso 2: Obtenemos los Datos de la Hoja "Usuarios"
+    users_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Usuarios')
+
+    # Paso 3: Construimos el Diccionario Correo -> Rol
+    return _construir_roles_especiales(users_df)
+
 # Función Auxiliar para Cargar los Permisos de Usuarios Especiales
 @st.cache_data(show_spinner="Cargando Permisos de Usuarios Especiales desde Google Sheets...", ttl=DAY_WAIT)
 def load_special_user_permissions() -> dict:
@@ -1305,17 +1348,32 @@ def load_special_user_permissions() -> dict:
     # Ahora Abrimos la Hoja "Usuarios" de las Configuraciones de la Aplicación
     special_users_df = google_sheets_service.get_sheet_as_dataframe(CONFIGS_SHEET_ID, 'Usuarios')
 
+    # La Hoja puede tener columnas adicionales (por ejemplo, Cargo_Interno);
+    # nos quedamos solo con las que necesita este loader para no romper el esquema.
+    columnas = ['Correo', 'Permisos']
+    if any(col not in special_users_df.columns for col in columnas):
+        return {}
+    special_users_df = special_users_df[columnas].dropna(subset=['Correo']).copy()
+    special_users_df = special_users_df[
+        special_users_df['Correo'].astype(str).str.strip() != ''
+    ]
+
+    # Si no quedaron Filas Válidas, no hay Permisos Especiales que Aplicar
+    if special_users_df.empty:
+        return {}
+
+    # Normalizamos el Correo para que la Búsqueda no dependa de Mayúsculas
+    special_users_df['Correo'] = special_users_df['Correo'].apply(lambda s: str(s).strip().lower())
+
+    # Validamos el DF con el Esquema antes de Convertir los Permisos a Objetos
+    special_users_df['Permisos'] = special_users_df['Permisos'].fillna('')
+    special_users_df = UserPermissionsSchema.validate(special_users_df)
+
     # A la Columna Permisos la Convertimos a Lista de Permisos
-    special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda s: [p.strip() for p in str(s).split(',')] if pd.notnull(s) else [])
+    special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda s: [p.strip() for p in str(s).split(',')] if str(s).strip() else [])
 
     # Ahora cambiamos la Búsqueda de Permisos según el Nombre y el Diccionario
     special_users_df['Permisos'] = special_users_df['Permisos'].apply(lambda perms: [PERMISSIONS_DICT[p] for p in perms if p in PERMISSIONS_DICT])
-
-    # Validamos el DF con el esquema (Si no esta vacío)
-    if special_users_df.empty:
-        special_users_df = UserPermissionsSchema.empty()
-    else:
-        special_users_df = UserPermissionsSchema.validate(special_users_df)
 
     # Convertimos el DataFrame a un Diccionario
     return special_users_df.set_index('Correo')['Permisos'].to_dict()
@@ -2182,7 +2240,7 @@ def load_asignacion_cartera() -> DataFrame[AsignacionSchema]:
 
 # Función Auxiliar para Ejecutar la Query de Deudas Activas
 @st.cache_data(ttl=HOUR_WAIT, max_entries=200, show_spinner=False)
-def execute_query_cache(query: str, dbId: int = None):
+def execute_query_cache(query: str, dbId: int):
     # Paso 1: Obtener El Servicio de Metabase
     metabase_service: MetabaseService = st.session_state["metabase_service"]
     return metabase_service.execute_query(query, dbId=dbId)

@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 import urllib.parse
+from typing import Optional
 
 # Librerías de Terceros
 import jwt
@@ -30,7 +31,8 @@ from core.auth_scopes import (
     normalize_scope_list,
 )
 from core.users import User
-from data.data_loader import load_headcount_negociacion
+from data.data_loader import load_headcount_negociacion, load_permisos_especiales
+from modules.constants import PERMITTED_USERS
 from views.error_page import error_page_view
 
 SCOPES = [
@@ -610,26 +612,40 @@ def get_user_info_from_credentials():
     user_info = service.userinfo().get().execute()
     return user_info
 
-def get_user_role(email: str) -> str:
+def get_user_role(email: str) -> Optional[PERMITTED_USERS]:
 
-    # Si el Email es Desconocido, entonces mostramos error
-    if email == "Unknown":
+    # Si el Email es Desconocido o está vacío, entonces mostramos error
+    if not email or not str(email).strip() or email == "Unknown":
         error_page_view("No se pudo obtener el correo del usuario. Por favor, contacte al administrador.")
 
-    # Primero Cargamos los Datos del headcount
+    # Normalizamos el Correo para Compararlo sin Distinguir Mayúsculas
+    correo_usuario = str(email).strip().lower()
+
+    # Primero Cargamos los Datos del headcount y de los roles especiales
     headcount_data = load_headcount_negociacion()
-    # Ahora Obtenemos la Fila para dicho Email
-    user_row = headcount_data[headcount_data['Correo'] == email]
-    # Si esta vacio, entonces devolvemos 'nego'
+    if headcount_data.empty or 'Correo' not in headcount_data.columns:
+        user_row = headcount_data
+    else:
+        user_row = headcount_data[
+            headcount_data['Correo'].astype(str).str.strip().str.lower() == correo_usuario
+        ]
+
+    # Guardamos el Nombre del Usuario si está registrado en el headcount
+    if not user_row.empty:
+        st.session_state['user_name'] = user_row.iloc[0]['Nombre']
+
+    # Verificamos si el correo tiene un rol especial que reemplace el del headcount
+    roles_especiales = load_permisos_especiales()
+    rol_especial = roles_especiales.get(correo_usuario)
+    if rol_especial:
+        return rol_especial  # type: ignore
+
+    # Si esta vacio, entonces mostramos un Mensaje de Error en la Aplicación
     if user_row.empty:
-        # Mostramos un Mensaje de Error en la Aplicación
         error_page_view(f"El correo {email} no está registrado en el headcount de negociación. Por favor, contacte al administrador.")
 
     # Obtenemos la Fila
     user_row = user_row.iloc[0]
-
-    # Guardamos el Nombre del Usuario en el Session State
-    st.session_state['user_name'] = user_row['Nombre']
 
     # Ahora, si 'Es_Negociador' es True, entonces devolvemos 'nego'
     if user_row['Es_Negociador']:
@@ -654,8 +670,10 @@ def create_user_from_session():
 
     creds = st.session_state["credentials"]
     user_info = get_user_info_from_credentials()
-    # Guardamos el Email en el Session_State
+    # Guardamos el Email y el Nombre en el Session_State. El nombre del
+    # headcount lo reemplaza get_user_role() si el usuario está registrado.
     st.session_state["user_email"] = user_info.get("email", "Unknown")
+    st.session_state["user_name"] = user_info.get("name", "Unknown")
 
     user_role = get_user_role(user_info.get("email", "Unknown"))
 

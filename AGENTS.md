@@ -172,6 +172,7 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. Archivo `...-MesAA.xlsx` y hoja `Mes AAAA`; se toma el más reciente. NO SE DEBE EDITAR |
 | Feedback de la app | Google Sheets (`Feedback`, spreadsheet de Configs) | Propio | Una fila por envío: `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Solo se escribe; la app no lo lee |
 | Cambios de Masivas | Google Sheets (`Cambios_Masivas`, spreadsheet de Configs) | Propio | Trazabilidad del Mando de Operaciones: `Fecha_Cambio`, `Usuario`, `Nombre_Aliado_Cambio`, `Fecha_Aliado_Cambio`, `Num_Registros` y `Num_Cambiados`. Una fila por base procesada |
+| Roles y permisos especiales | Google Sheets (`Usuarios`, spreadsheet de Configs) | Propio | `Correo` + `Cargo_Interno` para reemplazar el rol del headcount (`admin`, `leader`, `nego`, `executive`). La columna `Permisos` es opcional/legada; si no existe, se usan los permisos por defecto del rol |
 
 ---
 
@@ -292,9 +293,9 @@ Notas:
 | Ruta | Responsabilidad |
 |---|---|
 | `app.py` | Inicializa servicios y datos, autentica, arma la navegación según permisos. |
-| `core/auth.py` | OAuth con Google, cookies, refresh tokens, restauración de sesión. |
-| `core/permissions.py` | Permisos, roles y mapeo permiso → página. |
-| `core/users.py` | Objeto de usuario autenticado. |
+| `core/auth.py` | OAuth con Google, cookies, refresh tokens, restauración de sesión y resolución del rol (headcount + roles especiales de la hoja `Usuarios`). |
+| `core/permissions.py` | Permisos, roles (`PERMITTED_USERS`) y mapeo permiso → página. |
+| `core/users.py` | Objeto de usuario autenticado y carga de permisos especiales. |
 | `data/data_loader.py` | Lecturas cacheadas de Google Sheets, Google Drive y Metabase; normalización de solicitudes, asignación, prospectos, pipeline y control de masivas. |
 | `data/data_uploader.py` | Escrituras/actualizaciones en Google Sheets, logs, feedback y control de masivas. |
 | `data/data_deleter.py` | Borrados controlados (por ejemplo, bases de cruce). |
@@ -348,6 +349,8 @@ Notas:
 
 **Datos de la calculadora:** `load_asignacion_cartera()`, `load_prospectos_tradicional()` y `load_pipeline_credito()` se cargan **bajo demanda** con `st.cache_data`; no están en `initialize_data()`. `load_mes_operativo_liquidaciones()` (caché de 1 hora) obtiene el MEC desde `load_liquidaciones_mec()` y cae a `getMesOperativo()` si no hay liquidaciones válidas.
 
+**Roles especiales:** `load_permisos_especiales()` también se carga **bajo demanda** al resolver el rol del usuario (`get_user_role`) y se cachea 1 hora. No está en `initialize_data()`. Se puede reiniciar desde **Manejo de Cache**. Un cambio de rol en la hoja `Usuarios` no afecta a una sesión ya autenticada hasta que el usuario vuelva a iniciar sesión.
+
 **Implicación para tests:** las funciones puras deben recibir DataFrames/diccionarios por parámetro. No deben depender de `st.session_state` ni de servicios de Google. Si una función lo hace, aíslala con mocks o extrae la lógica pura.
 
 ### Roles y páginas
@@ -360,6 +363,17 @@ Notas:
 | `admin` | Todas: incluye Calculadora de Oportunidades, Logs y Manejo de Cache |
 
 La fuente de verdad de permisos es `core/permissions.py`. El permiso `calcular_opps` está en `admin`, `leader` y `nego`; `executive` no lo tiene.
+
+**Roles especiales (override de rol):** la hoja `Usuarios` del spreadsheet de Configs permite que un correo use un rol distinto al que le asigna el headcount.
+
+- Columnas: `Correo` y `Cargo_Interno`.
+- `Cargo_Interno` debe ser uno de `admin`, `leader`, `nego` o `executive` (se acepta cualquier combinación de mayúsculas/minúsculas y espacios alrededor). Un valor vacío o inválido se ignora y el usuario conserva el rol del headcount.
+- El correo se compara sin distinguir mayúsculas/minúsculas. Si está repetido, prevalece la última fila válida de la hoja.
+- `get_user_role()` consulta primero los roles especiales y, si el correo no tiene uno válido, sigue con la lógica del headcount. Por eso un correo puede usar la app aunque no esté registrado en el headcount.
+- El nombre del usuario se toma del headcount; si no está allí, se usa el nombre del perfil de Google.
+- El override no cambia el alcance de datos que depende del Headcount (por ejemplo, Referencias de la calculadora o correos a cargo). Un correo fuera del Headcount con rol `leader` o `nego` puede iniciar sesión, pero no tendrá Referencias/equipo asignados.
+- El cambio se refleja al iniciar sesión (o al renovar la sesión). El loader tiene caché de 1 hora y se puede limpiar desde **Manejo de Cache**.
+- La columna `Permisos` es opcional/legada. `load_special_user_permissions()` la lee si existe y devuelve `{}` si no; en ese caso `User.build_permits()` aplica los permisos por defecto del rol.
 
 **Alcance de Referencias en la calculadora:**
 
@@ -841,6 +855,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 | `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, Depósito Extra simulado como parte del ahorro, portafolio distribuido por `PaB_Origen`, PaB simulado mayor al Origen, umbrales, `PaB_Actualizado` con etiquetas confiables, fallback a `PaB_Origen` cuando el PaB es 0 y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
 | `tests/test_oportunidades_masivas.py` | Selección del mejor descuento vigente de Masivas (fechas vencidas, metadata ausente, empates), metadatos y completitud de portafolios, pago de portafolios de Masivas y de Actualizaciones (valores iguales vs. distintos), regla de bancos, cálculo por unidad de Tradicional y Crédito, Crédito por portafolio (todas las deudas con PaB Ideal), `Cr Parcial`/`Tradicional` como restricción de tipo de pago, incidencias de oportunidades, ingreso estimado y orden, redirección a la calculadora individual, filtros de la vista masiva, escape de `$` en Markdown y paginación entera. |
 | `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), completado y preservación de metadata, `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
+| `tests/test_permisos_especiales.py` | Normalización de `Cargo_Interno` a roles permitidos, descarte de valores inválidos/vacíos, construcción del mapa de roles, tolerancia de la hoja `Usuarios` a columnas adicionales o a la ausencia de `Permisos`, prioridad del rol especial sobre el headcount, fallback al rol del headcount y carga del nombre de Google cuando el usuario no está en el headcount. |
 
 ### Convenciones para nuevos tests
 
@@ -916,6 +931,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 27. **`PERMITIR_CALCULO_NO_ASIGNADO` es un override de pruebas.** Si está activo, cualquier rol ve todas las Referencias. No lo dejes activo en producción.
 28. **El feedback no se lee desde la app.** Se escribe en la hoja `Feedback` de Configs con `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Si cambias el esquema, actualiza `send_feedback` y la documentación.
 29. **El App comparte el cliente OAuth con el MCP de Google Workspace.** Si el MCP ya concedió scopes adicionales, Google devuelve el conjunto completo en el token y `oauthlib` lanza `Warning: Scope has changed...`. `core/auth_scopes.py` configura `OAUTHLIB_RELAX_TOKEN_SCOPE=1` y `core/auth.py` valida que los scopes propios del App estén presentes. No quites esa configuración ni cambies `SCOPES` sin probar el login con la skill activa. La solución definitiva (cliente/proyecto OAuth separado) requiere acceso a GCP; hoy no está disponible.
+30. **La hoja `Usuarios` cambió de estructura.** Hoy contiene `Correo` y `Cargo_Interno`; la columna `Permisos` es opcional/legada. `load_permisos_especiales()` normaliza el rol (mayúsculas/minúsculas y espacios) y descarta valores fuera de `PERMITTED_USERS`; `load_special_user_permissions()` devuelve `{}` si no existe `Permisos` y `User.build_permits()` cae a los permisos por defecto del rol. Los dos loaders proyectan solo sus columnas antes de validar, así que agregar columnas nuevas a la hoja no rompe el esquema estricto. Si agregas una columna obligatoria, actualiza `UserPermissionsSchema` y los tests.
 
 ---
 
@@ -939,3 +955,4 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 - [ ] ¿Verificaste que `PaB_Actualizado` se extraiga correctamente de `payment_to_bank` (centavos → COP) antes de usarlo en oportunidades?
 - [ ] ¿Evitaste escribir en Asignación de Cartera, Pipeline de Crédito o Prospectos?
 - [ ] ¿Si cambió el formato de archivo/hoja de Asignación, actualizaste `_parse_mes_anio_desde_nombre_archivo`, `obtener_prioridad_hoja` y sus tests?
+- [ ] ¿Si tocaste la hoja `Usuarios` o `get_user_role`, probaste el override de rol, el fallback al headcount, los valores inválidos/vacíos y la ausencia de la columna `Permisos`?

@@ -1,15 +1,14 @@
 # Estándar usando Pep8
-# Librerías de Python
-from typing import Literal
 # Librerías de Terceros
 import streamlit as st
 # Librerías Locales
+from modules.constants import PERMITTED_USERS
 
 class Permit:
     """
     Clase para manejar un permiso específico de un usuario.
     """
-    def __init__(self,*,name: str, description: str, user_roles_allowed: list[Literal['admin', 'leader','nego', 'executive']]):
+    def __init__(self,*,name: str, description: str, user_roles_allowed: list[PERMITTED_USERS]):
         self.name = name
         self.description = description
         self.user_roles_allowed = user_roles_allowed
@@ -19,7 +18,7 @@ class Permit:
             return self.name == other.name
         return False
 
-    def is_allowed(self, user_role: Literal['admin', 'leader','nego', 'executive']) -> bool:
+    def is_allowed(self, user_role: PERMITTED_USERS) -> bool:
         """
         Método para verificar si un usuario con un rol específico tiene permitido este permiso.
         """
@@ -98,7 +97,7 @@ PAGES_ROUTE_MAPPING = {
     "gestionar_cache": {"page": "views/cache_viewer.py","title": "Manejo de Cache", "icon": "🤖"}
 }
 
-def get_permit_pages(user_role: Literal['admin', 'leader', 'nego', 'executive']) -> list[st.Page]:
+def get_permit_pages(user_role: PERMITTED_USERS) -> list[st.Page]:
     """
     Función para obtener las páginas permitidas e instanciar st.Page dinámicamente.
     """

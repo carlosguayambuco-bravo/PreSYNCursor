@@ -7,6 +7,9 @@ from typing import Literal
 IVA = 1.19
 MINIMO_RATIO_FUZZY = 75
 
+# --- Configuración de Permisos ---
+PERMITTED_USERS = Literal['admin', 'leader','nego', 'executive']
+
 # --- Configuración de Oportunidades ---
 # Monto adicional que se suma a los depósitos por restricciones de dónde se guarda el ahorro
 MONTO_ADICIONAL_DEPOSITO = 20_000

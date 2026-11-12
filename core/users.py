@@ -1,17 +1,14 @@
 # Estándar usando Pep8
-# Librerías de Python
-from typing import Literal
 # Librerías de Terceros
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 # Librerías Locales
 from core.permissions import Permit, DEFAULT_PERMISSIONS
 from data.data_loader import load_special_user_permissions
-from services import GoogleDriveService, GoogleSheetsService
+from modules.constants import PERMITTED_USERS
 
 # Clase para manejar la información de los usuarios
 class User:
-    def __init__(self, name: str, email: str, creds: dict, role: Literal['admin', 'leader','nego', 'executive']):
+    def __init__(self, name: str, email: str, creds: dict, role: PERMITTED_USERS):
         self.name = name
         self.email = email
         self.creds = creds
@@ -30,8 +27,9 @@ class User:
         special_user_permissions = load_special_user_permissions()
 
         # Si el usuario tiene permisos especiales, los asignamos
-        if self.email in special_user_permissions:
-            self.permits = special_user_permissions[self.email]
+        permisos_especiales = special_user_permissions.get(str(self.email).strip().lower())
+        if permisos_especiales:
+            self.permits = permisos_especiales
         else:
             # Si no tiene permisos especiales, asignamos los permisos por defecto según el rol
             self.permits = DEFAULT_PERMISSIONS.get(self.role, [])
@@ -52,7 +50,7 @@ class User:
         """
         Método para verificar si el usuario tiene un permiso específico.
         """
-        return permit.is_allowed(self.role) # type: ignore
+        return permit.is_allowed(self.role)
 
     def get_email(self) -> str:
         return self.email
