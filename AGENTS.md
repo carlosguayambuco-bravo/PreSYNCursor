@@ -171,7 +171,7 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 | Pipeline de Crédito | Google Sheets (`Pipeline Crédito`, hoja `Pipeline`) | Del área de crédito | Flujo de los procesos de crédito con el cliente. NO SE DEBE EDITAR. Se toma el último estado por `Referencia` |
 | Asignación de Cartera | Google Drive Excel `Asignaciones de Cartera` | Propio | Se asigna una vez al mes. Archivo `...-MesAA.xlsx` y hoja `Mes AAAA`; se toma el más reciente. NO SE DEBE EDITAR |
 | Feedback de la app | Google Sheets (`Feedback`, spreadsheet de Configs) | Propio | Una fila por envío: `Fecha`, `Usuario`, `Positivo`, `Origen`, `Comentario` y `Configuraciones` (JSON). Solo se escribe; la app no lo lee |
-| Cambios de Masivas | Google Sheets (`Cambios_Masivas`, spreadsheet de Configs) | Propio | Trazabilidad del Mando de Operaciones: `Fecha_Cambio`, `Usuario`, `Nombre_Aliado_Cambio`, `Fecha_Aliado_Cambio`, `Num_Registros` y `Num_Cambiados`. Una fila por base procesada |
+| Cambios de Masivas | Google Sheets (`Cambios_Masivas`, spreadsheet de Configs) | Propio | Trazabilidad del Mando de Operaciones: `Fecha_Cambio`, `Usuario`, `Nombre_Aliado_Cambio`, `Fecha_Aliado_Cambio`, `Num_Registros` y `Num_Cambiados`. Una fila por cada fecha procesada |
 | Roles y permisos especiales | Google Sheets (`Usuarios`, spreadsheet de Configs) | Propio | `Correo` + `Cargo_Interno` para reemplazar el rol del headcount (`admin`, `leader`, `nego`, `executive`). La columna `Permisos` es opcional/legada; si no existe, se usan los permisos por defecto del rol |
 
 ---
@@ -793,8 +793,8 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 **Flujo:**
 
 1. Muestra el panel general de `Cambios_Masivas` (historial y métricas) y una notificación global de las bases sin metadata completa.
-2. Selectores: **Casa de Cobro** siempre específica y **Fecha de Subida** con opción `Todas` (todas las fechas de ese aliado).
-3. Si el alcance no tiene metadata completa, muestra un formulario por base (`Casa_Cobro` + `Fecha_Masiva`) con:
+2. Selectores: **Casa de Cobro** siempre específica y **Fechas de Subida** con selección múltiple. El multiselect inicia vacío y exige al menos una fecha; las fechas seleccionadas delimitan el alcance. Ya no existe la opción `Todas`: para procesar todo se seleccionan todas las fechas.
+3. Si el alcance no tiene metadata completa, muestra **un solo formulario por aliado** que aplica a todas las fechas seleccionadas, con:
    - `Tipo_Contraoferta` (valores de `TIPOS_CONTRAOFERTAS`; se sugiere según el aliado).
    - `Fecha_Limite_Uso` (mínimo el día 5 del mes actual).
    - `Alias` opcional.
@@ -802,11 +802,11 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 4. Si toda la metadata ya existe, solo se muestra el botón de reprocesar portafolios. Las filas con metadata completa conservan su `Tipo_Contraoferta`, `Fecha_Limite_Uso` y `Alias`.
 5. **Procesar Portafolios** no escribe en Sheets. Aplica la distribución y muestra la comparación de `PaB` total y el detalle por deuda.
 6. **Subir Cambios a Google Sheets** actualiza `Metadata`, `Propuesta Pago`, `Monto Portafolio` y `Portafolio` (solo si cambió) por fila con `batch_update`. Después muestra globos, espera 2 segundos y hace rerun.
-7. La subida registra una fila por base en `Cambios_Masivas` y guarda los cambios locales en `local_masivas_changes`.
+7. La subida registra una fila por cada fecha procesada en `Cambios_Masivas` (con su `Fecha_Aliado_Cambio`, `Num_Registros` y `Num_Cambiados`) y guarda los cambios locales en `local_masivas_changes`.
 
 **Distribución de portafolios (`modules/control_masivas.py`):**
 
-- `GrupoCol = Masiva_ + Referencia + Casa_Cobro + Fecha_Masiva`. La marca `Es_Portafolio` **no** forma parte de la llave: filas marcadas y no marcadas del mismo cliente/base se agrupan y distribuyen juntas.
+- `GrupoCol = Masiva_ + Referencia + Casa_Cobro`. La `Fecha_Masiva` **no** forma parte de la llave: el alcance de fechas se define en la vista y llega ya filtrado, de modo que una base subida por partes en fechas distintas se distribuye como una sola base. La marca `Es_Portafolio` **no** forma parte de la llave: filas marcadas y no marcadas del mismo cliente/base se agrupan y distribuyen juntas.
 - `%Pago = PaB_Origen / SUM(PaB_Origen)` dentro del grupo.
 - **Regla especial:** si todas las filas del grupo tienen el mismo `PaB_Propuesta` y hay más de una deuda, `PaB_Propuesta = PaB_Propuesta_Original * %Pago`. No se exige que las filas estén marcadas como portafolio; el grupo se marca automáticamente cuando aplica la regla.
 - **Regla JCAP:** para `Casa_Cobro == 'JCAP'`, si al menos dos filas del grupo tienen `PaB_Propuesta <= 100` y no aplicó la regla especial, `PaB_Propuesta = SUM(PaB_Propuesta_Original del grupo) * %Pago`. Este grupo también se marca automáticamente como portafolio.
@@ -855,7 +855,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
 | `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, Depósito Extra simulado como parte del ahorro, portafolio distribuido por `PaB_Origen`, PaB simulado mayor al Origen, umbrales, `PaB_Actualizado` con etiquetas confiables, fallback a `PaB_Origen` cuando el PaB es 0 y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
 | `tests/test_oportunidades_masivas.py` | Selección del mejor descuento vigente de Masivas (fechas vencidas, metadata ausente, empates), metadatos y completitud de portafolios, pago de portafolios de Masivas y de Actualizaciones (valores iguales vs. distintos), deduplicación de Actualizaciones por `Id_Deuda` + `Fecha_Act` conservando la última fila, regla de bancos, cálculo por unidad de Tradicional y Crédito, Crédito por portafolio (todas las deudas con PaB Ideal), `Cr Parcial`/`Tradicional` como restricción de tipo de pago, incidencias de oportunidades, ingreso estimado y orden, redirección a la calculadora individual, filtros de la vista masiva, escape de `$` en Markdown, paginación entera y benchmark de portafolios/unidades con 10k deudas (umbral 20 s). |
-| `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), completado y preservación de metadata, `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
+| `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP y grupos sin portafolio), distribución entre fechas distintas de una base subida por partes, separación por Referencia/Casa, completado y preservación de metadata (incluida la misma configuración de aliado replicada a varias fechas), `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
 | `tests/test_permisos_especiales.py` | Normalización de `Cargo_Interno` a roles permitidos, descarte de valores inválidos/vacíos, construcción del mapa de roles, tolerancia de la hoja `Usuarios` a columnas adicionales o a la ausencia de `Permisos`, prioridad del rol especial sobre el headcount, fallback al rol del headcount y carga del nombre de Google cuando el usuario no está en el headcount. |
 
 ### Convenciones para nuevos tests

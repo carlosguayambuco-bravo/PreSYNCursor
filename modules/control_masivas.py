@@ -108,16 +108,14 @@ def _montos_diferentes(antes: Any, despues: Any, tolerancia: float = 0.01) -> bo
 
 # Función Auxiliar para Construir la Columna de Agrupación de Portafolios
 def _construir_grupo_col(df: pd.DataFrame) -> pd.Series:
-    # La Marca Es_Portafolio No Forma Parte del Grupo: se Detecta Automáticamente
-    fechas = pd.to_datetime(df['Fecha_Masiva'], errors='coerce').dt.strftime('%Y-%m-%d')
-    fechas = fechas.fillna('SIN_FECHA')
+    # La Marca Es_Portafolio y la Fecha No Forman Parte del Grupo: los Grupos se Detectan
+    # Automáticamente y la Fecha se Controla desde el Alcance Seleccionado en la Vista.
+    # Así, una Base Subida por Partes en Fechas Distintas se Distribuye como una Sola Base.
     return (
         'Masiva_'
         + df['Referencia'].fillna('').astype(str).str.strip()
         + '_'
         + df['Casa_Cobro'].fillna('').astype(str).str.strip()
-        + '_'
-        + fechas
     )
 
 # Función para Completar la Metadata de las Filas que no la Tienen
@@ -178,6 +176,11 @@ def completar_metadata_masivas(
 # Función para Distribuir los Portafolios de las Bases Ya Cargadas
 def distribuir_portafolios_masivas(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Aplica la distribución de portafolios sobre la Base del Mes.
+
+    El grupo de portafolio se construye con ``Referencia`` + ``Casa_Cobro``. La
+    ``Fecha_Masiva`` no delimita el grupo: el alcance de fechas se define en la
+    vista y se recibe ya filtrado en ``df``. Esto permite distribuir una misma
+    base que fue subida por partes en fechas diferentes.
 
     Reglas:
     1. Si todas las filas de un grupo tienen el mismo PaB_Propuesta y hay más de

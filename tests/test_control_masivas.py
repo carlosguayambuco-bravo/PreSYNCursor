@@ -128,6 +128,57 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         self.assertFalse(distribuido["Es_Portafolio"].any())
         self.assertTrue(detalle.empty)
 
+    def test_distribuye_entre_fechas_distintas_de_una_base_por_partes(self):
+        # La misma base se subió en tres fechas: el grupo no debe partirse por fecha
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", fecha="2026-11-04", pab_origen=600000, pab_propuesta=500000),
+            self._fila(fila=3, id_deuda="D2", fecha="2026-11-05", pab_origen=300000, pab_propuesta=500000),
+            self._fila(fila=4, id_deuda="D3", fecha="2026-11-06", pab_origen=100000, pab_propuesta=500000),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [300000.0, 150000.0, 50000.0])
+        self.assertTrue(distribuido["Es_Portafolio"].all())
+        self.assertEqual(len(detalle), 3)
+        self.assertTrue(detalle["Regla_Especial"].all())
+
+    def test_regla_jcap_tambien_cruza_fechas_distintas(self):
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", casa="JCAP", fecha="2026-11-04", pab_origen=700000, pab_propuesta=100),
+            self._fila(fila=3, id_deuda="D2", casa="JCAP", fecha="2026-11-06", pab_origen=300000, pab_propuesta=50),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [105.0, 45.0])
+        self.assertTrue(distribuido["Es_Portafolio"].all())
+        self.assertTrue(detalle["Regla_JCAP"].all())
+
+    def test_no_mezcla_referencias_distintas_aunque_la_fecha_sea_la_misma(self):
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", referencia="REF1", pab_origen=600000, pab_propuesta=500000),
+            self._fila(fila=3, id_deuda="D2", referencia="REF2", pab_origen=400000, pab_propuesta=500000),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [500000.0, 500000.0])
+        self.assertFalse(distribuido["Es_Portafolio"].any())
+        self.assertTrue(detalle.empty)
+
+    def test_no_mezcla_casas_distintas_aunque_la_referencia_sea_la_misma(self):
+        df = self._df([
+            self._fila(fila=2, id_deuda="D1", casa="ALIADO A", pab_origen=600000, pab_propuesta=500000),
+            self._fila(fila=3, id_deuda="D2", casa="ALIADO B", pab_origen=400000, pab_propuesta=500000),
+        ])
+
+        distribuido, detalle = distribuir_portafolios_masivas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [500000.0, 500000.0])
+        self.assertFalse(distribuido["Es_Portafolio"].any())
+        self.assertTrue(detalle.empty)
+
     def test_no_falla_si_falta_pab_origen(self):
         df = self._df([
             self._fila(fila=2, id_deuda="D1", pab_origen=None, pab_propuesta=500000),
@@ -228,6 +279,38 @@ class TestMetadataMasivas(unittest.TestCase):
         }])
         with self.assertRaises(ValueError):
             completar_metadata_masivas(df, {})
+
+    def test_completa_varias_fechas_con_la_misma_configuracion_de_aliado(self):
+        # La vista replica la configuración de un solo formulario a cada fecha pendiente
+        df = self._df([
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-04"),
+                "Metadata": pd.NA,
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+                "Metadata": pd.NA,
+            },
+        ])
+        config_aliado = {
+            "Tipo_Contraoferta": "ContraOferta sin Compromiso",
+            "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+            "Alias": "Alias 1",
+        }
+        configs = {
+            ("ALIADO A", pd.Timestamp("2026-11-04")): config_aliado,
+            ("ALIADO A", pd.Timestamp("2026-11-06")): config_aliado,
+        }
+
+        resultado = completar_metadata_masivas(df, configs)
+
+        self.assertTrue(resultado["Metadata"].apply(metadata_masiva_completa).all())
+        self.assertEqual(
+            resultado["Metadata"].apply(lambda m: m["Alias"]).tolist(),
+            ["Alias 1", "Alias 1"],
+        )
 
     def test_serializacion_metadata_equipara_enteros_y_flotantes(self):
         metadata_entero = {
@@ -383,6 +466,59 @@ class TestCambiosYLog(unittest.TestCase):
         self.assertTrue(cambios["Metadata_Cambio"].all())
         self.assertTrue(cambios["PaB_Cambio"].all())
         self.assertEqual(cambios["PaB_Propuesta_Despues"].tolist(), [300000.0, 200000.0])
+
+    def test_flujo_completo_entre_fechas_genera_cambios_y_log_por_fecha(self):
+        original = pd.DataFrame([
+            {
+                "Fila_Sheets": 2,
+                "Id_Deuda": "D1",
+                "Referencia": "REF1",
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-04"),
+                "Es_Portafolio": False,
+                "PaB_Origen": 600000,
+                "PaB_Propuesta": 500000.0,
+                "PaB_Portafolio": None,
+                "Metadata": {"Id_Cruce": "C1"},
+            },
+            {
+                "Fila_Sheets": 3,
+                "Id_Deuda": "D2",
+                "Referencia": "REF1",
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+                "Es_Portafolio": False,
+                "PaB_Origen": 400000,
+                "PaB_Propuesta": 500000.0,
+                "PaB_Portafolio": None,
+                "Metadata": {"Id_Cruce": "C2"},
+            },
+        ])
+
+        resultado, _ = distribuir_portafolios_masivas(original)
+        resultado = actualizar_metadata_portafolios(resultado)
+        cambios = construir_cambios_masivas(
+            df_original=original,
+            df_resultado=resultado,
+        )
+        log = construir_log_cambios_masivas(
+            df_original=original,
+            df_cambios=cambios,
+            usuario="usuario@gobravo.com.co",
+            fecha_cambio=pd.Timestamp("2026-11-11 10:00:00"),
+        )
+
+        self.assertEqual(len(cambios), 2)
+        self.assertTrue(resultado["Es_Portafolio"].all())
+        self.assertEqual(resultado.loc[0, "Metadata"]["Id_Portafolio"], "C1-C2")
+        self.assertEqual(resultado.loc[0, "Metadata"]["PaB_Portafolio"], 500000.0)
+        self.assertEqual(len(log), 2)
+        self.assertEqual(log["Num_Registros"].tolist(), [1, 1])
+        self.assertEqual(log["Num_Cambiados"].tolist(), [1, 1])
+        self.assertEqual(
+            log["Fecha_Aliado_Cambio"].tolist(),
+            [pd.Timestamp("2026-11-04"), pd.Timestamp("2026-11-06")],
+        )
 
     def test_construye_log_por_base_incluso_sin_cambios(self):
         original = pd.concat([

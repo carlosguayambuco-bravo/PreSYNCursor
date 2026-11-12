@@ -976,9 +976,21 @@ def _formatear_fecha_mando(fecha) -> str:
         return 'SIN FECHA'
     return pd.Timestamp(fecha_ts).strftime('%d/%m/%Y')
 
+# Función Auxiliar para Formatear un Conjunto de Fechas del Mando de Operaciones
+def _formatear_fechas_mando(fechas_masivas) -> str:
+    fechas_ts = pd.to_datetime(list(fechas_masivas), errors='coerce')
+    fechas_validas = sorted(
+        pd.Timestamp(fecha).normalize()
+        for fecha in fechas_ts
+        if pd.notna(fecha)
+    )
+    if not fechas_validas:
+        return 'SIN FECHA'
+    return ", ".join(_formatear_fecha_mando(fecha) for fecha in fechas_validas)
+
 # Función Auxiliar para Formatear una Base del Mando de Operaciones
-def _formatear_base_mando(casa_cobro: str, fecha_masiva) -> str:
-    return "{} | {}".format(casa_cobro, _formatear_fecha_mando(fecha_masiva))
+def _formatear_base_mando(casa_cobro: str, fechas_masivas) -> str:
+    return "{} | {}".format(casa_cobro, _formatear_fechas_mando(fechas_masivas))
 
 # Función Auxiliar para Sugerir el Tipo de Contraoferta según el Aliado
 def _tipo_contraoferta_sugerido(casa_cobro: str) -> str:
@@ -991,15 +1003,22 @@ def _tipo_contraoferta_sugerido(casa_cobro: str) -> str:
         return "ContraOferta de Pago Obligatorio"
     return "ContraOferta sin Compromiso"
 
-# Función Auxiliar para Mostrar el Formulario de Metadata de una Base
+# Función Auxiliar para Mostrar el Formulario de Metadata de un Aliado
 def _mostrar_formulario_metadata_mando(
     *,
     casa_cobro: str,
-    fecha_masiva,
+    fechas_masivas,
     num_sin_metadata: int,
 ) -> Optional[dict]:
-    fecha_ts = pd.Timestamp(fecha_masiva)
-    sufijo_key = "{}__{}".format(casa_cobro, fecha_ts.strftime('%Y_%m_%d'))
+    fechas_key = "_".join(
+        pd.Timestamp(fecha).normalize().strftime('%Y_%m_%d')
+        for fecha in sorted(fechas_masivas)
+        if pd.notna(fecha)
+    )
+    sufijo_key = "{}__{}".format(
+        str(casa_cobro).replace(' ', '_'),
+        fechas_key or 'SIN_FECHA',
+    )
     tipo_sugerido = _tipo_contraoferta_sugerido(casa_cobro)
     opciones_tipo = list(get_args(TIPOS_CONTRAOFERTAS))
     index_tipo = opciones_tipo.index(tipo_sugerido) if tipo_sugerido in opciones_tipo else 0
@@ -1008,11 +1027,10 @@ def _mostrar_formulario_metadata_mando(
     )
 
     with st.container(border=True):
-        st.markdown("#### 🏷️ **{}**".format(_formatear_base_mando(casa_cobro, fecha_ts)))
+        st.markdown("#### 🏷️ **{}**".format(_formatear_base_mando(casa_cobro, fechas_masivas)))
         st.caption(
-            "**{:,}** registro(s) de esta base no tienen metadata completa.".format(
-                num_sin_metadata
-            )
+            "**{:,}** registro(s) de las fechas seleccionadas no tienen metadata completa. "
+            "Los valores se aplican a todas las fechas.".format(num_sin_metadata)
         )
         colTipo, colFecha, colAlias = st.columns([2, 1, 1])
         with colTipo:
@@ -1097,7 +1115,7 @@ def _mostrar_panel_cambios_mando(*, cambios_df: pd.DataFrame) -> None:
 def _mostrar_resumen_pendientes_mando(*, resumen_df: pd.DataFrame) -> None:
     if resumen_df.empty:
         st.info(
-            "ℹ️ Todas las bases del alcance seleccionado ya tienen la metadata completa. "
+            "ℹ️ Todas las fechas del alcance seleccionado ya tienen la metadata completa. "
             "Puedes volver a procesar los portafolios para recalcular los montos.",
             icon="ℹ️",
         )
@@ -1105,8 +1123,8 @@ def _mostrar_resumen_pendientes_mando(*, resumen_df: pd.DataFrame) -> None:
 
     total_sin_metadata = int(resumen_df['Num_Sin_Metadata'].sum())
     st.warning(
-        "⚠️ Hay **{:,}** registro(s) en **{:,}** base(s) sin metadata completa. "
-        "Completa los datos de cada base antes de procesar los portafolios.".format(
+        "⚠️ Hay **{:,}** registro(s) en **{:,}** fecha(s) sin metadata completa. "
+        "Completa los datos del aliado antes de procesar los portafolios.".format(
             total_sin_metadata, len(resumen_df)
         ),
         icon="⚠️",
@@ -1748,8 +1766,9 @@ if tab_mando.open:
         # --- 3. Selectores de la Base a Transformar ---
         st.markdown("### 🧬 Transformación de Datos")
         st.caption(
-            "Selecciona el aliado y la fecha de subida de la base que deseas transformar. "
-            "La fecha **Todas** aplica para todas las bases de ese aliado."
+            "Selecciona el aliado y una o varias fechas de subida de la base que deseas "
+            "transformar. Las fechas seleccionadas delimitan el alcance y la distribución "
+            "de portafolios se realiza entre todas ellas, aunque la base se haya subido por partes."
         )
         colCasa, colFecha = st.columns(2)
         with colCasa:
@@ -1774,34 +1793,45 @@ if tab_mando.open:
                     errors='coerce',
                 ).dropna().dt.normalize().unique()
             )
-            opciones_fecha = ['Todas'] + list(fechas_disponibles)
-            fecha_sel = st.selectbox(
-                label="**📅 Fecha de Subida**",
-                options=opciones_fecha,
-                index=0,
-                format_func=lambda valor: (
-                    'Todas' if isinstance(valor, str) else _formatear_fecha_mando(valor)
+            fechas_sel = st.multiselect(
+                label="**📅 Fechas de Subida**",
+                options=fechas_disponibles,
+                default=[],
+                format_func=_formatear_fecha_mando,
+                key="mando_fechas_subida_{}".format(str(casa_sel).replace(' ', '_')),
+                help=(
+                    "Selecciona una o varias fechas. La distribución de portafolios se hace "
+                    "entre todas las fechas seleccionadas."
                 ),
-                key="mando_fecha_subida_{}".format(str(casa_sel).replace(' ', '_')),
-                help="Fecha de la base. 'Todas' procesa todas las fechas de ese aliado.",
             )
 
-        scope_df = control_df[control_df['Casa_Cobro'] == casa_sel].copy()
-        if isinstance(fecha_sel, str) and (fecha_sel == 'Todas'):
-            fecha_texto = 'Todas'
-        else:
-            scope_df = scope_df[
-                scope_df['Fecha_Masiva'].dt.normalize() == pd.Timestamp(fecha_sel)
-            ].copy()
-            fecha_texto = _formatear_fecha_mando(fecha_sel)
+        if not fechas_sel:
+            st.info(
+                "Selecciona al menos una **Fecha de Subida** para continuar.",
+                icon="ℹ️",
+            )
+            st.stop()
+
+        fechas_sel_norm = sorted(
+            pd.Timestamp(fecha).normalize() for fecha in fechas_sel
+        )
+        fechas_texto = ", ".join(
+            _formatear_fecha_mando(fecha) for fecha in fechas_sel_norm
+        )
+        etiqueta_fechas = 'fecha' if len(fechas_sel_norm) == 1 else 'fechas'
+
+        scope_df = control_df[
+            (control_df['Casa_Cobro'] == casa_sel)
+            & (control_df['Fecha_Masiva'].dt.normalize().isin(fechas_sel_norm))
+        ].copy()
 
         if scope_df.empty:
             st.warning("No hay registros para la selección realizada.", icon="⚠️")
             st.stop()
 
         st.caption(
-            "✅ Alcance seleccionado: **{:,}** registro(s) de **{}** con fecha **{}**.".format(
-                len(scope_df), casa_sel, fecha_texto
+            "✅ Alcance seleccionado: **{:,}** registro(s) de **{}** con {} **{}**.".format(
+                len(scope_df), casa_sel, etiqueta_fechas, fechas_texto
             )
         )
 
@@ -1811,25 +1841,30 @@ if tab_mando.open:
         resumen_pendientes_df = resumen_bases_sin_metadata(scope_df)
         _mostrar_resumen_pendientes_mando(resumen_df=resumen_pendientes_df)
 
-        # --- 5. Formularios de Metadata por Base (solo si falta información) ---
+        # --- 5. Formulario de Metadata del Aliado (solo si falta información) ---
+        # La Fecha ya no Delimita la Base: un Solo Formulario Aplica a Todas las Fechas Seleccionadas
         configs_por_base = {}
         if not resumen_pendientes_df.empty:
-            st.markdown("#### 🏷️ Completar Metadata por Base")
-            for _, fila_pendiente in resumen_pendientes_df.iterrows():
-                config = _mostrar_formulario_metadata_mando(
-                    casa_cobro=str(fila_pendiente['Casa_Cobro']),
-                    fecha_masiva=fila_pendiente['Fecha_Masiva'],
-                    num_sin_metadata=int(fila_pendiente['Num_Sin_Metadata']),
-                )
-                if config is not None:
+            st.markdown("#### 🏷️ Completar Metadata del Aliado")
+            config_aliado = _mostrar_formulario_metadata_mando(
+                casa_cobro=str(casa_sel),
+                fechas_masivas=fechas_sel_norm,
+                num_sin_metadata=int(resumen_pendientes_df['Num_Sin_Metadata'].sum()),
+            )
+            if config_aliado is not None:
+                # Se Replica la Configuración del Aliado a Cada Fecha con Metadata Pendiente
+                for fecha_pendiente in resumen_pendientes_df['Fecha_Masiva'].dropna().unique():
                     configs_por_base[
                         obtener_clave_base(
-                            casa_cobro=fila_pendiente['Casa_Cobro'],
-                            fecha_masiva=fila_pendiente['Fecha_Masiva'],
+                            casa_cobro=casa_sel,
+                            fecha_masiva=fecha_pendiente,
                         )
-                    ] = config
+                    ] = config_aliado
 
-        configs_completas = len(configs_por_base) == len(resumen_pendientes_df)
+        configs_completas = (
+            resumen_pendientes_df.empty
+            or (len(configs_por_base) == len(resumen_pendientes_df))
+        )
 
         # Firma de los Selectores y Formularios (para invalidar resultados viejos)
         firma_configs = tuple(sorted(
@@ -1844,7 +1879,7 @@ if tab_mando.open:
         ))
         firma_actual = (
             str(casa_sel),
-            fecha_texto,
+            tuple(fecha.strftime('%Y-%m-%d') for fecha in fechas_sel_norm),
             firma_configs,
         )
 
@@ -1933,7 +1968,10 @@ if tab_mando.open:
 
                 st.session_state['mando_resultado'] = {
                     'firma': firma_actual,
-                    'scope_key': (str(casa_sel), fecha_texto),
+                    'scope_key': (
+                        str(casa_sel),
+                        tuple(fecha.strftime('%Y-%m-%d') for fecha in fechas_sel_norm),
+                    ),
                     'df_resultado': df_trabajo,
                     'df_cambios': df_cambios,
                     'detalle_distribucion': detalle_distribucion,
