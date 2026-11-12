@@ -32,6 +32,7 @@ from modules.id_aut_deud.helpers import (
     agregar_resultados_a_df_original, agrupar_montos_portafolio, aplicar_cambios_id_definitivo, build_pendiente_cruce_df, distribuir_montos_portafolio, leer_base_subida, limpiar_base_subida, mostrar_seleccion_columnas, obtener_pago_minimo, obtener_ultimo_status_cruce, resetear_widgets_columnas,
     generateFileName, uploadDBtoDrive,
 )
+from ui.cache_components import reiniciar_caches
 from ui.cruce_deudas_components import (
     ID_DEFINITIVO_ADDENDUM, LLAVE_CAMBIOS_ID_DEFINITIVO, LLAVE_IDS_NO_VALIDADOS,
     mostrar_advertencia_ids_no_validados, mostrar_deudas_cruce_paginadas,
@@ -1717,6 +1718,43 @@ if tab_mando.open:
             "no sube nada: primero se muestra una comparación y luego se confirman los cambios.",
             icon="ℹ️",
         )
+
+        # --- 0. Reinicio Manual de los Datos de Masivas y Cambios ---
+        with st.container(border=True):
+            colAviso, colBoton = st.columns([3, 1], vertical_alignment="center")
+            with colAviso:
+                st.markdown("#### 🔄 Reinicio de Carga de Datos")
+                st.caption(
+                    "Si acabas de subir una base nueva o la información de "
+                    "**Bases mes actual 2024** / **Cambios_Masivas** aún no aparece, "
+                    "reinicia los datos para forzar su recarga desde Google Sheets. "
+                    "Esta acción no modifica la información."
+                )
+            with colBoton:
+                reiniciar_datos = st.button(
+                    label="🔄 Reiniciar Datos de Masivas y Cambios",
+                    key="mando_reiniciar_datos",
+                    width="stretch",
+                    help=(
+                        "Limpia el cache de Masivas, la Base del Mes y Cambios_Masivas, "
+                        "y descarta los resultados de procesamiento de la sesión."
+                    ),
+                )
+            if reiniciar_datos:
+                reiniciar_caches(
+                    funciones=[load_masivas, load_masivas_control, load_cambios_masivas],
+                    claves_session_state=[
+                        'masivas_df',
+                        'local_masivas_changes',
+                        'mando_resultado',
+                        'mando_exito',
+                    ],
+                )
+                st.toast(
+                    "Datos de Masivas y Cambios reiniciados correctamente.",
+                    icon="✅",
+                )
+                st.rerun()
 
         # --- 1. Panel General de Cambios ---
         cambios_historial_df = load_cambios_masivas()
