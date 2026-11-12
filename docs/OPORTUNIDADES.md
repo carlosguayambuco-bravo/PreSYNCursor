@@ -12,7 +12,7 @@ Para esto se cuenta con las siguientes oportunidades que establecen diferentes f
 
 > **Acuerdos para Robo**: Acuerdos Vencidos que no cuenten con una gestión posterior con el cliente. La unión con Alianzas/Metabase es por deuda (`Id_Deuda`).
 
-> **Liquidación Instantánea**: Clientes que con el Descuento Actual pasen el PAB Ideal de Crédito o cuenten con el dinero suficiente para pagar la/las deudas.
+> **Liquidación Instantánea**: Clientes que con el Descuento Actual pasen el PAB Ideal de Crédito o cuenten con el dinero suficiente para pagar la/las deudas. En **Tradicional** se exige además un descuento actual mínimo del **3%**: tener el ahorro no basta si la deuda no tiene descuento. En Crédito no aplica ese mínimo.
 
 > **IA Liquidadora**: El Modelo interno de IA para la liquidación de clientes (1 de cada 3 se paga) prioriza los clientes que se tengan en cartera
 

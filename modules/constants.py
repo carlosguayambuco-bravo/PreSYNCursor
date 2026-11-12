@@ -21,6 +21,9 @@ UMBRAL_CONTRACOFERTA_MAXIMA = 0.95
 MARGEN_DESCUENTO_ESPERADO = 0.2
 # Umbral de probabilidad para la oportunidad de IA Liquidadora
 UMBRAL_PROB_LIQ_IA = 0.5
+# Descuento mínimo para considerar Liquidación Instantánea por Tradicional.
+# Aplica solo a Tradicional: Crédito se evalúa sin este mínimo.
+UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA = 0.03
 # Etiquetas de Actualización con las que se confía para calcular el Descuento Actual
 ETIQUETAS_ACT_CONFIABLES = [
     'CAMBIO DE PAB',
@@ -61,7 +64,7 @@ DESCRIPCION_OPORTUNIDADES = {
     ),
     'Liquidación Instantánea': (
         "El descuento actual ya es suficiente para liquidar sin necesidad "
-        "de un nuevo acuerdo."
+        "de un nuevo acuerdo. En Tradicional exige un descuento mínimo del 3%."
     ),
     'Acuerdo para Robo': (
         "Acuerdo de pago vencido, no liquidado y sin gestión posterior; "
@@ -172,7 +175,7 @@ QUALIFY
 
 # Query de dbId = 12
 QUERY_TOTAL_REPARADORAS = """
-SELECT DISTINCT ON (bcrd.id)
+SELECT DISTINCT ON (bcrd.id, bcr.bank_reference)
     bcrd.id AS Id_Deuda,
     pi.document_number AS Cedula,
     bcr.bank_reference AS Referencia,
@@ -180,18 +183,23 @@ SELECT DISTINCT ON (bcrd.id)
     cfe.name AS Banco,
     bcrd.credit_number AS Numero_Credito,
     CAST((bcrd.amount).amount AS NUMERIC) / 100.0 AS Monto_Actual,
-    bcrd.state as Estado_Deuda,
-    bcrd.sub_state as Sub_Estado_Deuda
+    bcrd.state AS Estado_Deuda,
+    bcrd.sub_state AS Sub_Estado_Deuda
 
 FROM credit_repair_debts AS bcrd
 
 INNER JOIN credit_repairs AS bcr
-    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit','drop')
+    ON bcr.id = bcrd.credit_repair_id 
+    AND bcr.country = 'co' 
+    AND bcr.status IN ('active','partial_credit','drop')
 LEFT JOIN catalog_financial_entities AS cfe
     ON cfe.id = bcrd.financial_entity_id
 LEFT JOIN personal_information AS pi
     ON pi.credit_repair_id = bcr.id
-ORDER BY bcrd.id, bcrd.inserted_at DESC
+
+WHERE NOT ((pi.document_number IS NULL) OR (bcrd.state = 'cancelled') OR (pi.document_number = '-'))
+    AND ((bcr.drop_date >= CURRENT_DATE - INTERVAL '2 months') OR (bcr.drop_date IS NULL))
+ORDER BY bcrd.id, bcr.bank_reference, bcrd.inserted_at DESC
 """
 
 # Query de dbId = 12

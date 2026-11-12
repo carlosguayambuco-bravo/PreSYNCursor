@@ -405,7 +405,7 @@ class TestCalculosOportunidades(unittest.TestCase):
             )
         )
 
-    def test_evaluar_liq_insta(self):
+    def test_evaluar_liq_insta_tradicional(self):
         self.assertTrue(
             evaluar_liq_insta(
                 descuento_actual=0.5,
@@ -434,11 +434,53 @@ class TestCalculosOportunidades(unittest.TestCase):
                 deposito_extra=0,
             )
         )
+
+    def test_evaluar_liq_insta_tradicional_exige_descuento_minimo(self):
+        # Con descuento menor al 3% no importa que no se requiera depósito.
+        self.assertFalse(
+            evaluar_liq_insta(
+                descuento_actual=0.0,
+                contraoferta=0.5,
+                deposito_extra=-1,
+            )
+        )
+        self.assertFalse(
+            evaluar_liq_insta(
+                descuento_actual=0.029,
+                contraoferta=0.0,
+                deposito_extra=-1,
+            )
+        )
+        self.assertTrue(
+            evaluar_liq_insta(
+                descuento_actual=0.03,
+                contraoferta=0.0,
+                deposito_extra=-1,
+            )
+        )
+        self.assertTrue(
+            evaluar_liq_insta(
+                descuento_actual=0.03,
+                contraoferta=0.02,
+                deposito_extra=0,
+            )
+        )
+
+    def test_evaluar_liq_insta_credito_no_exige_descuento_minimo(self):
         self.assertTrue(
             evaluar_liq_insta(
                 descuento_actual=0.0,
                 contraoferta=0.5,
                 deposito_extra=-1,
+                es_opp_cred=True,
+            )
+        )
+        self.assertTrue(
+            evaluar_liq_insta(
+                descuento_actual=0.02,
+                contraoferta=0.0,
+                deposito_extra=-1,
+                es_opp_cred=True,
             )
         )
 
@@ -957,7 +999,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
             "Pricing": [0.15],
         })
 
-    def _patches(self, es_opp_cred):
+    def _patches(self, es_opp_cred, pab_actualizado=60_000_000):
         return [
             patch(
                 "modules.oportunidades.obtener_asignacion_para_referencia",
@@ -969,7 +1011,7 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
             ),
             patch(
                 "modules.oportunidades.obtener_pab_actualizado_deuda",
-                return_value=60_000_000,
+                return_value=pab_actualizado,
             ),
             patch(
                 "modules.oportunidades._obtener_pab_ideal_deuda",
@@ -989,8 +1031,16 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
             ),
         ]
 
-    def _calcular(self, es_opp_cred, pab_por_deuda=None, deposito_extra=0):
-        patches = self._patches(es_opp_cred)
+    def _calcular(
+        self,
+        es_opp_cred,
+        pab_por_deuda=None,
+        deposito_extra=0,
+        pab_actualizado=60_000_000,
+        ahorro=50_000_000,
+        porcobrar=5_000_000,
+    ):
+        patches = self._patches(es_opp_cred, pab_actualizado=pab_actualizado)
         for p in patches:
             p.start()
         try:
@@ -998,8 +1048,8 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
                 referencia="REF",
                 deudas=["D1"],
                 es_opp_cred=es_opp_cred,
-                ahorro=50_000_000,
-                porcobrar=5_000_000,
+                ahorro=ahorro,
+                porcobrar=porcobrar,
                 deposito_extra=deposito_extra,
                 pab_por_deuda=pab_por_deuda,
             )
@@ -1118,6 +1168,19 @@ class TestCalcularOportunidadesReferencia(unittest.TestCase):
         )
         # El depósito requerido (22.16M) queda cubierto por el depósito simulado
         self.assertTrue(opps["Liquidación Instantánea"]["aplica"])
+
+    def test_tradicional_bajo_descuento_no_es_liq_insta_aunque_tenga_ahorro(self):
+        opps = self._calcular(
+            es_opp_cred=False,
+            pab_actualizado=99_000_000,
+            ahorro=150_000_000,
+            porcobrar=0,
+        )
+        # El ahorro cubre el pago (el depósito es negativo), pero el 1% de
+        # descuento no alcanza el mínimo del 3% exigido en Tradicional.
+        self.assertFalse(opps["Depósito Extra"]["aplica"])
+        self.assertFalse(opps["Liquidación Instantánea"]["aplica"])
+        self.assertAlmostEqual(opps["Liquidación Instantánea"]["valor"], 0.01)
 
     def test_sin_deudas_no_hay_oportunidades(self):
         opps = calcular_oportunidades_referencia(

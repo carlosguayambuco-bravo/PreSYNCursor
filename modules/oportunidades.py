@@ -32,6 +32,7 @@ from modules.constants import (
     MONTO_ADICIONAL_DEPOSITO,
     OPORTUNIDADES,
     UMBRAL_CONTRACOFERTA_MAXIMA,
+    UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA,
     UMBRAL_DEPOSITO_EXTRA_APARTADOS,
     UMBRAL_DEPOSITO_EXTRA_MONTO,
     UMBRAL_PROB_LIQ_IA,
@@ -900,14 +901,21 @@ def evaluar_liq_insta(
     descuento_actual: float,
     contraoferta: float,
     deposito_extra: float,
+    es_opp_cred: bool = False,
 ) -> bool:
     """Evalúa si el cliente ya puede liquidar de forma instantánea.
 
     Se cumple cuando el Descuento Actual es igual o mejor que la ContraOferta
     necesaria y existe un descuento, o cuando el Depósito Extra calculado es
     negativo (no se necesita depósito).
+
+    Para Tradicional se exige además un Descuento Actual mínimo de
+    ``UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA`` (3% por defecto): tener el dinero no
+    basta si no existe un descuento real. Crédito no aplica ese mínimo.
     """
     descuento_actual = _a_float(descuento_actual)
+    if not es_opp_cred and descuento_actual < UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA:
+        return False
     if _a_float(deposito_extra) < 0:
         return True
     contraoferta = _a_float(contraoferta, default=np.nan)
@@ -1466,6 +1474,7 @@ def calcular_oportunidades_referencia(
         descuento_actual=descuento_actual,
         contraoferta=contraoferta,
         deposito_extra=deposito_extra_calculado,
+        es_opp_cred=es_opp_cred,
     )
 
     # Paso 6: Acuerdos para Robo
@@ -2251,11 +2260,16 @@ def _calcular_metricas_tradicional_masivas(
         & (contraoferta <= agg["Trad_Descuento_Esperado_Ponderado"] + MARGEN_DESCUENTO_ESPERADO)
     )
 
-    # Liquidación Instantánea: no requiere depósito o el descuento actual ya
-    # alcanza la contraoferta necesaria.
-    agg["Trad_Liq_Insta_Aplica"] = (deposito < 0) | (
-        (agg["Trad_Descuento_Actual"] >= contraoferta)
-        & (agg["Trad_Descuento_Actual"] != 0)
+    # Liquidación Instantánea Tradicional: exige un descuento mínimo real
+    # (3% por defecto). Sin ese descuento, tener ahorro suficiente no basta.
+    # Luego aplica si no requiere depósito o si el descuento actual ya alcanza
+    # la contraoferta necesaria.
+    agg["Trad_Liq_Insta_Aplica"] = (
+        (agg["Trad_Descuento_Actual"] >= UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA)
+        & (
+            (deposito < 0)
+            | (agg["Trad_Descuento_Actual"] >= contraoferta)
+        )
     )
 
     # Viabilidad: Pago Total (PaB actual + comisión con IVA + 20k) <= Ahorro - Por Cobrar

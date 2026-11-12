@@ -178,6 +178,41 @@ class TestCalculoMasivoTradicional(unittest.TestCase):
         self.assertEqual(len(fila["Deudas_Detalle"]), 1)
         self.assertIn("Prospecto Tradicional", fila["Credito_Detalle"])
 
+    def test_liq_insta_tradicional_exige_descuento_minimo(self):
+        asignacion, _, prospectos = self._datos()
+        # 1% de descuento y ahorro de sobra: antes era Liquidación
+        # Instantánea, ahora no alcanza el mínimo del 3%.
+        masivas = pd.DataFrame([_masiva(id_deuda="D1", pab=99_000_000)])
+        resultado = _calcular(
+            asignacion=asignacion,
+            masivas=masivas,
+            saldos={"Saldos": {"REF-TRAD": 150_000_000}, "PorCobrar": {"REF-TRAD": 0}},
+            prospectos_credito={"REF-TRAD": "Tradicional"},
+            prospectos_tradicional=prospectos,
+        )
+
+        fila = resultado.iloc[0]
+        self.assertAlmostEqual(float(fila["Trad_Descuento_Actual"]), 0.01)
+        self.assertFalse(bool(fila["Trad_Deposito_Extra_Aplica"]))
+        self.assertFalse(bool(fila["Trad_Liq_Insta_Aplica"]))
+        self.assertNotIn("Liquidación Instantánea", fila["Oportunidades"])
+
+    def test_liq_insta_tradicional_aplica_con_descuento_suficiente(self):
+        asignacion, _, prospectos = self._datos()
+        masivas = pd.DataFrame([_masiva(id_deuda="D1", pab=96_000_000)])
+        resultado = _calcular(
+            asignacion=asignacion,
+            masivas=masivas,
+            saldos={"Saldos": {"REF-TRAD": 150_000_000}, "PorCobrar": {"REF-TRAD": 0}},
+            prospectos_credito={"REF-TRAD": "Tradicional"},
+            prospectos_tradicional=prospectos,
+        )
+
+        fila = resultado.iloc[0]
+        self.assertAlmostEqual(float(fila["Trad_Descuento_Actual"]), 0.04)
+        self.assertTrue(bool(fila["Trad_Liq_Insta_Aplica"]))
+        self.assertIn("Liquidación Instantánea", fila["Oportunidades"])
+
     def test_prospecto_tradicional_no_permite_credito(self):
         asignacion, masivas, prospectos = self._datos()
         pipeline = pd.DataFrame([{

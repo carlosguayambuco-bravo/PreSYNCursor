@@ -32,7 +32,7 @@ Un depósito extra hace referencia a una solicitud al cliente de conseguir un di
 
 Dado que las liquidaciones pueden ser realizadas por crédito o por tradicional, sus cálculos de depósito extra son diferentes. Adicionalmente se consideran 20k adicionales al depósito por restricciones de donde se guarda el ahorro.
 
-Si la diferencia es menor a 0, NO ES OPORTUNIDAD DE DEPÓSITO EXTRA, dado que no requiere un depósito extra en sí. En estos casos se vuelve una `Oportunidad de Liquidación Instantánea`.
+Si la diferencia es menor a 0, NO ES OPORTUNIDAD DE DEPÓSITO EXTRA, dado que no requiere un depósito extra en sí. En estos casos se evalúa como `Oportunidad de Liquidación Instantánea`; en Tradicional esa oportunidad exige además el descuento mínimo del 3% descrito más abajo.
 
 ### **Cálculo para Crédito**:
 $$Depósito \: Extra = SUM(PaB\_Actualizado) + 20k - SUM(PaB\_Ideal) - Depósito\_Extra$$
@@ -75,12 +75,25 @@ Teniendo en cuenta que el `Descuento Actual` se calcula según el `PaB Actualiza
 ## **Liquidación Instantánea**
 La Liquidación Instantánea hace referencia a que un cliente ya cuenta con un descuento actual suficiente para que entre dentro del cupo de crédito (Si Aplica) y/o pueda realizar el pago + comisión con el ahorro que tiene.
 
-Para aprovechar los cálculos que se realizan de las otras oportunidades (mas exactamente de la ContraOferta Viable), con base en esos cálculos se define la liquidación instantánea.
+Para aprovechar los cálculos que se realizan de las otras oportunidades (más exactamente de la ContraOferta Viable), con base en esos cálculos se define la liquidación instantánea. La definición cambia según el tipo de análisis.
 
-La definición es:
+### **Tradicional**
+En Tradicional, tener el dinero suficiente no basta: la deuda debe tener un **descuento real mínimo del 3%**. Ese valor vive en la constante `UMBRAL_DESCUENTO_MINIMO_LIQ_INSTA` y puede ajustarse allí. Un cliente con `Descuento Actual < 3%` no se considera oportunidad de Liquidación Instantánea aunque su ahorro cubra el pago completo o su descuento actual supere el requerido.
+
+Las condiciones son:
+- $Descuento \: Actual \geq 3\%$
+- y además se cumple una de estas dos:
+  - $Descuento \: Actual \geq ContraOferta \: Viable$, o
+  - $Depósito \: Extra < 0$ (no se requiere depósito).
+
+El mínimo del 3% se aplica también cuando el Depósito Extra es negativo. Así se evita que clientes con mucho ahorro y deudas pequeñas, pero sin descuento, saturen las oportunidades de liquidación.
+
+### **Crédito**
+En Crédito no se exige el mínimo del 3%, porque lo que habilita la liquidación es el cupo aprobado. Las condiciones son:
 - $Descuento \: Actual \geq ContraOferta \: Viable$
 - $Descuento \: Actual \neq 0$
-Con que se cumplan estas 2 condiciones (con descuento y con un descuento actual igual o mejor que el necesario) ya se considera una oportunidad de liquidación instantánea. También aplica cuando el Depósito Extra calculado es menor a 0 (no se requiere depósito). El Depósito Extra calculado ya viene neto del Depósito Extra simulado en la calculadora.
+
+También aplica cuando el Depósito Extra calculado es menor a 0 (no se requiere depósito). El Depósito Extra calculado ya viene neto del Depósito Extra simulado en la calculadora.
 
 > **Corrección de la fórmula:** la versión anterior de este documento decía `Descuento Actual <= ContraOferta Viable`. La condición correcta es `>=`: un descuento actual mayor significa que el pago es menor y, por tanto, ya cabe en el cupo de crédito o en el ahorro.
 
