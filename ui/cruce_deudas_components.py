@@ -1,5 +1,6 @@
 # Estándar usando Pep8
 # Librerías de Python
+from datetime import date
 import json
 from typing import Optional, get_args
 # Librerías de Terceros
@@ -10,11 +11,11 @@ import streamlit as st
 from data.data_loader import load_headcount_negociacion
 from modules.classes import get_cruce_identificaciones_manager
 from modules.constants import (
-    COL_BANCO, COL_CEDULA, COL_CREDITO, COL_MONTO_ACTUAL, COL_NOMBRE,
+    COL_BANCO, COL_CEDULA, COL_CREDITO, COL_ID_CRUCE, COL_MONTO_ACTUAL, COL_NOMBRE,
     ETIQUETA_ADDENDUM, ETIQUETA_AMBIGUO, ETIQUETA_DUPLICADO, ETIQUETA_EXACTO,
     ETIQUETA_NULO, ETIQUETAS_CRUCE, PRIORIDAD_ETIQUETAS_CRUCE, TIPOS_STATUS,
 )
-from modules.id_aut_deud.helpers import obtener_pago_minimo, obtener_ultimo_status_cruce, search_data_deudas
+from modules.id_aut_deud.helpers import obtener_pago_minimo, search_data_deudas
 from utils.helpers_general import formatNaN, replaceNaN
 
 LLAVE_CAMBIOS_ID_DEFINITIVO = 'cambios_id_definitivo'
@@ -103,6 +104,84 @@ def _texto_deudas_posibles_filtro(mtdt: dict) -> str:
                 partes.append(texto)
     return ' '.join(partes)
 
+# Función Auxiliar para Convertir la Metadata de un Registro en Diccionario
+def _metadata_a_dict(valor) -> dict:
+    if isinstance(valor, dict):
+        return valor
+    if isinstance(valor, str) and valor.strip():
+        try:
+            metadata = json.loads(valor)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+    return {}
+
+# --- Cache en Session State de las Columnas Internas del Cruce ---
+# El Id_Cruce es la llave única de cada registro. Las columnas internas se
+# construyen una sola vez por conjunto de datos y se reutilizan cuando el
+# usuario solo cambia los filtros de la vista (evita recalcular en cada rerun).
+LLAVE_CACHE_FILTROS_CRUCE = 'cruce_cache_columnas_filtros'
+LLAVE_CACHE_DETALLES_CRUCE = 'cruce_cache_columnas_detalles'
+COLUMNAS_FIRMA_CRUCE = [
+    COL_ID_CRUCE, 'Metadata', COL_CEDULA, COL_NOMBRE, COL_BANCO,
+    COL_MONTO_ACTUAL, COL_CREDITO,
+]
+
+# Función Auxiliar para Construir una Firma Vectorizada de las Columnas del Cruce
+def _firma_columnas_cruce(*, df: pd.DataFrame, columnas: list[str]) -> tuple:
+    """Resume el contenido de las columnas que alimentan las columnas internas.
+
+    La firma se calcula de forma vectorizada (por Id_Cruce) y permite reutilizar
+    el resultado ya construido cuando solo cambiaron los filtros de la vista.
+    """
+    if df.empty:
+        return (0,)
+    firma = [len(df)]
+    for columna in columnas:
+        if columna not in df.columns:
+            firma.append(None)
+            continue
+        serie = df[columna]
+        if serie.dtype == object:
+            serie = serie.astype(str)
+        try:
+            firma.append(int(pd.util.hash_pandas_object(serie, index=False).sum()))
+        except (TypeError, ValueError):
+            firma.append(hash(tuple(serie.astype(str))))
+    # El índice también forma parte de la firma para que las columnas cacheadas
+    # se alineen con la fila correcta al concatenarlas con el DataFrame actual.
+    firma.append(hash(tuple(df.index.tolist())))
+    return tuple(firma)
+
+# Función Auxiliar para Leer las Columnas Internas Cacheadas de la Sesión
+def _obtener_cache_columnas_cruce(*, llave: str, firma: tuple) -> Optional[pd.DataFrame]:
+    try:
+        cache = st.session_state.get(llave)
+    except Exception:
+        return None
+    if not isinstance(cache, dict):
+        return None
+    if cache.get('firma') != firma:
+        return None
+    df_cacheado = cache.get('df')
+    return df_cacheado if isinstance(df_cacheado, pd.DataFrame) else None
+
+# Función Auxiliar para Guardar las Columnas Internas en la Sesión
+def _guardar_cache_columnas_cruce(*, llave: str, firma: tuple, df: pd.DataFrame) -> None:
+    try:
+        st.session_state[llave] = {'firma': firma, 'df': df}
+    except Exception:
+        return
+
+# Función para Limpiar las Columnas Internas Cacheadas del Cruce
+def limpiar_cache_columnas_cruce() -> None:
+    """Descarta las columnas internas cacheadas de los filtros y detalles."""
+    for llave in (LLAVE_CACHE_FILTROS_CRUCE, LLAVE_CACHE_DETALLES_CRUCE):
+        try:
+            st.session_state.pop(llave, None)
+        except Exception:
+            continue
+
 # Función Auxiliar para Construir las Columnas Internas de Filtrado y Ordenamiento
 def _construir_df_filtros_cruce(
         *,
@@ -115,91 +194,139 @@ def _construir_df_filtros_cruce(
 
     # Quitamos Columnas Internas de una Construcción Anterior
     columnas_internas = [col for col in cruce_df.columns if str(col).startswith('_')]
-    df = cruce_df.drop(columns=columnas_internas).copy()
-    cambios = cambios or {}
+    df_base = cruce_df.drop(columns=columnas_internas).copy()
 
-    # Paso 1: Extraer la Metadata de Cada Registro
-    df['_Metadata_Filtro'] = df.apply(_obtener_metadata_detalle, axis=1)
-    df['_Casa_Cobro'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Casa_Cobro')))
-    df['_Alias_Casa'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Alias_Casa')))
-    df['_Archivo_Origen'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Archivo_Origen')))
-    df['_Etiqueta'] = df['_Metadata_Filtro'].apply(lambda m: _texto_busqueda(m.get('Etiqueta')))
-    df['_Prioridad_Etiqueta'] = (
-        df['_Etiqueta'].map(PRIORIDAD_ETIQUETAS_CRUCE).fillna(99).astype(int)
+    # Paso 1: Reutilizar las Columnas Estáticas si los Datos no Cambiaron
+    firma = _firma_columnas_cruce(df=df_base, columnas=COLUMNAS_FIRMA_CRUCE)
+    df_cacheado = _obtener_cache_columnas_cruce(
+        llave=LLAVE_CACHE_FILTROS_CRUCE,
+        firma=firma,
     )
-    df['_Estado'] = df['_Metadata_Filtro'].apply(obtener_ultimo_status_cruce)
+    if df_cacheado is None:
+        df_columnas = _construir_columnas_filtros_cruce(df=df_base)
+        _guardar_cache_columnas_cruce(
+            llave=LLAVE_CACHE_FILTROS_CRUCE,
+            firma=firma,
+            df=df_columnas,
+        )
+    else:
+        df_columnas = df_cacheado.copy()
 
-    # Paso 2: Resolver el Id_Definitivo Guardado y el Actual (Metadata + Cambios Pendientes)
-    ids_definitivos_metadata = df['_Metadata_Filtro'].apply(
-        lambda m: _texto_id(m.get('Id_Definitivo'))
-    )
-    ids_definitivos_actuales = []
-    for id_cruce, id_definitivo in zip(df['Id_Cruce'], ids_definitivos_metadata):
-        clave_cruce = _texto_id(id_cruce)
-        if clave_cruce in cambios:
-            ids_definitivos_actuales.append(_texto_id(cambios.get(clave_cruce)))
-        else:
-            ids_definitivos_actuales.append(id_definitivo)
-    df['_Id_Definitivo_Metadata'] = ids_definitivos_metadata
-    df['_Tiene_Id_Definitivo_Metadata'] = df['_Id_Definitivo_Metadata'] != ''
-    df['_Es_Addendum_Metadata'] = df['_Id_Definitivo_Metadata'] == ETIQUETA_ADDENDUM
-    df['_Id_Definitivo_Actual'] = ids_definitivos_actuales
-    df['_Tiene_Id_Definitivo_Actual'] = df['_Id_Definitivo_Actual'] != ''
+    # Paso 2: Unir las Columnas Internas con los Datos Actuales y Aplicar los Cambios
+    df = pd.concat([df_base, df_columnas], axis=1)
+    return _aplicar_cambios_filtros_cruce(df=df, cambios=cambios or {})
 
-    # Paso 3: Extraer las Fechas de Auditoría
-    df['_Fechas_Status'] = df['_Metadata_Filtro'].apply(_fechas_status_detalle)
-    df['_Fecha_Sin_Reconocer'] = pd.to_datetime(
-        df['_Fechas_Status'].apply(
-            lambda fechas: fechas.get('Sin Reconocer') if isinstance(fechas, dict) else None
-        ),
-        errors='coerce',
-    )
-    df['_Ultima_Fecha'] = pd.to_datetime(
-        df['_Fechas_Status'].apply(
-            lambda fechas: _ultima_fecha_detalle(fechas) if isinstance(fechas, dict) else None
-        ),
-        errors='coerce',
+# Función Auxiliar para Construir las Columnas Estáticas de Filtrado (una sola vez)
+def _construir_columnas_filtros_cruce(*, df: pd.DataFrame) -> pd.DataFrame:
+    n_registros = len(df)
+    metadata_list = (
+        [_metadata_a_dict(valor) for valor in df['Metadata']]
+        if 'Metadata' in df.columns else [{} for _ in range(n_registros)]
     )
 
-    # Paso 4: Extraer el Id_Registro Numérico para el Orden Original
-    df['_Id_Registro_Num'] = df['_Metadata_Filtro'].apply(
-        lambda m: pd.to_numeric(m.get('Id_Registro'), errors='coerce')
-    )
-    df['_Id_Registro_Num'] = pd.to_numeric(df['_Id_Registro_Num'], errors='coerce')
-    df.loc[df['_Id_Registro_Num'] <= 0, '_Id_Registro_Num'] = np.nan
+    # Paso 1: Extraer la Metadata de Cada Registro (una sola pasada)
+    casas = [_texto_busqueda(m.get('Casa_Cobro')) for m in metadata_list]
+    aliases = [_texto_busqueda(m.get('Alias_Casa')) for m in metadata_list]
+    archivos = [_texto_busqueda(m.get('Archivo_Origen')) for m in metadata_list]
+    etiquetas = [_texto_busqueda(m.get('Etiqueta')) for m in metadata_list]
+    ids_definitivos = [_texto_id(m.get('Id_Definitivo')) for m in metadata_list]
+    deudas_texto = [_texto_deudas_posibles_filtro(m) for m in metadata_list]
+    fechas_status = _fechas_status_detalle_batch(metadata_list)
+    fechas_iniciales = [fechas.get('Sin Reconocer') for fechas in fechas_status]
+    ultimas_fechas = [_ultima_fecha_detalle(fechas) for fechas in fechas_status]
+    estados = [_estado_desde_fechas_detalle(fechas) for fechas in fechas_status]
+    id_registro_lista = [m.get('Id_Registro') for m in metadata_list]
 
-    # Paso 5: Preparar las Columnas de Filtrado de Datos
-    df['_Cedula_Filtro'] = (
-        df[COL_CEDULA].apply(_normalizar_cedula_filtro)
-        if COL_CEDULA in df.columns else ''
+    # Paso 2: Preparar las Columnas de los Datos del Cliente
+    cedulas = (
+        df[COL_CEDULA].map(_normalizar_cedula_filtro)
+        if COL_CEDULA in df.columns else pd.Series('', index=df.index)
     )
-    df['_Banco'] = (
-        df[COL_BANCO].apply(_texto_busqueda)
-        if COL_BANCO in df.columns else ''
+    bancos = (
+        df[COL_BANCO].map(_texto_busqueda)
+        if COL_BANCO in df.columns else pd.Series('', index=df.index)
     )
-    df['_Monto_Actual_Num'] = (
+    montos_actuales = (
         pd.to_numeric(df[COL_MONTO_ACTUAL], errors='coerce')
-        if COL_MONTO_ACTUAL in df.columns else np.nan
+        if COL_MONTO_ACTUAL in df.columns else pd.Series(np.nan, index=df.index)
     )
-    df['_Deudas_Posibles_Texto'] = df['_Metadata_Filtro'].apply(_texto_deudas_posibles_filtro)
+    id_registro_num = pd.to_numeric(
+        pd.Series(id_registro_lista, index=df.index),
+        errors='coerce',
+    )
+    id_registro_num = id_registro_num.where(id_registro_num > 0)
 
-    # Paso 6: Construir el Texto de Búsqueda Global
+    # Paso 3: Construir el Texto de Búsqueda Global (sin el Id_Definitivo Actual)
     series_busqueda = []
     for columna in [COL_CEDULA, COL_NOMBRE, 'Id_Cruce', COL_CREDITO, COL_BANCO]:
         if columna in df.columns:
-            series_busqueda.append(df[columna].apply(_texto_busqueda))
+            series_busqueda.append(df[columna].map(_texto_busqueda).fillna('').tolist())
         else:
-            series_busqueda.append(pd.Series('', index=df.index))
-    series_busqueda.append(df['_Id_Definitivo_Actual'])
-    series_busqueda.append(df['_Deudas_Posibles_Texto'])
-    series_busqueda.append(df['_Cedula_Filtro'])
-    df['_Busqueda'] = (
-        pd.concat(series_busqueda, axis=1)
-        .fillna('')
-        .astype(str)
-        .agg(' '.join, axis=1)
-        .str.lower()
+            series_busqueda.append([''] * n_registros)
+    series_busqueda.append(cedulas.tolist())
+    series_busqueda.append(deudas_texto)
+    busqueda_base = pd.Series(
+        [
+            ' '.join(parte for parte in fila if parte).lower()
+            for fila in zip(*series_busqueda)
+        ],
+        index=df.index,
     )
+
+    # Paso 4: Ensamblar las Columnas Internas
+    columnas = pd.DataFrame({
+        '_Metadata_Filtro': metadata_list,
+        '_Casa_Cobro': casas,
+        '_Alias_Casa': aliases,
+        '_Archivo_Origen': archivos,
+        '_Etiqueta': etiquetas,
+        '_Prioridad_Etiqueta': (
+            pd.Series(etiquetas, index=df.index)
+            .map(PRIORIDAD_ETIQUETAS_CRUCE)
+            .fillna(99)
+            .astype(int)
+        ),
+        '_Estado': estados,
+        '_Id_Definitivo_Metadata': ids_definitivos,
+        '_Tiene_Id_Definitivo_Metadata': [bool(valor) for valor in ids_definitivos],
+        '_Es_Addendum_Metadata': [valor == ETIQUETA_ADDENDUM for valor in ids_definitivos],
+        '_Fechas_Status': fechas_status,
+        '_Fecha_Sin_Reconocer': pd.to_datetime(
+            pd.Series(fechas_iniciales, index=df.index), errors='coerce'
+        ),
+        '_Ultima_Fecha': pd.to_datetime(
+            pd.Series(ultimas_fechas, index=df.index), errors='coerce'
+        ),
+        '_Id_Registro_Num': id_registro_num,
+        '_Cedula_Filtro': cedulas,
+        '_Banco': bancos,
+        '_Monto_Actual_Num': montos_actuales,
+        '_Deudas_Posibles_Texto': deudas_texto,
+        '_Busqueda_Base': busqueda_base,
+    }, index=df.index)
+
+    return columnas
+
+# Función Auxiliar para Aplicar los Cambios Pendientes sin Reconstruir las Columnas
+def _aplicar_cambios_filtros_cruce(*, df: pd.DataFrame, cambios: dict) -> pd.DataFrame:
+    mapa_cambios = {_texto_id(llave): _texto_id(valor) for llave, valor in cambios.items()}
+
+    if mapa_cambios and ('Id_Cruce' in df.columns):
+        ids_actuales = df['Id_Cruce'].map(_texto_id).map(mapa_cambios)
+        ids_actuales = ids_actuales.where(
+            ids_actuales.notna(),
+            df['_Id_Definitivo_Metadata'],
+        )
+    else:
+        ids_actuales = df['_Id_Definitivo_Metadata']
+
+    df['_Id_Definitivo_Actual'] = ids_actuales.fillna('')
+    df['_Tiene_Id_Definitivo_Actual'] = df['_Id_Definitivo_Actual'] != ''
+    df['_Busqueda'] = (
+        df['_Busqueda_Base'].fillna('')
+        + ' '
+        + df['_Id_Definitivo_Actual'].astype(str).str.lower()
+    ).str.strip()
 
     return df
 
@@ -681,8 +808,8 @@ def mostrar_filtros_cruce(*, cruce_df: pd.DataFrame) -> pd.DataFrame:
         '_Tiene_Id_Definitivo_Metadata', '_Es_Addendum_Metadata',
         '_Id_Definitivo_Actual', '_Tiene_Id_Definitivo_Actual', '_Fechas_Status',
         '_Fecha_Sin_Reconocer', '_Ultima_Fecha', '_Id_Registro_Num',
-        '_Deudas_Posibles_Texto', '_Busqueda', '_Cedula_Filtro', '_Banco',
-        '_Monto_Actual_Num',
+        '_Deudas_Posibles_Texto', '_Busqueda', '_Busqueda_Base', '_Cedula_Filtro',
+        '_Banco', '_Monto_Actual_Num',
     ]
     return df_filtrado.drop(columns=[c for c in columnas_auxiliares if c in df_filtrado.columns])
 
@@ -1184,16 +1311,7 @@ def _texto_id(valor) -> str:
 
 # Función Auxiliar para Obtener la Metadata de un Registro como Diccionario
 def _obtener_metadata_detalle(registro: pd.Series) -> dict:
-    mtdt = registro.get('Metadata')
-    if isinstance(mtdt, dict):
-        return mtdt
-    if isinstance(mtdt, str) and mtdt.strip():
-        try:
-            metadata = json.loads(mtdt)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-        return metadata if isinstance(metadata, dict) else {}
-    return {}
+    return _metadata_a_dict(registro.get('Metadata'))
 
 # Función Auxiliar para Parsear una Fecha de Auditoría (Hora Local Bogotá)
 def _parsear_fecha_detalle(valor) -> Optional[pd.Timestamp]:
@@ -1209,9 +1327,26 @@ def _parsear_fecha_detalle(valor) -> Optional[pd.Timestamp]:
         fecha = fecha.tz_convert('America/Bogota').tz_localize(None)
     return fecha
 
-# Función Auxiliar para Obtener las Fechas de los Estados del Cruce
-def _fechas_status_detalle(mtdt: dict) -> dict[str, Optional[pd.Timestamp]]:
-    statuses = list(get_args(TIPOS_STATUS))
+# Función Auxiliar para Parsear un Conjunto de Fechas en una Sola Operación
+def _parsear_fechas_detalle_batch(valores) -> pd.Series:
+    serie = pd.Series(list(valores), dtype='object')
+    if serie.empty:
+        return pd.Series([], dtype='datetime64[ns]')
+    try:
+        fechas = pd.to_datetime(serie, errors='coerce', format='mixed')
+    except (TypeError, ValueError):
+        fechas = pd.to_datetime(serie, errors='coerce')
+    if isinstance(fechas.dtype, pd.DatetimeTZDtype):
+        return fechas.dt.tz_convert('America/Bogota').dt.tz_localize(None)
+    if fechas.dtype == object:
+        return pd.Series(
+            [_parsear_fecha_detalle(valor) for valor in serie],
+            index=serie.index,
+        )
+    return fechas
+
+# Función Auxiliar para Obtener el Diccionario Crudo de Última Actualización
+def _crudo_ultima_actualizacion(mtdt: dict) -> dict:
     crudo = mtdt.get('Ultima_Actualizacion')
 
     # Compatibilidad con Metadata Serializada como Texto
@@ -1221,18 +1356,64 @@ def _fechas_status_detalle(mtdt: dict) -> dict[str, Optional[pd.Timestamp]]:
         except json.JSONDecodeError:
             crudo = None
 
-    # Copiamos el Diccionario para no Mutar la Metadata Original
-    crudo = dict(crudo) if isinstance(crudo, dict) else {}
+    return dict(crudo) if isinstance(crudo, dict) else {}
 
+# Función Auxiliar para Obtener las Fechas de los Estados del Cruce
+def _fechas_status_detalle(mtdt: dict) -> dict[str, Optional[pd.Timestamp]]:
+    crudo = _crudo_ultima_actualizacion(mtdt)
     return {
         status: _parsear_fecha_detalle(crudo.get(status))
-        for status in statuses
+        for status in get_args(TIPOS_STATUS)
     }
+
+# Función Auxiliar para Obtener las Fechas de los Estados en Bloque
+def _fechas_status_detalle_batch(
+        metadata_list: list[dict],
+    ) -> list[dict[str, Optional[pd.Timestamp]]]:
+    statuses = list(get_args(TIPOS_STATUS))
+    crudos = [_crudo_ultima_actualizacion(mtdt) for mtdt in metadata_list]
+    columnas = [
+        _parsear_fechas_detalle_batch([crudo.get(status) for crudo in crudos])
+        for status in statuses
+    ]
+
+    fechas = []
+    for indice in range(len(metadata_list)):
+        fechas.append({
+            status: (
+                None if pd.isna(columna.iloc[indice])
+                else pd.Timestamp(columna.iloc[indice])
+            )
+            for status, columna in zip(statuses, columnas)
+        })
+    return fechas
 
 # Función Auxiliar para Obtener la Fecha Más Reciente de un Registro
 def _ultima_fecha_detalle(fechas: dict[str, Optional[pd.Timestamp]]) -> Optional[pd.Timestamp]:
     validas = [fecha for fecha in fechas.values() if fecha is not None]
     return max(validas) if validas else None
+
+# Función Auxiliar para Resolver el Estado Más Reciente desde Fechas ya Parseadas
+def _estado_desde_fechas_detalle(
+        fechas: dict[str, Optional[pd.Timestamp]],
+    ) -> str:
+    """Réplica de obtener_ultimo_status_cruce sin volver a parsear las fechas."""
+    mejor_status = 'Sin Reconocer'
+    mejor_fecha = None
+    mejor_prioridad = -1
+    for prioridad, status in enumerate(get_args(TIPOS_STATUS)):
+        fecha = fechas.get(status)
+        if fecha is None:
+            continue
+        if (
+            (mejor_fecha is None)
+            or (fecha > mejor_fecha)
+            or ((fecha == mejor_fecha) and (prioridad > mejor_prioridad))
+        ):
+            mejor_status = status
+            mejor_fecha = fecha
+            mejor_prioridad = prioridad
+    return mejor_status
 
 # Función Auxiliar para Convertir una Fecha en Texto (Hora Local Bogotá)
 def _formatear_fecha_detalle(fecha) -> str:
@@ -1340,121 +1521,233 @@ def _observaciones_auditoria_detalle(
             observaciones.append('Id_Definitivo fuera de las Deudas_Posibles (posible búsqueda manual).')
     return observaciones
 
+# Función Auxiliar para Normalizar los Motivos del Cruce de un Registro
+def _normalizar_motivos_detalle(motivos) -> list[str]:
+    motivos = motivos or []
+    if isinstance(motivos, str):
+        return [motivo.strip() for motivo in motivos.split('|') if motivo.strip()]
+    return [str(motivo) for motivo in motivos if str(motivo).strip()]
+
+# Función Auxiliar para Construir una Firma del Mapa de Nombres del HeadCount
+def _firma_mapa_nombres_detalle(mapa_nombres: dict[str, str]) -> int:
+    if not mapa_nombres:
+        return 0
+    return hash(tuple(sorted(
+        (str(correo), str(nombre)) for correo, nombre in mapa_nombres.items()
+    )))
+
 # Función Auxiliar para Construir las Columnas Internas de Detalles y Auditoría
 def _construir_df_detalles(*, cruce_df: pd.DataFrame, mapa_nombres: dict[str, str]) -> pd.DataFrame:
     # Quitamos Columnas Internas de una Construcción Anterior
     columnas_internas = [columna for columna in cruce_df.columns if str(columna).startswith('_')]
     df_base = cruce_df.drop(columns=columnas_internas).copy()
 
-    filas = []
-    for _, registro in df_base.iterrows():
-        mtdt = _obtener_metadata_detalle(registro)
-        fechas = _fechas_status_detalle(mtdt)
-        etiqueta = str(mtdt.get('Etiqueta') or '').strip()
-        id_definitivo = _texto_id(mtdt.get('Id_Definitivo'))
-        identificado_por = _texto_busqueda(mtdt.get('Identificado_Por'))
-        ejecutivo_subida = _texto_busqueda(mtdt.get('Ejecutivo_Subida'))
-        id_registro = mtdt.get('Id_Registro')
-        id_registro_num = pd.to_numeric(id_registro, errors='coerce')
-        if pd.isna(id_registro_num) or (float(id_registro_num) <= 0):
-            id_registro_num = np.nan
-
-        motivos = mtdt.get('Motivos_Cruce') or []
-        if isinstance(motivos, str):
-            motivos = [motivo.strip() for motivo in motivos.split('|') if motivo.strip()]
-        else:
-            motivos = [str(motivo) for motivo in motivos if str(motivo).strip()]
-
-        deudas_posibles = [
-            deuda for deuda in (mtdt.get('Deudas_Posibles') or [])
-            if isinstance(deuda, dict)
-        ]
-        pagos_cuotas = [
-            pago for pago in (mtdt.get('Pagos_Cuotas') or [])
-            if isinstance(pago, dict)
-        ]
-
-        tipo_identificacion = _tipo_identificacion_detalle(
-            identificado_por=identificado_por,
-            motivos=motivos,
+    # Las Columnas de Auditoría solo Cambian si Cambian los Datos (o el HeadCount)
+    firma = _firma_columnas_cruce(df=df_base, columnas=COLUMNAS_FIRMA_CRUCE)
+    firma = firma + (_firma_mapa_nombres_detalle(mapa_nombres),)
+    df_cacheado = _obtener_cache_columnas_cruce(
+        llave=LLAVE_CACHE_DETALLES_CRUCE,
+        firma=firma,
+    )
+    if df_cacheado is None:
+        df_columnas = _construir_columnas_detalles_cruce(
+            df_base=df_base,
+            mapa_nombres=mapa_nombres,
         )
-        observaciones = _observaciones_auditoria_detalle(
+        _guardar_cache_columnas_cruce(
+            llave=LLAVE_CACHE_DETALLES_CRUCE,
+            firma=firma,
+            df=df_columnas,
+        )
+    else:
+        df_columnas = df_cacheado.copy()
+
+    # Las Columnas Internas se Unen con los Datos Actuales para no Cachear el DF Completo
+    return pd.concat([df_base, df_columnas], axis=1)
+
+# Función Auxiliar para Construir las Columnas de Detalles en una Sola Pasada
+def _construir_columnas_detalles_cruce(
+        *,
+        df_base: pd.DataFrame,
+        mapa_nombres: dict[str, str],
+    ) -> pd.DataFrame:
+    if df_base.empty:
+        return pd.DataFrame(index=df_base.index)
+
+    n_registros = len(df_base)
+    metadata_list = (
+        [_metadata_a_dict(valor) for valor in df_base['Metadata']]
+        if 'Metadata' in df_base.columns else [{} for _ in range(n_registros)]
+    )
+
+    # Paso 1: Extraer la Metadata de Todos los Registros
+    fechas_status_list = _fechas_status_detalle_batch(metadata_list)
+    etiquetas = [str(m.get('Etiqueta') or '').strip() for m in metadata_list]
+    ids_definitivos = [_texto_id(m.get('Id_Definitivo')) for m in metadata_list]
+    identificados = [_texto_busqueda(m.get('Identificado_Por')) for m in metadata_list]
+    ejecutivos = [_texto_busqueda(m.get('Ejecutivo_Subida')) for m in metadata_list]
+    motivos_list = [_normalizar_motivos_detalle(m.get('Motivos_Cruce')) for m in metadata_list]
+    deudas_list = [
+        [deuda for deuda in (m.get('Deudas_Posibles') or []) if isinstance(deuda, dict)]
+        for m in metadata_list
+    ]
+    pagos_list = [
+        [pago for pago in (m.get('Pagos_Cuotas') or []) if isinstance(pago, dict)]
+        for m in metadata_list
+    ]
+    fechas_limite_serie = _parsear_fechas_detalle_batch(
+        [m.get('Fecha_Limite_Pago') for m in metadata_list]
+    )
+    montos_originales_serie = pd.to_numeric(
+        pd.Series(
+            [m.get('Monto_Actual_Original') for m in metadata_list],
+            index=df_base.index,
+        ),
+        errors='coerce',
+    )
+    id_registro_serie = pd.to_numeric(
+        pd.Series(
+            [m.get('Id_Registro') for m in metadata_list],
+            index=df_base.index,
+        ),
+        errors='coerce',
+    )
+    fechas_iniciales = [fechas.get('Sin Reconocer') for fechas in fechas_status_list]
+    fechas_reconocido = [fechas.get('Reconocido') for fechas in fechas_status_list]
+    fechas_subido = [fechas.get('Subido Alianzas') for fechas in fechas_status_list]
+    ultimas_fechas = [_ultima_fecha_detalle(fechas) for fechas in fechas_status_list]
+    estados = [_estado_desde_fechas_detalle(fechas) for fechas in fechas_status_list]
+    tipos_identificacion = [
+        _tipo_identificacion_detalle(identificado_por=identificado, motivos=motivos)
+        for identificado, motivos in zip(identificados, motivos_list)
+    ]
+    observaciones_list = [
+        _observaciones_auditoria_detalle(
             mtdt=mtdt,
             fechas=fechas,
             etiqueta=etiqueta,
             id_definitivo=id_definitivo,
-            identificado_por=identificado_por,
+            identificado_por=identificado,
         )
-        fecha_limite = _parsear_fecha_detalle(mtdt.get('Fecha_Limite_Pago'))
-        monto_actual_original = pd.to_numeric(mtdt.get('Monto_Actual_Original'), errors='coerce')
-        fecha_inicial = fechas.get('Sin Reconocer')
-        fecha_reconocido = fechas.get('Reconocido')
-        fecha_subido = fechas.get('Subido Alianzas')
-        ultima_fecha = _ultima_fecha_detalle(fechas)
-
-        texto_deudas = ' '.join(
+        for mtdt, fechas, etiqueta, id_definitivo, identificado in zip(
+            metadata_list, fechas_status_list, etiquetas, ids_definitivos, identificados
+        )
+    ]
+    texto_deudas_list = [
+        ' '.join(
             '{} {} {}'.format(
                 _texto_id(deuda.get('Id_Deuda')),
                 _texto_busqueda(deuda.get('Banco')),
                 _texto_busqueda(deuda.get('Numero_Credito')),
             )
-            for deuda in deudas_posibles
+            for deuda in deudas
         )
+        for deudas in deudas_list
+    ]
+
+    # Paso 2: Extraer los Datos del Cliente y Preparar los Nombres de Responsables
+    cedulas = (
+        df_base[COL_CEDULA].map(_texto_busqueda).tolist()
+        if COL_CEDULA in df_base.columns else [''] * n_registros
+    )
+    nombres = (
+        df_base[COL_NOMBRE].map(_texto_busqueda).tolist()
+        if COL_NOMBRE in df_base.columns else [''] * n_registros
+    )
+    bancos = (
+        df_base[COL_BANCO].map(_texto_busqueda).tolist()
+        if COL_BANCO in df_base.columns else [''] * n_registros
+    )
+    creditos = (
+        df_base[COL_CREDITO].map(_texto_busqueda).tolist()
+        if COL_CREDITO in df_base.columns else [''] * n_registros
+    )
+    id_cruces = (
+        df_base[COL_ID_CRUCE].map(_texto_busqueda).tolist()
+        if COL_ID_CRUCE in df_base.columns else [''] * n_registros
+    )
+    categorias_identificado = [_categoria_responsable_detalle(valor) for valor in identificados]
+    categorias_ejecutivo = [_categoria_responsable_detalle(valor) for valor in ejecutivos]
+    nombres_responsable_identificado = [
+        _nombre_responsable_detalle(valor, mapa_nombres) for valor in identificados
+    ]
+    nombres_responsable_ejecutivo = [
+        _nombre_responsable_detalle(valor, mapa_nombres) for valor in ejecutivos
+    ]
+    nombres_identificado = [
+        mapa_nombres.get(valor.lower(), '') for valor in identificados
+    ]
+    archivos = [_texto_busqueda(m.get('Archivo_Origen')) for m in metadata_list]
+    casas = [_texto_busqueda(m.get('Casa_Cobro')) for m in metadata_list]
+    aliases = [_texto_busqueda(m.get('Alias_Casa')) for m in metadata_list]
+    tipos_contraoferta = [_texto_busqueda(m.get('Tipo_Contraoferta')) for m in metadata_list]
+    portafolios = [_texto_busqueda(m.get('Portafolio_Ids')) for m in metadata_list]
+
+    # Paso 3: Ensamblar las Filas de Auditoría en una Sola Pasada
+    filas = []
+    for indice in range(n_registros):
+        mtdt = metadata_list[indice]
+        id_registro = mtdt.get('Id_Registro')
+        id_registro_num = id_registro_serie.iloc[indice]
+        if pd.isna(id_registro_num) or (float(id_registro_num) <= 0):
+            id_registro_num = np.nan
+        fecha_limite = fechas_limite_serie.iloc[indice]
+        if pd.isna(fecha_limite):
+            fecha_limite = pd.NaT
+        observaciones = observaciones_list[indice]
         texto_busqueda = ' '.join([
-            _texto_busqueda(registro.get(COL_CEDULA)),
-            _texto_busqueda(registro.get(COL_NOMBRE)),
-            _texto_busqueda(registro.get('Id_Cruce')),
-            _texto_busqueda(registro.get(COL_CREDITO)),
-            _texto_busqueda(id_definitivo),
-            _texto_busqueda(registro.get(COL_BANCO)),
-            _texto_busqueda(mtdt.get('Archivo_Origen')),
-            _texto_busqueda(mtdt.get('Casa_Cobro')),
-            _texto_busqueda(mtdt.get('Alias_Casa')),
-            _texto_busqueda(identificado_por),
-            _nombre_responsable_detalle(identificado_por, mapa_nombres),
-            _texto_busqueda(ejecutivo_subida),
-            _nombre_responsable_detalle(ejecutivo_subida, mapa_nombres),
-            _texto_busqueda(etiqueta),
-            _texto_busqueda(mtdt.get('Tipo_Contraoferta')),
-            _texto_busqueda(tipo_identificacion),
-            texto_deudas,
+            cedulas[indice],
+            nombres[indice],
+            id_cruces[indice],
+            creditos[indice],
+            ids_definitivos[indice],
+            bancos[indice],
+            archivos[indice],
+            casas[indice],
+            aliases[indice],
+            identificados[indice],
+            nombres_responsable_identificado[indice],
+            ejecutivos[indice],
+            nombres_responsable_ejecutivo[indice],
+            etiquetas[indice],
+            tipos_contraoferta[indice],
+            tipos_identificacion[indice],
+            texto_deudas_list[indice],
         ]).lower()
 
         filas.append({
-            '_Casa_Cobro': _texto_busqueda(mtdt.get('Casa_Cobro')),
-            '_Alias_Casa': _texto_busqueda(mtdt.get('Alias_Casa')),
-            '_Archivo_Origen': _texto_busqueda(mtdt.get('Archivo_Origen')),
-            '_Ejecutivo_Subida': ejecutivo_subida,
-            '_Ejecutivo_Subida_Categoria': _categoria_responsable_detalle(ejecutivo_subida),
-            '_Etiqueta': etiqueta,
-            '_Prioridad_Etiqueta': PRIORIDAD_ETIQUETAS_CRUCE.get(etiqueta, 99),
-            '_Id_Definitivo': id_definitivo,
-            '_Tiene_Id_Definitivo': bool(id_definitivo),
-            '_Es_Addendum': (id_definitivo == ETIQUETA_ADDENDUM),
-            '_Identificado_Por': identificado_por,
-            '_Identificado_Por_Categoria': _categoria_responsable_detalle(identificado_por),
-            '_Tipo_Identificacion': tipo_identificacion,
+            '_Casa_Cobro': casas[indice],
+            '_Alias_Casa': aliases[indice],
+            '_Archivo_Origen': archivos[indice],
+            '_Ejecutivo_Subida': ejecutivos[indice],
+            '_Ejecutivo_Subida_Categoria': categorias_ejecutivo[indice],
+            '_Etiqueta': etiquetas[indice],
+            '_Prioridad_Etiqueta': PRIORIDAD_ETIQUETAS_CRUCE.get(etiquetas[indice], 99),
+            '_Id_Definitivo': ids_definitivos[indice],
+            '_Tiene_Id_Definitivo': bool(ids_definitivos[indice]),
+            '_Es_Addendum': (ids_definitivos[indice] == ETIQUETA_ADDENDUM),
+            '_Identificado_Por': identificados[indice],
+            '_Identificado_Por_Categoria': categorias_identificado[indice],
+            '_Identificado_Por_Nombre': nombres_identificado[indice],
+            '_Tipo_Identificacion': tipos_identificacion[indice],
             '_Id_Registro': _texto_busqueda(id_registro),
             '_Id_Registro_Num': id_registro_num,
-            '_Fecha_Sin_Reconocer': fecha_inicial if fecha_inicial is not None else pd.NaT,
-            '_Fecha_Reconocido': fecha_reconocido if fecha_reconocido is not None else pd.NaT,
-            '_Fecha_Subido_Alianzas': fecha_subido if fecha_subido is not None else pd.NaT,
-            '_Ultima_Fecha': ultima_fecha if ultima_fecha is not None else pd.NaT,
-            '_Fecha_Limite_Pago': fecha_limite if fecha_limite is not None else pd.NaT,
-            '_Estado': obtener_ultimo_status_cruce(mtdt),
-            '_Motivos_Cruce': motivos,
-            '_Deudas_Posibles': deudas_posibles,
-            '_Pagos_Cuotas': pagos_cuotas,
-            '_Tipo_Contraoferta': _texto_busqueda(mtdt.get('Tipo_Contraoferta')),
-            '_Portafolio_Ids': _texto_busqueda(mtdt.get('Portafolio_Ids')),
-            '_Monto_Actual_Original': monto_actual_original,
+            '_Fecha_Sin_Reconocer': fechas_iniciales[indice] or pd.NaT,
+            '_Fecha_Reconocido': fechas_reconocido[indice] or pd.NaT,
+            '_Fecha_Subido_Alianzas': fechas_subido[indice] or pd.NaT,
+            '_Ultima_Fecha': ultimas_fechas[indice] or pd.NaT,
+            '_Fecha_Limite_Pago': fecha_limite,
+            '_Estado': estados[indice],
+            '_Motivos_Cruce': motivos_list[indice],
+            '_Deudas_Posibles': deudas_list[indice],
+            '_Pagos_Cuotas': pagos_list[indice],
+            '_Tipo_Contraoferta': tipos_contraoferta[indice],
+            '_Portafolio_Ids': portafolios[indice],
+            '_Monto_Actual_Original': montos_originales_serie.iloc[indice],
             '_Observaciones': observaciones,
             '_N_Observaciones': len(observaciones),
             '_Busqueda': texto_busqueda,
         })
-
-    if not filas:
-        return df_base
 
     df_detalles = pd.DataFrame(filas, index=df_base.index)
 
@@ -1467,7 +1760,7 @@ def _construir_df_detalles(*, cruce_df: pd.DataFrame, mapa_nombres: dict[str, st
     df_detalles['_Id_Registro_Num'] = pd.to_numeric(df_detalles['_Id_Registro_Num'], errors='coerce')
     df_detalles['_Monto_Actual_Original'] = pd.to_numeric(df_detalles['_Monto_Actual_Original'], errors='coerce')
 
-    return pd.concat([df_base, df_detalles], axis=1)
+    return df_detalles
 
 # Función Auxiliar para Cargar el Mapa de Correos a Nombres desde el HeadCount
 def _cargar_mapa_nombres_detalle() -> dict[str, str]:
@@ -2297,3 +2590,465 @@ def mostrar_detalles_cruce_paginados(*, cruce_df: pd.DataFrame, key: str) -> Non
 
     # Paso 8: Caption Final con la Página Actual
     st.caption("Página **{}** de **{}**.".format(pagina_actual, total_paginas))
+
+# =============================================================================
+# Cómo se Cruza (Control de las Personas que Realizan el Cruce)
+# =============================================================================
+
+# Claves de los Widgets del Panel de Personas (para poder Limpiarlos)
+LLAVES_FILTROS_PERSONAS_CRUCE = [
+    'personas_cruce_personas_input',
+    'personas_cruce_rango_fecha_input',
+    'personas_cruce_incluir_automaticos_input',
+]
+
+# Categorías Especiales de Responsable (no corresponden a una Persona)
+CATEGORIA_PERSONA_AUTOMATICO = 'Automático'
+CATEGORIA_PERSONA_SIN_REGISTRO = 'No registrado'
+
+# Función Auxiliar para Limpiar los Filtros del Panel de Personas
+def _limpiar_filtros_personas_cruce() -> None:
+    for llave in LLAVES_FILTROS_PERSONAS_CRUCE:
+        st.session_state.pop(llave, None)
+
+# Función Auxiliar para Normalizar el Rango de Fechas del Panel
+def _rango_fechas_personas_cruce(rango_fecha) -> tuple[Optional[date], Optional[date]]:
+    inicio_fecha = None
+    fin_fecha = None
+    if isinstance(rango_fecha, (tuple, list)):
+        if len(rango_fecha) == 1:
+            inicio_fecha = fin_fecha = rango_fecha[0]
+        elif len(rango_fecha) >= 2:
+            inicio_fecha = rango_fecha[0]
+            fin_fecha = rango_fecha[1]
+    elif rango_fecha:
+        inicio_fecha = fin_fecha = rango_fecha
+    if (inicio_fecha is not None) and (fin_fecha is not None) and (inicio_fecha > fin_fecha):
+        inicio_fecha, fin_fecha = fin_fecha, inicio_fecha
+    return inicio_fecha, fin_fecha
+
+# Función Auxiliar para Normalizar los Detalles de las Personas que Cruzan
+def _normalizar_detalles_personas_cruce(*, df_detalles: pd.DataFrame) -> pd.DataFrame:
+    if df_detalles.empty:
+        return df_detalles.copy()
+
+    df = df_detalles.copy()
+    df['_Persona'] = (
+        df['_Identificado_Por_Categoria'].fillna('').astype(str).str.strip()
+    )
+    df['_Es_Addendum_Num'] = (
+        df['_Es_Addendum'].fillna(False).astype(bool).astype(int)
+    )
+    df['_Fecha_Reconocido'] = pd.to_datetime(df['_Fecha_Reconocido'], errors='coerce')
+    df['_Fecha_Dia'] = df['_Fecha_Reconocido'].dt.normalize()
+
+    if '_Identificado_Por_Nombre' in df.columns:
+        nombres = df['_Identificado_Por_Nombre'].fillna('').astype(str).str.strip()
+    else:
+        nombres = pd.Series('', index=df.index)
+    df['_Nombre_Persona'] = nombres.where(nombres.ne(''), df['_Persona'])
+    df.loc[df['_Persona'] == 'Automatico', '_Nombre_Persona'] = CATEGORIA_PERSONA_AUTOMATICO
+
+    etiquetas_persona = []
+    for nombre, persona in zip(df['_Nombre_Persona'], df['_Persona']):
+        if persona == 'Automatico':
+            etiquetas_persona.append(CATEGORIA_PERSONA_AUTOMATICO)
+        elif nombre and (nombre != persona):
+            etiquetas_persona.append('{} ({})'.format(nombre, persona))
+        else:
+            etiquetas_persona.append(persona)
+    df['_Etiqueta_Persona'] = etiquetas_persona
+
+    return df
+
+# Función Auxiliar para Filtrar los Detalles por Persona y Rango de Fechas
+def _filtrar_detalles_personas_cruce(
+        *,
+        df_detalles: pd.DataFrame,
+        personas: Optional[list[str]] = None,
+        rango_fecha=(),
+        incluir_automaticos: bool = False,
+    ) -> pd.DataFrame:
+    df = _normalizar_detalles_personas_cruce(df_detalles=df_detalles)
+    if df.empty:
+        return df
+
+    # Se Excluyen los Registros sin Responsable y, Opcionalmente, los Automáticos
+    categorias_excluidas = [CATEGORIA_PERSONA_SIN_REGISTRO, '']
+    if not incluir_automaticos:
+        categorias_excluidas.append('Automatico')
+    df = df[~df['_Persona'].isin(categorias_excluidas)]
+
+    if personas:
+        df = df[df['_Persona'].isin([str(persona) for persona in personas])]
+
+    inicio_fecha, fin_fecha = _rango_fechas_personas_cruce(rango_fecha)
+    if (inicio_fecha is not None) and (fin_fecha is not None):
+        fechas = df['_Fecha_Reconocido'].dt.date
+        df = df[(fechas >= inicio_fecha) & (fechas <= fin_fecha)]
+
+    return df
+
+# Función Auxiliar para Construir el Resumen por Persona de los Cruces
+def _construir_resumen_personas_cruce(*, df_personas: pd.DataFrame) -> pd.DataFrame:
+    columnas_etiquetas = ['Etiqueta_{}'.format(etiqueta) for etiqueta in ETIQUETAS_CRUCE]
+    columnas_resumen = [
+        '_Persona', 'Nombre', 'Etiqueta_Persona', 'Cruces', 'Pct_Total',
+        'Addendums', 'Pct_Addendums', 'Dias_Activos', 'Frecuencia_Diaria',
+        'Bases', 'Casas', 'Primer_Cruce', 'Ultimo_Cruce',
+    ] + columnas_etiquetas
+
+    if df_personas.empty:
+        return pd.DataFrame(columns=columnas_resumen)
+
+    resumen = (
+        df_personas
+        .groupby('_Persona', dropna=False)
+        .agg(
+            Nombre=('_Nombre_Persona', 'first'),
+            Etiqueta_Persona=('_Etiqueta_Persona', 'first'),
+            Cruces=('Id_Cruce', 'size'),
+            Addendums=('_Es_Addendum_Num', 'sum'),
+            Dias_Activos=('_Fecha_Dia', 'nunique'),
+            Bases=('_Archivo_Origen', 'nunique'),
+            Casas=('_Casa_Cobro', 'nunique'),
+            Primer_Cruce=('_Fecha_Reconocido', 'min'),
+            Ultimo_Cruce=('_Fecha_Reconocido', 'max'),
+        )
+        .reset_index()
+    )
+
+    # Desglose por Etiqueta del Cruce (EXACTO, DUPLICADO, AMBIGUO, ADDENDUM, NULO)
+    conteo_etiquetas = pd.crosstab(df_personas['_Persona'], df_personas['_Etiqueta'])
+    for etiqueta, columna in zip(ETIQUETAS_CRUCE, columnas_etiquetas):
+        if etiqueta in conteo_etiquetas.columns:
+            resumen[columna] = (
+                resumen['_Persona']
+                .map(conteo_etiquetas[etiqueta])
+                .fillna(0)
+                .astype(int)
+            )
+        else:
+            resumen[columna] = 0
+
+    # Métricas Derivadas: Participación, % Addendums y Frecuencia (Cruces por Día Activo)
+    total_cruces = int(resumen['Cruces'].sum())
+    resumen['Pct_Total'] = resumen['Cruces'] / total_cruces if total_cruces else 0.0
+    resumen['Addendums'] = resumen['Addendums'].astype(int)
+    resumen['Pct_Addendums'] = (
+        resumen['Addendums'] / resumen['Cruces'].clip(lower=1)
+    ).fillna(0.0)
+    resumen['Dias_Activos'] = resumen['Dias_Activos'].astype(int)
+    resumen['Frecuencia_Diaria'] = (
+        resumen['Cruces'] / resumen['Dias_Activos'].clip(lower=1)
+    ).fillna(0.0)
+    resumen['Bases'] = resumen['Bases'].astype(int)
+    resumen['Casas'] = resumen['Casas'].astype(int)
+
+    resumen = resumen.sort_values(
+        by=['Cruces', '_Persona'],
+        ascending=[False, True],
+        kind='stable',
+    ).reset_index(drop=True)
+
+    return resumen[columnas_resumen]
+
+# Función Auxiliar para Construir el Timeline Diario por Persona
+def _construir_timeline_personas_cruce(*, df_personas: pd.DataFrame) -> pd.DataFrame:
+    columnas_etiquetas = ['Etiqueta_{}'.format(etiqueta) for etiqueta in ETIQUETAS_CRUCE]
+    columnas_timeline = [
+        'Fecha', '_Persona', 'Nombre', 'Etiqueta_Persona', 'Cruces', 'Addendums',
+    ] + columnas_etiquetas
+
+    if df_personas.empty:
+        return pd.DataFrame(columns=columnas_timeline)
+
+    df = df_personas.dropna(subset=['_Fecha_Dia'])
+    if df.empty:
+        return pd.DataFrame(columns=columnas_timeline)
+
+    timeline = (
+        df
+        .groupby(['_Fecha_Dia', '_Persona'], dropna=False)
+        .agg(
+            Nombre=('_Nombre_Persona', 'first'),
+            Etiqueta_Persona=('_Etiqueta_Persona', 'first'),
+            Cruces=('Id_Cruce', 'size'),
+            Addendums=('_Es_Addendum_Num', 'sum'),
+        )
+        .reset_index()
+        .rename(columns={'_Fecha_Dia': 'Fecha'})
+    )
+
+    conteo_etiquetas = pd.crosstab([df['_Fecha_Dia'], df['_Persona']], df['_Etiqueta'])
+    conteo_etiquetas = conteo_etiquetas.reset_index()
+    conteo_etiquetas = conteo_etiquetas.rename(columns={
+        conteo_etiquetas.columns[0]: 'Fecha',
+        conteo_etiquetas.columns[1]: '_Persona',
+    })
+    for etiqueta, columna in zip(ETIQUETAS_CRUCE, columnas_etiquetas):
+        if etiqueta in conteo_etiquetas.columns:
+            conteo_etiquetas = conteo_etiquetas.rename(columns={etiqueta: columna})
+        else:
+            conteo_etiquetas[columna] = 0
+
+    timeline = timeline.merge(
+        conteo_etiquetas[['Fecha', '_Persona'] + columnas_etiquetas],
+        on=['Fecha', '_Persona'],
+        how='left',
+    )
+    for columna in columnas_etiquetas:
+        timeline[columna] = timeline[columna].fillna(0).astype(int)
+    timeline['Addendums'] = timeline['Addendums'].astype(int)
+
+    timeline = timeline.sort_values(
+        by=['Fecha', 'Cruces', '_Persona'],
+        ascending=[True, False, True],
+        kind='stable',
+    ).reset_index(drop=True)
+
+    return timeline[columnas_timeline]
+
+# Función Principal para Mostrar el Panel 'Cómo se Cruza'
+def mostrar_panel_personas_cruce(*, cruce_df: pd.DataFrame) -> None:
+    """Muestra el control de las personas que realizan el cruce de deudas.
+
+    El responsable y su fecha se toman de la Metadata guardada en Google Sheets:
+    `Identificado_Por` y `Ultima_Actualizacion['Reconocido']`. El panel resume
+    la cantidad de cruces, los Addendums, el desglose por etiqueta, la frecuencia
+    diaria y un timeline de la actividad por persona.
+    """
+    if cruce_df.empty:
+        st.warning(
+            "No hay registros de cruce disponibles. Sube una base en la pestaña de **Subida de Datos**.",
+            icon="⚠️",
+        )
+        return
+
+    # Paso 1: Construir (o Reutilizar) las Columnas Internas de Detalles
+    mapa_nombres = _obtener_mapa_nombres_detalle()
+    df_detalles = _construir_df_detalles(cruce_df=cruce_df, mapa_nombres=mapa_nombres)
+
+    # Paso 2: Calcular las Personas Disponibles para el Filtro
+    df_opciones = _filtrar_detalles_personas_cruce(
+        df_detalles=df_detalles,
+        incluir_automaticos=True,
+    )
+    if df_opciones.empty:
+        st.info(
+            "Aún no hay identificaciones manuales registradas. Cuando un negociador "
+            "identifique un cruce y guarde los cambios, aparecerá aquí.",
+            icon="ℹ️",
+        )
+        return
+
+    opciones_personas = sorted(
+        df_opciones['_Persona'].unique().tolist(),
+        key=lambda valor: _formatear_responsable_filtro_detalle(
+            valor, mapa_nombres
+        ).lower(),
+    )
+
+    # Paso 3: Filtros del Panel
+    with st.container(border=True):
+        st.markdown("#### 🔎 Filtros del Panel")
+        colPersonas, colFechas, colAutomaticos, colLimpiar = st.columns(
+            [2, 2, 1.4, 1],
+            vertical_alignment="bottom",
+        )
+        with colPersonas:
+            personas_seleccionadas = st.multiselect(
+                label="**🧑‍💼 Personas**",
+                options=opciones_personas,
+                format_func=lambda valor: _formatear_responsable_filtro_detalle(
+                    valor, mapa_nombres
+                ),
+                key="personas_cruce_personas_input",
+                help="Selecciona una o varias personas. Si lo dejas vacío, se muestran todas.",
+            )
+        with colFechas:
+            rango_fecha = st.date_input(
+                label="**📅 Rango de Identificación**",
+                value=(),
+                format="DD/MM/YYYY",
+                key="personas_cruce_rango_fecha_input",
+                help=(
+                    "Filtra por la fecha en que se guardó la identificación "
+                    "(estado Reconocido)."
+                ),
+            )
+        with colAutomaticos:
+            incluir_automaticos = st.toggle(
+                label="**⚙️ Incluir automáticos**",
+                key="personas_cruce_incluir_automaticos_input",
+                help="Incluye los cruces resueltos automáticamente por el algoritmo.",
+            )
+        with colLimpiar:
+            st.button(
+                label="**🧹 Limpiar**",
+                key="personas_cruce_limpiar_filtros",
+                on_click=_limpiar_filtros_personas_cruce,
+                width="stretch",
+            )
+        st.caption(
+            "El responsable se toma de la Metadata guardada en Google Sheets "
+            "(`Identificado_Por`) y la fecha del estado **Reconocido**."
+        )
+
+    # Paso 4: Aplicar los Filtros
+    df_personas = _filtrar_detalles_personas_cruce(
+        df_detalles=df_detalles,
+        personas=personas_seleccionadas,
+        rango_fecha=rango_fecha,
+        incluir_automaticos=incluir_automaticos,
+    )
+    if df_personas.empty:
+        st.warning(
+            "Ninguna persona coincide con los filtros seleccionados. Si buscas los "
+            "cruces automáticos, activa **Incluir automáticos**.",
+            icon="🔍",
+        )
+        return
+
+    resumen = _construir_resumen_personas_cruce(df_personas=df_personas)
+    timeline = _construir_timeline_personas_cruce(df_personas=df_personas)
+
+    # Paso 5: Métricas Globales del Panel
+    total_cruces = int(resumen['Cruces'].sum())
+    total_addendums = int(resumen['Addendums'].sum())
+    total_personas = int(resumen['_Persona'].nunique())
+    dias_activos = int(df_personas['_Fecha_Dia'].dropna().nunique())
+    pct_addendums = (total_addendums / total_cruces) if total_cruces else 0.0
+
+    colPersonas, colCruces, colAddendums, colPct, colDias = st.columns(5, border=True)
+    with colPersonas:
+        st.metric(label="**🧑‍💼 Personas**", value="{:,}".format(total_personas))
+    with colCruces:
+        st.metric(label="**🔀 Cruces**", value="{:,}".format(total_cruces))
+    with colAddendums:
+        st.metric(label="**📝 Addendums**", value="{:,}".format(total_addendums))
+    with colPct:
+        st.metric(
+            label="**📊 % Addendums**",
+            value="{:.1%}".format(pct_addendums),
+        )
+    with colDias:
+        st.metric(label="**📅 Días con Actividad**", value="{:,}".format(dias_activos))
+
+    st.caption(
+        "ℹ️ Un **cruce** es un registro con responsable identificado. Los registros "
+        "**sin identificar** no cuentan como cruce de una persona."
+    )
+
+    # Paso 6: Tabla Resumen por Persona
+    st.markdown("#### 🧾 Resumen por Persona")
+    columnas_etiquetas = ['Etiqueta_{}'.format(etiqueta) for etiqueta in ETIQUETAS_CRUCE]
+    tabla_resumen = resumen[[
+        'Nombre', '_Persona', 'Cruces', 'Pct_Total', 'Addendums', 'Pct_Addendums',
+        'Dias_Activos', 'Frecuencia_Diaria', 'Bases', 'Primer_Cruce', 'Ultimo_Cruce',
+    ] + columnas_etiquetas].copy()
+    st.dataframe(
+        tabla_resumen,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            '_Persona': st.column_config.TextColumn('Correo'),
+            'Nombre': st.column_config.TextColumn('Persona'),
+            'Cruces': st.column_config.NumberColumn('Cruces'),
+            'Pct_Total': st.column_config.NumberColumn('% del Total', format="percent"),
+            'Addendums': st.column_config.NumberColumn('Addendums'),
+            'Pct_Addendums': st.column_config.NumberColumn('% Addendums', format="percent"),
+            'Dias_Activos': st.column_config.NumberColumn('Días Activos'),
+            'Frecuencia_Diaria': st.column_config.NumberColumn(
+                'Cruces por Día Activo', format="%.2f"
+            ),
+            'Bases': st.column_config.NumberColumn('Bases'),
+            'Primer_Cruce': st.column_config.DatetimeColumn(
+                'Primer Cruce', format="DD/MM/YYYY HH:mm"
+            ),
+            'Ultimo_Cruce': st.column_config.DatetimeColumn(
+                'Último Cruce', format="DD/MM/YYYY HH:mm"
+            ),
+            **{
+                columna: st.column_config.NumberColumn(columna.replace('Etiqueta_', '🏷️ '))
+                for columna in columnas_etiquetas
+            },
+        },
+    )
+
+    # Paso 7: Desglose por Etiqueta
+    st.markdown("#### 🏷️ Desglose por Etiqueta")
+    limite_grafico = 15
+    resumen_grafico = resumen.head(limite_grafico)
+    desglose = resumen_grafico.set_index('Etiqueta_Persona')[columnas_etiquetas]
+    if desglose.to_numpy().sum() > 0:
+        st.bar_chart(desglose, stack=True, height=320)
+        if len(resumen) > limite_grafico:
+            st.caption(
+                "ℹ️ El gráfico muestra las **{}** personas con más cruces. "
+                "La tabla superior incluye a todas.".format(limite_grafico)
+            )
+    else:
+        st.info("No hay etiquetas registradas para las personas filtradas.", icon="ℹ️")
+
+    # Paso 8: Timeline de los Cruces Realizados
+    st.markdown("#### 🗓️ Timeline de Cruces")
+    if timeline.empty:
+        st.info(
+            "Los cruces filtrados no tienen una fecha de identificación (**Reconocido**) "
+            "registrada, por lo que no se pueden ubicar en el timeline.",
+            icon="ℹ️",
+        )
+    else:
+        personas_grafico = resumen_grafico['Etiqueta_Persona'].tolist()
+        timeline_grafico_df = timeline[
+            timeline['Etiqueta_Persona'].isin(personas_grafico)
+        ]
+        if timeline_grafico_df.empty:
+            st.info(
+                "Las personas con más cruces no tienen fecha de identificación registrada.",
+                icon="ℹ️",
+            )
+        else:
+            timeline_grafico = timeline_grafico_df.pivot_table(
+                index='Fecha',
+                columns='Etiqueta_Persona',
+                values='Cruces',
+                aggfunc='sum',
+                fill_value=0,
+            )
+            st.bar_chart(timeline_grafico, stack=True, height=360)
+        if len(resumen) > limite_grafico:
+            st.caption(
+                "ℹ️ El timeline muestra las **{}** personas con más cruces. "
+                "El detalle inferior incluye a todas.".format(limite_grafico)
+            )
+
+        with st.expander("🔎 Ver Detalle del Timeline", expanded=False):
+            tabla_timeline = timeline.copy()
+            tabla_timeline['Fecha'] = pd.to_datetime(
+                tabla_timeline['Fecha'], errors='coerce'
+            ).dt.strftime('%d/%m/%Y')
+            st.dataframe(
+                tabla_timeline,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    '_Persona': st.column_config.TextColumn('Correo'),
+                    'Nombre': st.column_config.TextColumn('Persona'),
+                    'Etiqueta_Persona': st.column_config.TextColumn('Persona (Visible)'),
+                    'Fecha': st.column_config.TextColumn('Fecha'),
+                    'Cruces': st.column_config.NumberColumn('Cruces'),
+                    'Addendums': st.column_config.NumberColumn('Addendums'),
+                    **{
+                        columna: st.column_config.NumberColumn(
+                            columna.replace('Etiqueta_', '🏷️ ')
+                        )
+                        for columna in columnas_etiquetas
+                    },
+                },
+            )
+            st.caption(
+                "ℹ️ La fecha corresponde al momento en que se guardó la identificación "
+                "(estado **Reconocido**), no necesariamente al momento en que se abrió el registro."
+            )

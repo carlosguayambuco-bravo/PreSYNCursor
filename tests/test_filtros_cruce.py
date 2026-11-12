@@ -2,15 +2,19 @@
 
 Cubren la construcción de columnas internas, los filtros determinantes para
 identificar una deuda (aliado, etiqueta, estado, banco, cédula, monto, fechas
-y búsqueda global) y el ordenamiento ascendente/descendente.
+y búsqueda global), el ordenamiento ascendente/descendente y la reutilización
+de las columnas internas cacheadas por Id_Cruce.
 """
 
 import unittest
 from datetime import date
 
 import pandas as pd
+import streamlit as st
 
 from ui.cruce_deudas_components import (
+    LLAVE_CACHE_DETALLES_CRUCE,
+    LLAVE_CACHE_FILTROS_CRUCE,
     OPCION_FILTRO_FECHA_CRUCE,
     OPCION_FILTRO_FECHA_ULTIMA,
     OPCION_FILTRO_ID_ADDENDUM,
@@ -25,8 +29,10 @@ from ui.cruce_deudas_components import (
     OPCION_ORDEN_ORIGINAL,
     OPCION_ORDEN_ULTIMA_ACTUALIZACION,
     _aplicar_filtros_cruce,
+    _construir_df_detalles,
     _construir_df_filtros_cruce,
     _ordenar_cruce,
+    limpiar_cache_columnas_cruce,
 )
 
 
@@ -57,6 +63,7 @@ def _metadata(
 
 class TestFiltrosIdentificacionManual(unittest.TestCase):
     def setUp(self):
+        limpiar_cache_columnas_cruce()
         self.cruce_df = pd.DataFrame([
             {
                 'Id_Cruce': 'c1',
@@ -342,6 +349,121 @@ class TestFiltrosIdentificacionManual(unittest.TestCase):
             ascendente=False,
         )
         self.assertEqual(self._ids(df_ultima), ['c4', 'c3', 'c2', 'c1'])
+
+
+class TestCacheColumnasCruce(unittest.TestCase):
+    """Valida que las columnas internas se reutilicen y se invaliden correctamente."""
+
+    def setUp(self):
+        limpiar_cache_columnas_cruce()
+        self.cruce_df = pd.DataFrame([
+            {
+                'Id_Cruce': 'c1',
+                'Cedula': '1234567890',
+                'Nombre_Cliente': 'Ana Pérez',
+                'Banco': 'BBVA Colombia',
+                'Monto_Actual': 1000.0,
+                'Numero_Credito': 'A1',
+                'Metadata': {
+                    'Id_Registro': '1',
+                    'Casa_Cobro': 'Aliado A',
+                    'Archivo_Origen': 'base_1.xlsx',
+                    'Etiqueta': 'AMBIGUO',
+                    'Identificado_Por': 'persona@x.com',
+                    'Ultima_Actualizacion': {
+                        'Sin Reconocer': '2026-01-01T10:00:00',
+                        'Reconocido': '2026-01-02T10:00:00',
+                    },
+                    'Deudas_Posibles': [],
+                    'Pagos_Cuotas': [],
+                    'Motivos_Cruce': [],
+                },
+            },
+            {
+                'Id_Cruce': 'c2',
+                'Cedula': '9876543210',
+                'Nombre_Cliente': 'Luis Gómez',
+                'Banco': 'Davivienda',
+                'Monto_Actual': 5000.0,
+                'Numero_Credito': 'B2',
+                'Metadata': {
+                    'Id_Registro': '2',
+                    'Casa_Cobro': 'Aliado B',
+                    'Archivo_Origen': 'base_2.xlsx',
+                    'Etiqueta': 'EXACTO',
+                    'Id_Definitivo': 'D-200',
+                    'Ultima_Actualizacion': {'Sin Reconocer': '2026-02-01T10:00:00'},
+                    'Deudas_Posibles': [],
+                    'Pagos_Cuotas': [],
+                    'Motivos_Cruce': [],
+                },
+            },
+        ])
+
+    def tearDown(self):
+        limpiar_cache_columnas_cruce()
+
+    def test_filtros_reutiliza_la_construccion_cacheada(self):
+        df_1 = _construir_df_filtros_cruce(cruce_df=self.cruce_df)
+        cache_1 = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+        df_2 = _construir_df_filtros_cruce(cruce_df=self.cruce_df)
+        cache_2 = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+
+        self.assertIsNotNone(cache_1)
+        self.assertIsNotNone(cache_2)
+        self.assertIs(cache_1['df'], cache_2['df'])
+        pd.testing.assert_frame_equal(df_1, df_2)
+
+    def test_cambios_pendientes_no_reconstruyen_columnas(self):
+        _construir_df_filtros_cruce(cruce_df=self.cruce_df)
+        cache_antes = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+
+        df = _construir_df_filtros_cruce(
+            cruce_df=self.cruce_df,
+            cambios={'c1': 'D-999'},
+        )
+        cache_despues = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+
+        self.assertIs(cache_antes['df'], cache_despues['df'])
+        self.assertEqual(df.loc[0, '_Id_Definitivo_Actual'], 'D-999')
+        self.assertIn('d-999', df.loc[0, '_Busqueda'])
+        self.assertEqual(df.loc[0, '_Id_Definitivo_Metadata'], '')
+
+    def test_cache_se_invalida_al_cambiar_la_metadata(self):
+        _construir_df_filtros_cruce(cruce_df=self.cruce_df)
+        cache_antes = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+
+        df_modificado = self.cruce_df.copy()
+        metadata = dict(df_modificado.loc[0, 'Metadata'])
+        metadata['Etiqueta'] = 'NULO'
+        metadata['Id_Definitivo'] = 'D-777'
+        df_modificado.at[0, 'Metadata'] = metadata
+
+        df = _construir_df_filtros_cruce(cruce_df=df_modificado)
+        cache_despues = st.session_state.get(LLAVE_CACHE_FILTROS_CRUCE)
+
+        self.assertIsNot(cache_antes['df'], cache_despues['df'])
+        self.assertEqual(df.loc[0, '_Etiqueta'], 'NULO')
+        self.assertEqual(df.loc[0, '_Id_Definitivo_Metadata'], 'D-777')
+
+    def test_detalles_reutiliza_la_construccion_cacheada(self):
+        df_1 = _construir_df_detalles(cruce_df=self.cruce_df, mapa_nombres={})
+        cache_1 = st.session_state.get(LLAVE_CACHE_DETALLES_CRUCE)
+        df_2 = _construir_df_detalles(cruce_df=self.cruce_df, mapa_nombres={})
+        cache_2 = st.session_state.get(LLAVE_CACHE_DETALLES_CRUCE)
+
+        self.assertIs(cache_1['df'], cache_2['df'])
+        pd.testing.assert_frame_equal(df_1, df_2)
+
+    def test_detalles_resuelven_el_nombre_del_responsable(self):
+        df = _construir_df_detalles(
+            cruce_df=self.cruce_df,
+            mapa_nombres={'persona@x.com': 'Ana'},
+        )
+
+        self.assertEqual(df.loc[0, '_Identificado_Por_Nombre'], 'Ana')
+        self.assertEqual(df.loc[0, '_Estado'], 'Reconocido')
+        self.assertEqual(df.loc[1, '_Estado'], 'Sin Reconocer')
 
 
 if __name__ == '__main__':

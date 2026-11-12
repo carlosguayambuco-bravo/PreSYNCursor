@@ -36,9 +36,10 @@ from modules.id_aut_deud.helpers import (
 from ui.cache_components import reiniciar_caches
 from ui.cruce_deudas_components import (
     ID_DEFINITIVO_ADDENDUM, LLAVE_CAMBIOS_ID_DEFINITIVO, LLAVE_IDS_NO_VALIDADOS,
-    mostrar_advertencia_ids_no_validados, mostrar_deudas_cruce_paginadas,
-    mostrar_detalles_cruce_paginados, mostrar_filtros_cruce,
-    mostrar_filtros_detalles_cruce,
+    limpiar_cache_columnas_cruce, mostrar_advertencia_ids_no_validados,
+    mostrar_deudas_cruce_paginadas, mostrar_detalles_cruce_paginados,
+    mostrar_filtros_cruce, mostrar_filtros_detalles_cruce,
+    mostrar_panel_personas_cruce,
 )
 from utils.helpers_general import cleanNumber
 from utils.helpers_sheets import convert_data_to_string
@@ -1138,11 +1139,12 @@ def _mostrar_resumen_pendientes_mando(*, resumen_df: pd.DataFrame) -> None:
     st.dataframe(resumen_mostrar, width="stretch", hide_index=True)
 
 # --- Página Principal ---
-tab_subida, tab_escogencia, tab_detalles, tab_control, tab_mando = st.tabs(
+tab_subida, tab_escogencia, tab_detalles, tab_personas, tab_control, tab_mando = st.tabs(
     tabs = [
         "📤 Subida de Datos",
         "✍️ Identificación Manual",
         "🧾 Detalles de Cruce",
+        "🫪Como se Cruza",
         "🟢 Control",
         "🪭Mando de Operaciones",
     ],
@@ -1310,6 +1312,7 @@ if tab_escogencia.open:
                 help="Reinicia el cache de carga de las Deudas a Identificar, libera las identificaciones en curso y recarga desde Sheets.",
             ):
                 load_pendiente_cruce.clear()
+                limpiar_cache_columnas_cruce()
                 get_cruce_identificaciones_manager().reset()
                 st.rerun()
 
@@ -1348,7 +1351,29 @@ if tab_detalles.open:
             mostrar_detalles_cruce_paginados(cruce_df=cruce_filtrado, key="detalles_cruce")
 
 # ==============================
-# Tab 4: Control de Subida a la Base del Mes
+# Tab 4: Cómo se Cruza (Control de Personas)
+# ==============================
+if tab_personas.open:
+    with tab_personas:
+        st.markdown("### 🫪Cómo se Cruza")
+        st.info(
+            "Este panel permite hacer seguimiento a las personas que realizan el cruce: "
+            "cuántos registros han identificado, cuántos de esos son **Addendums**, su "
+            "desglose por etiqueta, su frecuencia de trabajo y el timeline de su actividad.",
+            icon="ℹ️",
+        )
+        st.caption(
+            "ℹ️ La información se toma de la Metadata guardada en Google Sheets "
+            "(`Identificado_Por`). Los cambios pendientes de **Actualizar Cambios** no se "
+            "reflejan en el panel hasta que se guarden."
+        )
+
+        # Carga de los Registros de Cruce (incluye los Cambios Locales ya Guardados)
+        cruce_df = load_pendiente_cruce_con_cambios()
+        mostrar_panel_personas_cruce(cruce_df=cruce_df)
+
+# ==============================
+# Tab 5: Control de Subida a la Base del Mes
 # ==============================
 if tab_control.open:
     with tab_control:
@@ -1708,7 +1733,7 @@ if tab_control.open:
                     st.rerun()
 
 # ==============================
-# Tab 5: Mando de Operaciones (Centro de Control de Masivas)
+# Tab 6: Mando de Operaciones (Centro de Control de Masivas)
 # ==============================
 if tab_mando.open:
     with tab_mando:
