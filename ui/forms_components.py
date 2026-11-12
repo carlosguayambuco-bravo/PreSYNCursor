@@ -3,6 +3,7 @@
 from typing import Any, Optional, TypedDict, Literal
 from time import sleep
 # Librerías de Terceros
+from numpy import place
 from pandera.typing import DataFrame
 import pandas as pd
 import streamlit as st
@@ -714,7 +715,7 @@ def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Li
     """
     # Definimos el Contenedor
     if (type_container == "expander"):
-        container_fb = st.expander("**♻️ Dar FeedBack del App**", expanded=False)
+        container_fb = st.expander("**♻️ Dar FeedBack del App**", expanded=True)
     elif (type_container == "container"):
         container_fb = st.container(border=True)
     else:
@@ -723,10 +724,10 @@ def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Li
     # Creamos el Expander
     with container_fb:
         # Hay 2 Opciones a Mostrar: Like o Dislike ,Espacio para Comentario y Botón de Envío
-        colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="top", border=True)
+        colGusto, colComentario, colEnviar = st.columns([1,4,2], vertical_alignment="top", border=True, gap="medium")
 
         with colGusto:
-            st.markdown("**¿Te fue útil lo que vez?**")
+            st.markdown("**¿Te fue útil esta parte del App?**")
             gusto_fb = st.feedback(
                 "thumbs",
                 key=origin+"_feedback_gusto",
@@ -736,6 +737,7 @@ def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Li
             comentario_fb = st.text_area(
                 label="**👌Recomendaciones o 😒Quejas o 😁Felictaciones**",
                 key=origin+"_feedback_comentario",
+                placeholder="Puedes asincerarte todo lo que quieras"
             )
 
         # Ajustamos el Comentario a "Sin Comentario"
@@ -743,6 +745,7 @@ def mostrar_componente_feedback(*,origin: str, configs: dict, type_container: Li
 
         # Creamos el Botón de envío
         with colEnviar:
+            st.info("Con este bóton subes el Feedback para que lo revisemos",icon="ℹ️")
             enviar_fb = st.button(
                 label="**➿Enviar Feedback**",
                 type="primary",
