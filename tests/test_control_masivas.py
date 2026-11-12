@@ -18,7 +18,9 @@ from modules.control_masivas import (
     completar_metadata_masivas,
     construir_cambios_masivas,
     construir_log_cambios_masivas,
+    detectar_fechas_portafolio_fuera_alcance,
     distribuir_portafolios_masivas,
+    distribuir_portafolios_masivas_con_alertas,
     metadata_masiva_completa,
     resumen_bases_sin_metadata,
 )
@@ -39,6 +41,7 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         es_portafolio=False,
         pab_origen=600000,
         pab_propuesta=500000,
+        pab_portafolio=None,
         id_cruce=None,
         metadata=None,
     ):
@@ -51,6 +54,7 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
             "Es_Portafolio": es_portafolio,
             "PaB_Origen": pab_origen,
             "PaB_Propuesta": pab_propuesta,
+            "PaB_Portafolio": pab_portafolio,
             "Metadata": metadata if metadata is not None else {"Id_Cruce": id_cruce or "C{}".format(fila)},
         }
 
@@ -204,6 +208,187 @@ class TestDistribucionPortafoliosMasivas(unittest.TestCase):
         self.assertTrue(pd.isna(distribuido["PaB_Propuesta"].iloc[2]))
         self.assertTrue(detalle.empty)
 
+    def test_usa_pab_portafolio_existente_para_redistribuir_lote_nuevo(self):
+        # El lote 1 ya fue distribuido (600k y 400k) y guardó PaB_Portafolio = 1M.
+        # El lote 2 trae una deuda nueva con el total repetido: se debe ignorar su
+        # PaB_Propuesta y redistribuir el total guardado entre las tres deudas.
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", fecha="2026-11-04",
+                pab_origen=600000, pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", fecha="2026-11-04",
+                pab_origen=400000, pab_propuesta=400000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=4, id_deuda="D3", fecha="2026-11-07",
+                pab_origen=1000000, pab_propuesta=1000000,
+            ),
+        ])
+
+        distribuido, detalle, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(
+            distribuido["PaB_Propuesta"].tolist(),
+            [300000.0, 200000.0, 500000.0],
+        )
+        self.assertTrue(distribuido["Es_Portafolio"].all())
+        self.assertTrue(detalle["Regla_Portafolio_Existente"].all())
+        self.assertFalse(detalle["Regla_Especial"].any())
+        self.assertTrue(alertas.empty)
+
+    def test_pab_portafolio_tiene_prioridad_sobre_regla_especial(self):
+        # La regla especial usaría el pago común (600k) y daría 300k/300k.
+        # El PaB_Portafolio oficial (1M) debe imponerse y dar 500k/500k.
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", pab_origen=500000,
+                pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", pab_origen=500000,
+                pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+        ])
+
+        distribuido, detalle, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [500000.0, 500000.0])
+        self.assertTrue(detalle["Regla_Portafolio_Existente"].all())
+        self.assertFalse(detalle["Regla_Especial"].any())
+        self.assertTrue(alertas.empty)
+
+    def test_no_redistribuye_portafolio_individual_no_proporcional(self):
+        # Los pagos individuales no guardan proporción con PaB_Origen:
+        # se debe conservar el modo 'Monto Individual de Portafolio'.
+        metadata = {
+            "Id_Cruce": "C1",
+            "Id_Portafolio": "C1-C2",
+            "PaB_Portafolio": 1000000.0,
+        }
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", pab_origen=600000,
+                pab_propuesta=100000, pab_portafolio=1000000,
+                metadata=metadata,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", pab_origen=400000,
+                pab_propuesta=300000, pab_portafolio=1000000,
+                metadata=metadata,
+            ),
+        ])
+
+        distribuido, detalle, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [100000.0, 300000.0])
+        self.assertTrue(detalle.empty)
+        self.assertEqual(alertas["Tipo_Alerta"].tolist(), ["Portafolio Individual"])
+
+    def test_redistribuye_si_deuda_nueva_trae_el_total_repetido(self):
+        # Aunque los pagos previos no sean proporcionales, una deuda nueva con
+        # el total del portafolio repetido confirma que el portafolio se distribuye.
+        metadata = {
+            "Id_Cruce": "C1",
+            "Id_Portafolio": "C1-C2",
+            "PaB_Portafolio": 1000000.0,
+        }
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", pab_origen=600000,
+                pab_propuesta=100000, pab_portafolio=1000000,
+                metadata=metadata,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", pab_origen=400000,
+                pab_propuesta=300000, pab_portafolio=1000000,
+                metadata=metadata,
+            ),
+            self._fila(
+                fila=4, id_deuda="D3", fecha="2026-11-07",
+                pab_origen=1000000, pab_propuesta=1000000,
+            ),
+        ])
+
+        distribuido, detalle, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(
+            distribuido["PaB_Propuesta"].tolist(),
+            [300000.0, 200000.0, 500000.0],
+        )
+        self.assertTrue(detalle["Regla_Portafolio_Existente"].all())
+        self.assertTrue(alertas.empty)
+
+    def test_pab_portafolio_usa_el_valor_mas_reciente_y_alerta(self):
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", fecha="2026-11-04",
+                pab_origen=600000, pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", fecha="2026-11-06",
+                pab_origen=400000, pab_propuesta=400000, pab_portafolio=1200000,
+            ),
+        ])
+
+        distribuido, _, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].tolist(), [720000.0, 480000.0])
+        self.assertEqual(alertas["Tipo_Alerta"].tolist(), ["Portafolios Múltiples"])
+        self.assertIn("1,200,000", alertas.loc[0, "Detalle"])
+        self.assertIn("06/11/2026", alertas.loc[0, "Detalle"])
+
+    def test_no_redistribuye_pab_portafolio_si_falta_un_pago(self):
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", pab_origen=600000,
+                pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", pab_origen=400000,
+                pab_propuesta=None, pab_portafolio=1000000,
+            ),
+        ])
+
+        distribuido, detalle, alertas = distribuir_portafolios_masivas_con_alertas(df)
+
+        self.assertEqual(distribuido["PaB_Propuesta"].iloc[0], 600000.0)
+        self.assertTrue(pd.isna(distribuido["PaB_Propuesta"].iloc[1]))
+        self.assertTrue(detalle.empty)
+        self.assertEqual(alertas["Tipo_Alerta"].tolist(), ["Pago Faltante"])
+
+    def test_flujo_pab_portafolio_es_idempotente(self):
+        df = self._df([
+            self._fila(
+                fila=2, id_deuda="D1", fecha="2026-11-04",
+                pab_origen=600000, pab_propuesta=600000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=3, id_deuda="D2", fecha="2026-11-04",
+                pab_origen=400000, pab_propuesta=400000, pab_portafolio=1000000,
+            ),
+            self._fila(
+                fila=4, id_deuda="D3", fecha="2026-11-07",
+                pab_origen=1000000, pab_propuesta=1000000,
+            ),
+        ])
+
+        primera, _, _ = distribuir_portafolios_masivas_con_alertas(df)
+        primera = actualizar_metadata_portafolios(primera)
+        segunda, _, alertas = distribuir_portafolios_masivas_con_alertas(primera)
+        segunda = actualizar_metadata_portafolios(segunda)
+
+        self.assertEqual(
+            primera["PaB_Propuesta"].tolist(),
+            segunda["PaB_Propuesta"].tolist(),
+        )
+        self.assertEqual(
+            primera["PaB_Portafolio"].tolist(),
+            segunda["PaB_Portafolio"].tolist(),
+        )
+        self.assertTrue(alertas.empty)
+
     def test_exige_columnas_requeridas(self):
         with self.assertRaises(ValueError):
             distribuir_portafolios_masivas(pd.DataFrame([{"Referencia": "REF1"}]))
@@ -244,6 +429,63 @@ class TestMetadataMasivas(unittest.TestCase):
         self.assertEqual(metadata["Tipo_Contraoferta"], "ContraOferta sin Compromiso")
         self.assertEqual(metadata["Alias"], "Alias 1")
         self.assertEqual(metadata["Fecha_Limite_Uso"], pd.Timestamp("2026-11-30"))
+
+    def test_completar_metadata_no_modifica_montos_ni_portafolios(self):
+        df = self._df([
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+                "PaB_Propuesta": 100000.0,
+                "PaB_Portafolio": 500000.0,
+                "Es_Portafolio": True,
+                "Metadata": pd.NA,
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+                "PaB_Propuesta": 200000.0,
+                "PaB_Portafolio": 500000.0,
+                "Es_Portafolio": True,
+                "Metadata": pd.NA,
+            },
+        ])
+        configs = {
+            ("ALIADO A", pd.Timestamp("2026-11-06")): {
+                "Tipo_Contraoferta": "ContraOferta sin Compromiso",
+                "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+                "Alias": None,
+            }
+        }
+
+        resultado = completar_metadata_masivas(df, configs)
+
+        self.assertTrue(resultado["Metadata"].apply(metadata_masiva_completa).all())
+        self.assertEqual(resultado["PaB_Propuesta"].tolist(), [100000.0, 200000.0])
+        self.assertEqual(resultado["PaB_Portafolio"].tolist(), [500000.0, 500000.0])
+        self.assertEqual(resultado["Es_Portafolio"].tolist(), [True, True])
+
+    def test_completar_metadata_preserva_pab_portafolio_de_la_columna(self):
+        df = self._df([{
+            "Casa_Cobro": "ALIADO A",
+            "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+            "PaB_Propuesta": 100000.0,
+            "PaB_Portafolio": 500000.0,
+            "Es_Portafolio": True,
+            "Metadata": pd.NA,
+        }])
+        configs = {
+            ("ALIADO A", pd.Timestamp("2026-11-06")): {
+                "Tipo_Contraoferta": "ContraOferta sin Compromiso",
+                "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+                "Alias": None,
+            }
+        }
+
+        resultado = completar_metadata_masivas(df, configs)
+
+        self.assertEqual(resultado.loc[0, "Metadata"]["PaB_Portafolio"], 500000.0)
+        self.assertEqual(resultado.loc[0, "Metadata"]["Id_Portafolio"], "")
+        self.assertEqual(resultado.loc[0, "PaB_Portafolio"], 500000.0)
 
     def test_preserva_metadata_existente(self):
         metadata_original = {
@@ -404,6 +646,40 @@ class TestMetadataPortafolios(unittest.TestCase):
         self.assertEqual(resultado.loc[1, "Metadata"]["Id_Portafolio"], "")
         self.assertIsNone(resultado.loc[1, "Metadata"]["PaB_Portafolio"])
 
+    def test_preserva_metadata_de_portafolio_si_falta_un_pago(self):
+        metadata_portafolio = {
+            "Id_Cruce": "C1",
+            "Tipo_Contraoferta": "Descuento Máximo",
+            "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+            "Alias": None,
+            "Id_Portafolio": "C1-C2",
+            "PaB_Portafolio": 1000000.0,
+        }
+        df = pd.DataFrame([
+            {
+                **self._fila(
+                    fila=2, id_deuda="D1", id_cruce="C1",
+                    es_portafolio=True, pab=600000, metadata=metadata_portafolio,
+                ),
+                "PaB_Portafolio": 1000000.0,
+            },
+            {
+                **self._fila(
+                    fila=3, id_deuda="D2", id_cruce="C2",
+                    es_portafolio=False, pab=None,
+                    metadata={"Id_Cruce": "C2"},
+                ),
+                "PaB_Portafolio": float("nan"),
+            },
+        ])
+
+        resultado = actualizar_metadata_portafolios(df)
+
+        self.assertEqual(resultado.loc[0, "Metadata"]["Id_Portafolio"], "C1-C2")
+        self.assertEqual(resultado.loc[0, "Metadata"]["PaB_Portafolio"], 1000000.0)
+        self.assertEqual(resultado.loc[0, "PaB_Portafolio"], 1000000.0)
+        self.assertTrue(pd.isna(resultado.loc[1, "PaB_Portafolio"]))
+
 
 class TestCambiosYLog(unittest.TestCase):
     def _df_base(self):
@@ -450,6 +726,32 @@ class TestCambiosYLog(unittest.TestCase):
         self.assertTrue(cambios["Metadata_Cambio"].all())
         self.assertTrue(cambios["Portafolio_Cambio"].all())
         self.assertEqual(cambios["Diferencia_PaB"].tolist(), [-200000.0, -300000.0])
+
+    def test_cambios_solo_metadata_no_marcan_pagos_ni_portafolios(self):
+        original = self._df_base()
+        resultado = original.copy()
+        resultado["Metadata"] = [
+            {
+                "Id_Cruce": "C1",
+                "Tipo_Contraoferta": "Descuento Máximo",
+                "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+            },
+            {
+                "Id_Cruce": "C2",
+                "Tipo_Contraoferta": "Descuento Máximo",
+                "Fecha_Limite_Uso": pd.Timestamp("2026-11-30"),
+            },
+        ]
+
+        cambios = construir_cambios_masivas(
+            df_original=original,
+            df_resultado=resultado,
+        )
+
+        self.assertEqual(len(cambios), 2)
+        self.assertTrue(cambios["Metadata_Cambio"].all())
+        self.assertFalse(cambios["PaB_Cambio"].any())
+        self.assertFalse(cambios["Portafolio_Cambio"].any())
 
     def test_cambios_incluyen_marca_automatica_de_portafolio(self):
         original = self._df_base()
@@ -661,6 +963,95 @@ class TestCambiosYLog(unittest.TestCase):
         self.assertEqual(len(resumen), 1)
         self.assertEqual(resumen.loc[0, "Num_Registros"], 2)
         self.assertEqual(resumen.loc[0, "Num_Sin_Metadata"], 1)
+
+
+class TestFechasPortafolioFueraAlcance(unittest.TestCase):
+    def _df(self):
+        return pd.DataFrame([
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Referencia": "REF1",
+                "Fecha_Masiva": pd.Timestamp("2026-11-04"),
+                "PaB_Portafolio": 1000000,
+                "Metadata": {"Id_Cruce": "C1"},
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Referencia": "REF1",
+                "Fecha_Masiva": pd.Timestamp("2026-11-06"),
+                "PaB_Portafolio": 1000000,
+                "Metadata": {"Id_Cruce": "C2"},
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Referencia": "REF2",
+                "Fecha_Masiva": pd.Timestamp("2026-11-04"),
+                "PaB_Portafolio": 500000,
+                "Metadata": {"Id_Cruce": "C3"},
+            },
+            {
+                "Casa_Cobro": "ALIADO B",
+                "Referencia": "REF1",
+                "Fecha_Masiva": pd.Timestamp("2026-11-04"),
+                "PaB_Portafolio": 1000000,
+                "Metadata": {"Id_Cruce": "C4"},
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Referencia": "REF1",
+                "Fecha_Masiva": pd.Timestamp("2026-11-05"),
+                "PaB_Portafolio": None,
+                "Metadata": {"Id_Cruce": "C5", "PaB_Portafolio": 900000},
+            },
+            {
+                "Casa_Cobro": "ALIADO A",
+                "Referencia": "REF1",
+                "Fecha_Masiva": pd.Timestamp("2026-11-07"),
+                "PaB_Portafolio": None,
+                "Metadata": {"Id_Cruce": "C6"},
+            },
+        ])
+
+    def test_detecta_fechas_con_portafolio_fuera_del_alcance(self):
+        resultado = detectar_fechas_portafolio_fuera_alcance(
+            df=self._df(),
+            casa_cobro="aliado a",
+            fechas_alcance=[pd.Timestamp("2026-11-06")],
+            referencias=["REF1"],
+        )
+
+        self.assertEqual(
+            resultado["Fecha_Masiva"].tolist(),
+            [pd.Timestamp("2026-11-04"), pd.Timestamp("2026-11-05")],
+        )
+        self.assertEqual(resultado["Num_Registros"].tolist(), [1, 1])
+
+    def test_sin_filtro_de_referencias_incluye_todas_las_de_la_casa(self):
+        resultado = detectar_fechas_portafolio_fuera_alcance(
+            df=self._df(),
+            casa_cobro="ALIADO A",
+            fechas_alcance=[pd.Timestamp("2026-11-06")],
+        )
+
+        self.assertEqual(
+            resultado["Fecha_Masiva"].tolist(),
+            [pd.Timestamp("2026-11-04"), pd.Timestamp("2026-11-05")],
+        )
+        self.assertEqual(resultado["Num_Registros"].tolist(), [2, 1])
+
+    def test_devuelve_vacio_si_todas_las_fechas_estan_en_el_alcance(self):
+        resultado = detectar_fechas_portafolio_fuera_alcance(
+            df=self._df(),
+            casa_cobro="ALIADO A",
+            fechas_alcance=[
+                pd.Timestamp("2026-11-04"),
+                pd.Timestamp("2026-11-05"),
+                pd.Timestamp("2026-11-06"),
+                pd.Timestamp("2026-11-07"),
+            ],
+        )
+
+        self.assertTrue(resultado.empty)
 
 
 if __name__ == '__main__':

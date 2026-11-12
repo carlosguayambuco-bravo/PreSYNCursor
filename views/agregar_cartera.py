@@ -22,7 +22,8 @@ from modules.control_masivas import (
     completar_metadata_masivas,
     construir_cambios_masivas,
     construir_log_cambios_masivas,
-    distribuir_portafolios_masivas,
+    detectar_fechas_portafolio_fuera_alcance,
+    distribuir_portafolios_masivas_con_alertas,
     metadata_masiva_completa,
     obtener_clave_base,
     resumen_bases_sin_metadata,
@@ -1915,33 +1916,82 @@ if tab_mando.open:
             )
             for (casa, fecha), config in configs_por_base.items()
         ))
+        # --- 6. Botón de Procesamiento (no sube datos) ---
+        st.divider()
+        st.markdown("### 💼 Distribución de Portafolios y Metadata")
+        st.caption(
+            "El procesamiento calcula la nueva Metadata y, si lo indicas, aplica la "
+            "distribución de portafolios. **No modifica Google Sheets**; primero muestra "
+            "la comparación. La columna **Portafolio** ya no requiere marcarse manualmente: "
+            "los grupos con pagos iguales o regla JCAP se detectan y marcan automáticamente. "
+            "Si un portafolio ya fue distribuido en un lote anterior, se usa su "
+            "**PaB_Portafolio** como total y se redistribuye entre todas las deudas "
+            "del alcance, incluidas las que llegaron en lotes nuevos."
+        )
+        distribuir_portafolios = st.toggle(
+            label="**💼 Distribuir Portafolios**",
+            value=True,
+            key="mando_distribuir_portafolios",
+            help=(
+                "Actívalo si la base maneja portafolios y sus montos deben redistribuirse. "
+                "Desactívalo si la base se entregó con montos individuales y solo necesitas "
+                "completar la metadata: no se modificarán Propuesta Pago, "
+                "Id_Portafolio ni PaB_Portafolio."
+            ),
+        )
+        if distribuir_portafolios:
+            # Advertimos si el Alcance Deja por Fuera Fechas con Portafolios Ya Distribuidos
+            fechas_portafolio_fuera = detectar_fechas_portafolio_fuera_alcance(
+                df=control_df,
+                casa_cobro=str(casa_sel),
+                fechas_alcance=fechas_sel_norm,
+                referencias=scope_df['Referencia'].dropna().astype(str).unique().tolist(),
+            )
+            if not fechas_portafolio_fuera.empty:
+                st.warning(
+                    "Hay portafolios ya distribuidos en fechas que **no están en el alcance**: **{}**. "
+                    "Para redistribuir el portafolio completo, selecciona también esas fechas.".format(
+                        _formatear_fechas_mando(fechas_portafolio_fuera['Fecha_Masiva'])
+                    ),
+                    icon="⚠️",
+                )
+        else:
+            st.info(
+                "**Modo solo metadata:** se completará la metadata del alcance sin "
+                "redistribuir montos ni actualizar la metadata de portafolios.",
+                icon="🏷️",
+            )
         firma_actual = (
             str(casa_sel),
             tuple(fecha.strftime('%Y-%m-%d') for fecha in fechas_sel_norm),
             firma_configs,
-        )
-
-        # --- 6. Botón de Procesamiento (no sube datos) ---
-        st.divider()
-        st.markdown("### 💼 Distribución de Portafolios")
-        st.caption(
-            "El procesamiento aplica la distribución de portafolios y calcula la nueva "
-            "Metadata. **No modifica Google Sheets**; primero muestra la comparación. "
-            "La columna **Portafolio** ya no requiere marcarse manualmente: los grupos "
-            "con pagos iguales o regla JCAP se detectan y marcan automáticamente."
+            bool(distribuir_portafolios),
         )
         procesar_portafolios = st.button(
-            label="💼 Procesar Portafolios",
+            label=(
+                "💼 Procesar Portafolios"
+                if distribuir_portafolios
+                else "🏷️ Procesar Metadata"
+            ),
             type="primary",
             key="mando_procesar_portafolios",
             width="stretch",
             disabled=not configs_completas,
-            help="Aplica la distribución de portafolios y prepara los cambios para revisión.",
+            help=(
+                "Aplica la distribución de portafolios y prepara los cambios para revisión."
+                if distribuir_portafolios
+                else "Completa la metadata y prepara los cambios para revisión sin distribuir montos."
+            ),
         )
 
         if procesar_portafolios:
             st.session_state.pop('mando_resultado', None)
-            with st.spinner("💼 Procesando metadata y portafolios..."):
+            mensaje_spinner = (
+                "💼 Procesando metadata y portafolios..."
+                if distribuir_portafolios
+                else "🏷️ Procesando metadata..."
+            )
+            with st.spinner(mensaje_spinner):
                 df_trabajo = scope_df.copy()
 
                 # Paso 1: Completar la Metadata de las Filas que la Necesiten
@@ -1951,47 +2001,54 @@ if tab_mando.open:
                     )
 
                 # Paso 2: Enriquecer con PaB_Origen y Referencia desde Metabase
-                deudas_scope = tuple(
-                    df_trabajo['Id_Deuda'].dropna().astype(str).unique().tolist()
-                )
-                try:
-                    pab_origen_df = load_pab_origen_deudas(deudas_scope)
-                except Exception as e:
-                    pab_origen_df = pd.DataFrame()
-                    st.warning(
-                        "No se pudo consultar Metabase para obtener el PaB_Origen. "
-                        "Se usará la columna **Deuda Bravo** de la base. Detalle: ```{}```".format(e),
-                        icon="⚠️",
+                # (solo es necesario cuando se van a distribuir portafolios)
+                detalle_distribucion = pd.DataFrame()
+                alertas_distribucion = pd.DataFrame()
+                sin_pab_origen = 0
+                if distribuir_portafolios:
+                    deudas_scope = tuple(
+                        df_trabajo['Id_Deuda'].dropna().astype(str).unique().tolist()
                     )
-                if not pab_origen_df.empty:
-                    mapa_pab_origen = dict(zip(
-                        pab_origen_df['Id_Deuda'], pab_origen_df['PaB_Origen']
-                    ))
-                    mapa_referencia = dict(zip(
-                        pab_origen_df['Id_Deuda'], pab_origen_df['Referencia']
-                    ))
-                    df_trabajo['PaB_Origen'] = (
-                        df_trabajo['Id_Deuda'].map(mapa_pab_origen)
-                        .fillna(df_trabajo['PaB_Origen'])
-                    )
-                    referencia_query = df_trabajo['Id_Deuda'].map(mapa_referencia)
-                    df_trabajo['Referencia'] = referencia_query.where(
-                        referencia_query.notna()
-                        & referencia_query.astype(str).str.strip().ne(''),
-                        df_trabajo['Referencia'],
-                    )
+                    try:
+                        pab_origen_df = load_pab_origen_deudas(deudas_scope)
+                    except Exception as e:
+                        pab_origen_df = pd.DataFrame()
+                        st.warning(
+                            "No se pudo consultar Metabase para obtener el PaB_Origen. "
+                            "Se usará la columna **Deuda Bravo** de la base. Detalle: ```{}```".format(e),
+                            icon="⚠️",
+                        )
+                    if not pab_origen_df.empty:
+                        mapa_pab_origen = dict(zip(
+                            pab_origen_df['Id_Deuda'], pab_origen_df['PaB_Origen']
+                        ))
+                        mapa_referencia = dict(zip(
+                            pab_origen_df['Id_Deuda'], pab_origen_df['Referencia']
+                        ))
+                        df_trabajo['PaB_Origen'] = (
+                            df_trabajo['Id_Deuda'].map(mapa_pab_origen)
+                            .fillna(df_trabajo['PaB_Origen'])
+                        )
+                        referencia_query = df_trabajo['Id_Deuda'].map(mapa_referencia)
+                        df_trabajo['Referencia'] = referencia_query.where(
+                            referencia_query.notna()
+                            & referencia_query.astype(str).str.strip().ne(''),
+                            df_trabajo['Referencia'],
+                        )
 
-                sin_pab_origen = int(df_trabajo['PaB_Origen'].isna().sum())
-                if sin_pab_origen > 0:
-                    st.warning(
-                        "**{:,}** deuda(s) no tienen PaB_Origen disponible; sus portafolios "
-                        "no se podrán distribuir.".format(sin_pab_origen),
-                        icon="⚠️",
-                    )
+                    sin_pab_origen = int(df_trabajo['PaB_Origen'].isna().sum())
+                    if sin_pab_origen > 0:
+                        st.warning(
+                            "**{:,}** deuda(s) no tienen PaB_Origen disponible; sus portafolios "
+                            "no se podrán distribuir.".format(sin_pab_origen),
+                            icon="⚠️",
+                        )
 
-                # Paso 3: Distribuir Portafolios y Actualizar la Metadata
-                df_trabajo, detalle_distribucion = distribuir_portafolios_masivas(df_trabajo)
-                df_trabajo = actualizar_metadata_portafolios(df_trabajo)
+                    # Paso 3: Distribuir Portafolios y Actualizar la Metadata
+                    df_trabajo, detalle_distribucion, alertas_distribucion = (
+                        distribuir_portafolios_masivas_con_alertas(df_trabajo)
+                    )
+                    df_trabajo = actualizar_metadata_portafolios(df_trabajo)
 
                 # Paso 4: Construir los Cambios y el Log
                 df_cambios = construir_cambios_masivas(
@@ -2013,6 +2070,8 @@ if tab_mando.open:
                     'df_resultado': df_trabajo,
                     'df_cambios': df_cambios,
                     'detalle_distribucion': detalle_distribucion,
+                    'alertas_distribucion': alertas_distribucion,
+                    'distribuir_portafolios': bool(distribuir_portafolios),
                     'log_df': log_df,
                     'total_antes': float(pd.to_numeric(
                         scope_df['PaB_Propuesta'], errors='coerce'
@@ -2036,6 +2095,14 @@ if tab_mando.open:
 
             st.divider()
             st.markdown("### 📊 Comparación de la Transformación")
+            alertas_distribucion = resultado_mando.get('alertas_distribucion')
+            if alertas_distribucion is not None and not alertas_distribucion.empty:
+                st.warning(
+                    "La distribución detectó situaciones que requieren revisión. "
+                    "Los portafolios afectados no se redistribuyeron o usaron el valor más reciente:",
+                    icon="⚠️",
+                )
+                st.dataframe(alertas_distribucion, width="stretch", hide_index=True)
             total_antes = resultado_mando['total_antes']
             total_despues = resultado_mando['total_despues']
             diferencia_total = total_despues - total_antes
@@ -2151,11 +2218,17 @@ if tab_mando.open:
                 # --- 8. Subida Definitiva a Google Sheets ---
                 st.divider()
                 st.markdown("### 🚀 Subida Definitiva")
-                st.warning(
-                    "Esta acción actualiza **Metadata**, **Propuesta Pago** y **Monto Portafolio** "
-                    "(y **Portafolio** si cambió) en 'Bases mes actual 2024'. No se puede deshacer.",
-                    icon="⚠️",
-                )
+                if bool(resultado_mando.get('distribuir_portafolios', True)):
+                    mensaje_subida = (
+                        "Esta acción actualiza **Metadata**, **Propuesta Pago** y **Monto Portafolio** "
+                        "(y **Portafolio** si cambió) en 'Bases mes actual 2024'. No se puede deshacer."
+                    )
+                else:
+                    mensaje_subida = (
+                        "Esta acción actualiza únicamente la **Metadata** en 'Bases mes actual 2024'. "
+                        "No se modifican Propuesta Pago, Portafolio ni Monto Portafolio. No se puede deshacer."
+                    )
+                st.warning(mensaje_subida, icon="⚠️")
                 subir_cambios = st.button(
                     label="🚀 Subir Cambios a Google Sheets",
                     type="primary",
