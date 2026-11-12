@@ -16,8 +16,11 @@ from modules.oportunidades import (
 )
 from modules.constants import (
     LLAVE_REDIRECCION_CALCULADORA,
+    OPORTUNIDADES,
 )
 from ui.calculadora_masiva_components import (
+    OPORTUNIDADES_CALCULADAS,
+    OPORTUNIDADES_GENERALES,
     _calcular_slice_pagina,
     _formatear_valor_oportunidad_masiva,
     _normalizar_pagina_actual,
@@ -753,6 +756,184 @@ class TestFiltrosMasivos(unittest.TestCase):
             self._resultado(), orden="Mayor DUM", solo_con_oportunidades=False
         )
         self.assertEqual(resultado["Referencia"].tolist(), ["REF-C", "REF-A", "REF-B"])
+
+
+class TestFiltroTipoAnalisisResultado(unittest.TestCase):
+    """El tipo de análisis filtra oportunidades del bloque, no solo viabilidad."""
+
+    def _resultado(self) -> pd.DataFrame:
+        def portafolio(trad: list[str], cred: list[str]) -> list[dict]:
+            return [{
+                "Trad_Oportunidades": [{"nombre": nombre} for nombre in trad],
+                "Cred_Oportunidades": [{"nombre": nombre} for nombre in cred],
+            }]
+
+        return pd.DataFrame([
+            {
+                "Referencia": "REF-A", "Nombre_Cliente": "Ana", "Negociador": "Nego A",
+                "Prospecto_Credito": "Batch 1", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 2,
+                "Oportunidades": ["Depósito Extra", "ContraOferta Viable"],
+                "Es_Viable": True, "Descuento_Actual": 0.4,
+                "PaB_Origen_Total": 100_000_000, "Ahorro_Neto": 45_000_000,
+                "Tiene_Deudas_Liquidaciones": False, "Ingreso_Actual": 30_000_000,
+                "Acuerdo_Robo_Aplica": False, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio(
+                    ["Depósito Extra"], ["ContraOferta Viable"]
+                ),
+            },
+            {
+                "Referencia": "REF-B", "Nombre_Cliente": "Bruno", "Negociador": "Nego B",
+                "Prospecto_Credito": "Tradicional", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": False, "Num_Oportunidades": 1,
+                "Oportunidades": ["ContraOferta Viable"], "Es_Viable": False,
+                "Descuento_Actual": 0.2, "PaB_Origen_Total": 50_000_000,
+                "Ahorro_Neto": 10_000_000, "Tiene_Deudas_Liquidaciones": True,
+                "Ingreso_Actual": 5_000_000,
+                "Acuerdo_Robo_Aplica": False, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio(["ContraOferta Viable"], []),
+            },
+            {
+                "Referencia": "REF-C", "Nombre_Cliente": "Carla", "Negociador": "Nego A",
+                "Prospecto_Credito": "Cr Parcial", "Tradicional_Habilitado": False,
+                "Credito_Habilitado": True, "Num_Oportunidades": 1,
+                "Oportunidades": ["Depósito Extra"], "Es_Viable": True,
+                "Descuento_Actual": 0.6, "PaB_Origen_Total": 150_000_000,
+                "Ahorro_Neto": 0, "Tiene_Deudas_Liquidaciones": False,
+                "Ingreso_Actual": 60_000_000,
+                "Acuerdo_Robo_Aplica": False, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio([], ["Depósito Extra"]),
+            },
+            {
+                "Referencia": "REF-D", "Nombre_Cliente": "Diana", "Negociador": "Nego B",
+                "Prospecto_Credito": "Batch 2", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 1,
+                "Oportunidades": ["Liquidación Instantánea"], "Es_Viable": True,
+                "Descuento_Actual": 0.3, "PaB_Origen_Total": 80_000_000,
+                "Ahorro_Neto": 20_000_000, "Tiene_Deudas_Liquidaciones": False,
+                "Ingreso_Actual": 15_000_000,
+                "Acuerdo_Robo_Aplica": False, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio(
+                    ["Liquidación Instantánea"], ["Liquidación Instantánea"]
+                ),
+            },
+            {
+                "Referencia": "REF-E", "Nombre_Cliente": "Elena", "Negociador": "Nego A",
+                "Prospecto_Credito": "Batch 3", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 2,
+                "Oportunidades": ["ContraOferta Viable", "Acuerdo para Robo"],
+                "Es_Viable": True, "Descuento_Actual": 0.35,
+                "PaB_Origen_Total": 70_000_000, "Ahorro_Neto": 25_000_000,
+                "Tiene_Deudas_Liquidaciones": False, "Ingreso_Actual": 18_000_000,
+                "Acuerdo_Robo_Aplica": True, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio([], ["ContraOferta Viable"]),
+            },
+            {
+                "Referencia": "REF-F", "Nombre_Cliente": "Felipe", "Negociador": "Nego B",
+                "Prospecto_Credito": "Batch 4", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 1,
+                "Oportunidades": ["Acuerdo para Robo"], "Es_Viable": False,
+                "Descuento_Actual": 0.1, "PaB_Origen_Total": 40_000_000,
+                "Ahorro_Neto": 5_000_000, "Tiene_Deudas_Liquidaciones": False,
+                "Ingreso_Actual": 2_000_000,
+                "Acuerdo_Robo_Aplica": True, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio([], []),
+            },
+            {
+                "Referencia": "REF-G", "Nombre_Cliente": "Gloria", "Negociador": "Nego A",
+                "Prospecto_Credito": "Batch 1", "Tradicional_Habilitado": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 1,
+                "Oportunidades": ["Depósito Extra"], "Es_Viable": True,
+                "Descuento_Actual": 0.45, "PaB_Origen_Total": 90_000_000,
+                "Ahorro_Neto": 40_000_000, "Tiene_Deudas_Liquidaciones": False,
+                "Ingreso_Actual": 28_000_000,
+                "Acuerdo_Robo_Aplica": False, "IA_Liquidadora_Aplica": False,
+                "Portafolios_Detalle": portafolio(
+                    ["Depósito Extra"], ["Depósito Extra"]
+                ),
+            },
+        ])
+
+    def _filtrar(self, **kwargs) -> pd.DataFrame:
+        parametros = {
+            "solo_con_oportunidades": True,
+            "orden": "Referencia (A-Z)",
+        }
+        parametros.update(kwargs)
+        return filtrar_oportunidades_masivas(self._resultado(), **parametros)
+
+    def test_tradicional_con_oportunidad_excluye_otros_bloques(self):
+        resultado = self._filtrar(
+            tipo_analisis="Tradicional", oportunidades=["Depósito Extra"]
+        )
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-A", "REF-G"])
+
+    def test_credito_con_oportunidad_excluye_otros_bloques(self):
+        resultado = self._filtrar(
+            tipo_analisis="Crédito", oportunidades=["Depósito Extra"]
+        )
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-C", "REF-G"])
+
+    def test_tradicional_y_credito_exige_la_oportunidad_en_ambos(self):
+        resultado = self._filtrar(
+            tipo_analisis="Tradicional y Crédito",
+            oportunidades=["Depósito Extra"],
+        )
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-G"])
+
+    def test_tradicional_sin_oportunidad_exige_alguna_del_tipo(self):
+        resultado = self._filtrar(tipo_analisis="Tradicional")
+        self.assertEqual(
+            resultado["Referencia"].tolist(),
+            ["REF-A", "REF-B", "REF-D", "REF-G"],
+        )
+
+    def test_credito_sin_oportunidad_exige_alguna_del_tipo(self):
+        resultado = self._filtrar(tipo_analisis="Crédito")
+        self.assertEqual(
+            resultado["Referencia"].tolist(),
+            ["REF-A", "REF-C", "REF-D", "REF-E", "REF-G"],
+        )
+
+    def test_tradicional_y_credito_sin_oportunidad_exige_ambos_bloques(self):
+        resultado = self._filtrar(tipo_analisis="Tradicional y Crédito")
+        self.assertEqual(
+            resultado["Referencia"].tolist(), ["REF-A", "REF-D", "REF-G"]
+        )
+
+    def test_varias_oportunidades_del_tipo_se_combinan_con_o(self):
+        resultado = self._filtrar(
+            tipo_analisis="Tradicional",
+            oportunidades=["Depósito Extra", "Liquidación Instantánea"],
+        )
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-A", "REF-D", "REF-G"])
+
+    def test_oportunidad_general_exige_ademas_oportunidad_del_tipo(self):
+        resultado = self._filtrar(
+            tipo_analisis="Crédito", oportunidades=["Acuerdo para Robo"]
+        )
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-E"])
+
+    def test_oportunidad_general_con_todos_no_restriñe_tipo(self):
+        resultado = self._filtrar(oportunidades=["Acuerdo para Robo"])
+        self.assertEqual(resultado["Referencia"].tolist(), ["REF-E", "REF-F"])
+
+    def test_sin_solo_con_oportunidades_mantiene_viabilidad_del_analisis(self):
+        resultado = self._filtrar(
+            tipo_analisis="Crédito", solo_con_oportunidades=False
+        )
+        self.assertEqual(
+            resultado["Referencia"].tolist(),
+            ["REF-A", "REF-C", "REF-D", "REF-E", "REF-F", "REF-G"],
+        )
+
+
+class TestConfiguracionFiltrosMasivos(unittest.TestCase):
+    def test_todas_las_oportunidades_tienen_clasificacion(self):
+        self.assertEqual(
+            OPORTUNIDADES_CALCULADAS + OPORTUNIDADES_GENERALES,
+            OPORTUNIDADES,
+        )
 
 
 class TestMetadatosPortafolioMasivas(unittest.TestCase):

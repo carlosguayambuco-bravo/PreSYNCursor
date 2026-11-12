@@ -714,6 +714,12 @@ La pestaña **🛠️ Oportunidades Masivas** de `views/calculadora_opps.py` eje
 
 - Los filtros se muestran dentro de un `st.container(border=True)`.
 - Filtros: búsqueda por Referencia/Cliente, Negociador, Prospecto de Crédito, Tipo de Análisis (Tradicional/Crédito/ambos), multiselect de Oportunidad, Solo con oportunidades, Solo viables, rango de Descuento Actual, rango de DUM Total y exclusión de clientes con deudas liquidadas.
+- **Combinación de Tipo de Análisis con Oportunidad:** con **Solo con oportunidades** activo, el Tipo de Análisis filtra el **resultado** y no la viabilidad del cálculo.
+  - `Tradicional` o `Crédito`: solo quedan los clientes con al menos una oportunidad seleccionada en ese bloque. Si no hay oportunidad seleccionada, se exige al menos una oportunidad calculada del tipo (`Depósito Extra`, `ContraOferta Viable` o `Liquidación Instantánea`).
+  - `Tradicional y Crédito`: la oportunidad debe existir en **ambos** bloques.
+  - Las oportunidades generales (`Acuerdo para Robo`, `IA Liquidadora`) no pertenecen a un tipo: se exigen **además** y deben coexistir con al menos una oportunidad del tipo elegido.
+  - Con **Solo con oportunidades** inactivo se conserva el filtro anterior de viabilidad (`Tradicional_Habilitado` / `Credito_Habilitado`).
+  - El filtro se evalúa por unidad con `Portafolios_Detalle`, de modo que coincide con las oportunidades que muestran las tarjetas. Si el detalle no existe, usa como respaldo las banderas agregadas `Trad_*_Aplica` / `Cred_*_Aplica`.
 - Ordenamiento: **Mayor Ingreso Estimado (por defecto)**, más oportunidades, mayor Descuento Actual, mayor DUM, mayor Ahorro Neto, Referencia A-Z o Nombre del Cliente A-Z.
 - Debajo del ordenamiento hay un toggle **Invertir orden** (desactivado por defecto). Cada criterio conserva su orden natural (numéricos de mayor a menor, A-Z de A a Z); el toggle lo invierte.
 - `Ingreso Estimado = max((DUM - PaB Actual) * Pricing, 0)`, sin IVA. Reemplaza a `Apartado_Neto` como quinto KPI y es el orden por defecto.
@@ -966,7 +972,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 - [ ] ¿Si cambiaste reglas de estado/SLA, actualizaste las constantes, los tests y este documento?
 - [ ] ¿Si cambiaste una fórmula de oportunidad, actualizaste `docs/OPORTUNIDADES_DETALLADO.md`, `docs/OPORTUNIDADES.md` y `AGENTS.md`?
 - [ ] ¿Agregaste tests de la fórmula, los umbrales y los bordes (sin deudas, deuda liquidada, sin PaB Ideal, `Apartado_Neto = 0`, sin actualizaciones) antes de conectar una oportunidad a la UI?
-- [ ] ¿Si tocaste la calculadora masiva, probaste el toggle `Solo de Masivas`, la selección del mejor descuento vigente, la fuente de Actualizaciones con toggle inactivo, los portafolios de Masivas/Actualizaciones/Bancos, `Cr Parcial`/`Tradicional`, Crédito por unidad solo si todas las deudas tienen PaB Ideal, el orden por ingreso y la paginación entera?
+- [ ] ¿Si tocaste la calculadora masiva, probaste el toggle `Solo de Masivas`, la selección del mejor descuento vigente, la fuente de Actualizaciones con toggle inactivo, los portafolios de Masivas/Actualizaciones/Bancos, `Cr Parcial`/`Tradicional`, Crédito por unidad solo si todas las deudas tienen PaB Ideal, la combinación de Tipo de Análisis con Oportunidad, el orden por ingreso y la paginación entera?
 - [ ] ¿Verificaste que la calculadora masiva use Masivas con el toggle activo y Actualizaciones con el toggle inactivo (nunca PaB simulado) y que calcule por portafolio/unidad?
 - [ ] ¿Verificaste que la Asignación de Cartera tenga `Banco`, `Pricing` válido e `Id_Deuda` único?
 - [ ] ¿Verificaste que `load_liquidaciones_mec()` tenga `Fecha_Liq` válida para calcular el MEC?

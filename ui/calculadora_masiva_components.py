@@ -26,6 +26,41 @@ OPCIONES_TIPO_ANALISIS = [
     "Crédito",
     "Tradicional y Crédito",
 ]
+# Prefijos de las columnas y del detalle por unidad según el tipo de análisis
+PREFIJOS_TIPO_ANALISIS = {
+    "Tradicional": ("Trad",),
+    "Crédito": ("Cred",),
+    "Tradicional y Crédito": ("Trad", "Cred"),
+}
+COLUMNAS_HABILITADO_TIPO = {
+    "Trad": "Tradicional_Habilitado",
+    "Cred": "Credito_Habilitado",
+}
+OPORTUNIDADES_CALCULADAS = [
+    "Depósito Extra",
+    "ContraOferta Viable",
+    "Liquidación Instantánea",
+]
+OPORTUNIDADES_GENERALES = [
+    "Acuerdo para Robo",
+    "IA Liquidadora",
+]
+COLUMNAS_APLICA_OPORTUNIDAD = {
+    "Trad": {
+        "Depósito Extra": "Trad_Deposito_Extra_Aplica",
+        "ContraOferta Viable": "Trad_Contraoferta_Aplica",
+        "Liquidación Instantánea": "Trad_Liq_Insta_Aplica",
+    },
+    "Cred": {
+        "Depósito Extra": "Cred_Deposito_Extra_Aplica",
+        "ContraOferta Viable": "Cred_Contraoferta_Aplica",
+        "Liquidación Instantánea": "Cred_Liq_Insta_Aplica",
+    },
+}
+COLUMNAS_APLICA_GENERAL = {
+    "Acuerdo para Robo": "Acuerdo_Robo_Aplica",
+    "IA Liquidadora": "IA_Liquidadora_Aplica",
+}
 OPCIONES_ORDEN_MASIVA = [
     "Mayor Ingreso Estimado",
     "Más oportunidades",
@@ -142,6 +177,80 @@ def _limpiar_filtros_masivos() -> None:
     st.session_state.pop(LLAVE_PAGINA_MASIVA, None)
     st.session_state.pop(LLAVE_PAGINA_INPUT_MASIVA, None)
 
+# --- Filtros de Tipo de Análisis ---
+def _nombres_oportunidades_de_tipo(portafolios: Any, prefijo: str) -> set[str]:
+    """Devuelve las oportunidades presentes en el bloque de un tipo.
+
+    Args:
+        portafolios (Any): Detalle de portafolios/unidades del cliente.
+        prefijo (str): ``Trad`` para Tradicional o ``Cred`` para Crédito.
+
+    Returns:
+        set[str]: Nombres de las oportunidades aplicables en ese bloque.
+    """
+    clave = "{}_Oportunidades".format(prefijo)
+    nombres: set[str] = set()
+    for portafolio in _normalizar_lista(portafolios):
+        if not isinstance(portafolio, dict):
+            continue
+        for oportunidad in _normalizar_lista(portafolio.get(clave, [])):
+            if isinstance(oportunidad, dict):
+                nombre = str(oportunidad.get("nombre") or "").strip()
+            else:
+                nombre = str(oportunidad or "").strip()
+            if nombre:
+                nombres.add(nombre)
+    return nombres
+
+def _mascara_oportunidades_de_tipo(
+    df: pd.DataFrame,
+    *,
+    prefijo: str,
+    requeridas: list[str],
+) -> pd.Series:
+    """Construye la máscara de oportunidades de un bloque de análisis.
+
+    Cuando hay oportunidades calculadas seleccionadas se exige al menos una de
+    ellas en el bloque. Si no hay ninguna seleccionada, basta con que exista
+    cualquier oportunidad calculada del tipo. El detalle por unidad se usa para
+    que el filtro coincida con las tarjetas; si no está disponible, se usan las
+    banderas agregadas del cliente como respaldo.
+    """
+    requeridas_tipo = [
+        nombre for nombre in requeridas if nombre in OPORTUNIDADES_CALCULADAS
+    ]
+    nombres_buscados = requeridas_tipo or OPORTUNIDADES_CALCULADAS
+
+    if "Portafolios_Detalle" in df.columns:
+        nombres_set = set(nombres_buscados)
+        return df["Portafolios_Detalle"].apply(
+            lambda portafolios: bool(
+                _nombres_oportunidades_de_tipo(portafolios, prefijo) & nombres_set
+            )
+        ).astype(bool)
+
+    columnas_evaluar = [
+        COLUMNAS_APLICA_OPORTUNIDAD[prefijo][nombre]
+        for nombre in nombres_buscados
+        if COLUMNAS_APLICA_OPORTUNIDAD[prefijo][nombre] in df.columns
+    ]
+    mascara = pd.Series(False, index=df.index)
+    for columna in columnas_evaluar:
+        mascara |= df[columna].fillna(False).astype(bool)
+    return mascara
+
+def _mascara_oportunidades_generales(
+    df: pd.DataFrame,
+    seleccionadas: list[str],
+) -> pd.Series:
+    """Construye la máscara de oportunidades generales seleccionadas."""
+    mascara = pd.Series(False, index=df.index)
+    for nombre in seleccionadas:
+        columna = COLUMNAS_APLICA_GENERAL.get(nombre)
+        if columna and columna in df.columns:
+            mascara |= df[columna].fillna(False).astype(bool)
+    return mascara
+
 # --- Filtros de Oportunidades Masivas ---
 def filtrar_oportunidades_masivas(
     df: pd.DataFrame,
@@ -168,9 +277,15 @@ def filtrar_oportunidades_masivas(
         busqueda (str): Texto a buscar en Referencia o Nombre_Cliente.
         negociadores (Optional[list[str]]): Negociadores seleccionados.
         prospectos (Optional[list[str]]): Prospectos de Crédito seleccionados.
-        tipo_analisis (str): Tradicional, Crédito, ambos o Todos.
+        tipo_analisis (str): Tradicional, Crédito, ambos o Todos. Con
+            ``solo_con_oportunidades`` activo se combina con las oportunidades
+            para exigir que existan en el bloque del tipo elegido; sin
+            oportunidades seleccionadas exige al menos una oportunidad del tipo.
+            Con ``solo_con_oportunidades`` inactivo mantiene el filtro de
+            viabilidad del análisis (Tradicional_Habilitado/Credito_Habilitado).
         oportunidades (Optional[list[str]]): Oportunidades que debe tener el cliente.
-        solo_con_oportunidades (bool): Si True, exige Num_Oportunidades > 0.
+        solo_con_oportunidades (bool): Si True, exige Num_Oportunidades > 0 y
+            cambia el significado de ``tipo_analisis`` al de resultado por tipo.
         solo_viables (bool): Si True, exige Es_Viable.
         descuento_min (float): Descuento Actual mínimo (0-1).
         descuento_max (float): Descuento Actual máximo (0-1).
@@ -210,26 +325,53 @@ def filtrar_oportunidades_masivas(
         if prospectos_validos:
             resultado = resultado[resultado["Prospecto_Credito"].isin(prospectos_validos)]
 
-    if tipo_analisis == "Tradicional":
-        resultado = resultado[resultado["Tradicional_Habilitado"].astype(bool)]
-    elif tipo_analisis == "Crédito":
-        resultado = resultado[resultado["Credito_Habilitado"].astype(bool)]
-    elif tipo_analisis == "Tradicional y Crédito":
-        resultado = resultado[
-            resultado["Tradicional_Habilitado"].astype(bool)
-            & resultado["Credito_Habilitado"].astype(bool)
-        ]
-
     # Paso 3: Oportunidades Seleccionadas
     seleccionadas = [o for o in (oportunidades or []) if o in OPORTUNIDADES]
-    if seleccionadas:
-        resultado = resultado[
-            resultado["Oportunidades"].apply(
-                lambda ops: any(o in _normalizar_lista(ops) for o in seleccionadas)
-            )
-        ]
+    prefijos_tipo = PREFIJOS_TIPO_ANALISIS.get(str(tipo_analisis).strip(), ())
 
-    # Paso 4: Filtros Booleanos y Numéricos
+    # Paso 4: Tipo de Análisis
+    if prefijos_tipo:
+        if solo_con_oportunidades:
+            # El tipo de análisis filtra por resultado: la oportunidad debe
+            # existir en el bloque Tradicional y/o Crédito de la unidad.
+            for prefijo in prefijos_tipo:
+                resultado = resultado[
+                    _mascara_oportunidades_de_tipo(
+                        resultado,
+                        prefijo=prefijo,
+                        requeridas=seleccionadas,
+                    )
+                ]
+        else:
+            # Sin "Solo con oportunidades" se mantiene el filtro de viabilidad
+            # del análisis: el tipo debe estar habilitado para el cliente.
+            mascara_habilitado = pd.Series(True, index=resultado.index)
+            for prefijo in prefijos_tipo:
+                columna = COLUMNAS_HABILITADO_TIPO[prefijo]
+                mascara_habilitado &= resultado[columna].astype(bool)
+            resultado = resultado[mascara_habilitado]
+
+    # Paso 5: Oportunidades Seleccionadas
+    if seleccionadas:
+        if prefijos_tipo and solo_con_oportunidades:
+            # Las oportunidades calculadas ya se filtraron por bloque. Las
+            # generales (Robo/IA) se exigen además y no pertenecen a un tipo.
+            generales = [
+                nombre for nombre in seleccionadas
+                if nombre in OPORTUNIDADES_GENERALES
+            ]
+            if generales:
+                resultado = resultado[
+                    _mascara_oportunidades_generales(resultado, generales)
+                ]
+        else:
+            resultado = resultado[
+                resultado["Oportunidades"].apply(
+                    lambda ops: any(o in _normalizar_lista(ops) for o in seleccionadas)
+                )
+            ]
+
+    # Paso 6: Filtros Booleanos y Numéricos
     if solo_con_oportunidades:
         resultado = resultado[
             pd.to_numeric(resultado["Num_Oportunidades"], errors="coerce").fillna(0) > 0
@@ -254,7 +396,7 @@ def filtrar_oportunidades_masivas(
     if excluir_clientes_con_liquidaciones:
         resultado = resultado[~resultado["Tiene_Deudas_Liquidaciones"].astype(bool)]
 
-    # Paso 5: Ordenamiento
+    # Paso 7: Ordenamiento
     if resultado.empty:
         return resultado.reset_index(drop=True)
 
@@ -336,6 +478,13 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
             options=OPCIONES_TIPO_ANALISIS,
             index=0,
             key="{}tipo_analisis".format(PREFIJO_FILTROS_MASIVOS),
+            help=(
+                "Con 'Solo con oportunidades' activo se combina con la "
+                "Oportunidad: muestra los clientes que la tienen por el tipo "
+                "elegido. Sin oportunidad elegida, exige al menos una "
+                "oportunidad de ese tipo. Si desactivas 'Solo con "
+                "oportunidades', filtra por viabilidad del análisis."
+            ),
             on_change=_reiniciar_pagina_masiva,
         )
 
@@ -346,7 +495,11 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
             options=OPORTUNIDADES,
             default=[],
             key="{}oportunidad".format(PREFIJO_FILTROS_MASIVOS),
-            help="Sin selección se muestran todas las oportunidades.",
+            help=(
+                "Sin selección se muestran todas las oportunidades. Al "
+                "combinar con un Tipo de Análisis, la oportunidad debe existir "
+                "en el bloque Tradicional o Crédito elegido."
+            ),
             on_change=_reiniciar_pagina_masiva,
         )
     with colOrden:
@@ -394,6 +547,12 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
             "**Solo con oportunidades**",
             value=True,
             key="{}solo_oportunidades".format(PREFIJO_FILTROS_MASIVOS),
+            help=(
+                "Si está activo, el Tipo de Análisis filtra por las "
+                "oportunidades del bloque Tradicional o Crédito. Si lo "
+                "desactivas, el Tipo de Análisis vuelve a filtrar por "
+                "viabilidad del análisis."
+            ),
             on_change=_reiniciar_pagina_masiva,
         )
     with colSoloViables:
