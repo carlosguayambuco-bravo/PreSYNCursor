@@ -64,6 +64,11 @@ def _normalizar_id_deuda(valor: Any) -> str:
 # Función Auxiliar para Convertir un Valor a Float
 def _a_float(valor: Any, default: float = 0.0) -> float:
     """Convierte un valor a Float, devolviendo ``default`` si no es numérico."""
+    # Camino rápido para los valores numéricos, que son la mayoría en los
+    # bucles de detalle. Evita el costo de pd.to_numeric por cada celda.
+    if isinstance(valor, (int, float, np.integer, np.floating)):
+        numero = float(valor)
+        return default if np.isnan(numero) else numero
     try:
         numero = pd.to_numeric(valor, errors="coerce")
     except (TypeError, ValueError):
@@ -77,6 +82,8 @@ def _a_bool(valor: Any, default: bool = False) -> bool:
     """Convierte un valor a booleano tratando NaN como False."""
     if valor is None:
         return default
+    if isinstance(valor, (bool, np.bool_)):
+        return bool(valor)
     try:
         if pd.isna(valor):
             return default
@@ -1847,6 +1854,138 @@ def seleccionar_descuentos_masivas(
 
     return df[columnas_salida].reset_index(drop=True)
 
+# Función Auxiliar para Eliminar Actualizaciones Duplicadas
+def _deduplicar_actualizaciones(
+    actualizaciones_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """Elimina registros repetidos de la misma deuda en el mismo instante.
+
+    La hoja de Actualizaciones puede repetir una gestión por reintentos de
+    escritura o cargas parciales. Se conserva la **última** fila de la hoja,
+    que es el criterio con el que se resuelven las filas más recientes.
+
+    Args:
+        actualizaciones_df (Optional[pd.DataFrame]): Actualizaciones crudas.
+
+    Returns:
+        pd.DataFrame: Copia normalizada y sin duplicados por ``Id_Deuda`` +
+        ``Fecha_Act``. Si faltan las columnas requeridas, devuelve una copia
+        sin transformar.
+    """
+    if actualizaciones_df is None:
+        return pd.DataFrame()
+    if actualizaciones_df.empty:
+        return actualizaciones_df.copy()
+    if not {"Id_Deuda", "Fecha_Act"}.issubset(set(actualizaciones_df.columns)):
+        return actualizaciones_df.copy()
+
+    df = actualizaciones_df.copy()
+    df["Id_Deuda"] = df["Id_Deuda"].apply(_normalizar_id_deuda)
+    df["Fecha_Act"] = _normalizar_columna_fechas(df["Fecha_Act"])
+    df = df[(df["Id_Deuda"] != "") & df["Fecha_Act"].notna()]
+    return df.drop_duplicates(
+        subset=["Id_Deuda", "Fecha_Act"], keep="last"
+    ).reset_index(drop=True)
+
+# Función Auxiliar para Construir el Mapa del Último Descuento en Base
+def _mapa_ultimo_descuento_masivas(
+    masivas_df: Optional[pd.DataFrame],
+) -> dict[str, dict[str, Any]]:
+    """Construye ``Id_Deuda -> último descuento en base`` de Masivas.
+
+    Se toma la masiva más reciente (``Fecha_Masiva`` y luego ``Fila_Sheets``).
+    Si esas columnas no existen, se mantiene el orden de la hoja y gana la
+    primera fila, igual que en la resolución individual.
+    """
+    if masivas_df is None or masivas_df.empty:
+        return {}
+    if "Id_Deuda" not in masivas_df.columns:
+        return {}
+
+    df = masivas_df.copy()
+    df["Id_Deuda"] = df["Id_Deuda"].apply(_normalizar_id_deuda)
+    df = df[df["Id_Deuda"] != ""]
+    if df.empty:
+        return {}
+
+    columnas_orden = [
+        columna for columna in ("Fecha_Masiva", "Fila_Sheets")
+        if columna in df.columns
+    ]
+    if columnas_orden:
+        df = df.sort_values(
+            by=columnas_orden, ascending=False, na_position="last"
+        )
+    df = df.drop_duplicates(subset=["Id_Deuda"], keep="first")
+
+    pab = (
+        pd.to_numeric(df["PaB_Propuesta"], errors="coerce")
+        if "PaB_Propuesta" in df.columns
+        else pd.Series(np.nan, index=df.index, dtype=float)
+    )
+    fechas = (
+        df["Metadata"].apply(_fecha_limite_uso_masiva)
+        if "Metadata" in df.columns
+        else pd.Series(None, index=df.index, dtype=object)
+    )
+    return {
+        deuda: {
+            "pab": None if pd.isna(pab_deuda) else float(pab_deuda),
+            "fecha": (
+                None
+                if fecha_deuda is None or pd.isna(fecha_deuda)
+                else fecha_deuda
+            ),
+        }
+        for deuda, pab_deuda, fecha_deuda in zip(df["Id_Deuda"], pab, fechas)
+    }
+
+# Función Auxiliar para Construir el Mapa de la Última Solicitud Exitosa
+def _mapa_ultima_solicitud_exitosa(
+    solicitudes_df: Optional[pd.DataFrame],
+) -> dict[str, dict[str, Any]]:
+    """Construye ``Id_Deuda -> última solicitud exitosa`` del MEC.
+
+    Se ordenan las solicitudes exitosas por ``Fecha_Respuesta`` descendente y
+    se conserva el primer monto encontrado para cada deuda, replicando el
+    recorrido de ``_resolver_pab_actualizado_alianzas`` pero en una sola pasada.
+    """
+    if solicitudes_df is None or solicitudes_df.empty:
+        return {}
+    if "Estado_Solicitud" not in solicitudes_df.columns:
+        return {}
+
+    solicitudes = solicitudes_df[
+        solicitudes_df["Estado_Solicitud"] == "Exitosa"
+    ]
+    if solicitudes.empty:
+        return {}
+    if "Fecha_Respuesta" in solicitudes.columns:
+        solicitudes = solicitudes.sort_values(
+            by="Fecha_Respuesta", ascending=False, na_position="last"
+        )
+
+    mapa: dict[str, dict[str, Any]] = {}
+    for _, solicitud in solicitudes.iterrows():
+        fecha = _a_timestamp(solicitud.get("Fecha_Respuesta"))
+        if fecha is None:
+            fecha = _a_timestamp(solicitud.get("Timestamp"))
+        for campo in ("JSON_Respuesta", "Datos_Solicitud"):
+            contenido = solicitud.get(campo)
+            if not isinstance(contenido, (list, tuple)):
+                continue
+            for deuda in contenido:
+                if not isinstance(deuda, dict):
+                    continue
+                deuda_norm = _normalizar_id_deuda(deuda.get("Id_Deuda"))
+                if not deuda_norm or deuda_norm in mapa:
+                    continue
+                monto = _a_float(deuda.get("Monto_Propuesto"), default=np.nan)
+                if pd.isna(monto):
+                    continue
+                mapa[deuda_norm] = {"pab": monto, "fecha": fecha}
+    return mapa
+
 # Función Auxiliar para Construir el Mapa de Fechas Límite de Pago de Alianzas
 def _mapa_fechas_limite_pago_alianza(
     solicitudes_df: Optional[pd.DataFrame],
@@ -1930,10 +2069,10 @@ def _preparar_acuerdos_robo_masivos(
     if not deudas_scope:
         return {}, []
 
-    acts = actualizaciones_df.copy()
-    acts["Id_Deuda"] = acts["Id_Deuda"].apply(_normalizar_id_deuda)
-    acts["Fecha_Act"] = _normalizar_columna_fechas(acts["Fecha_Act"])
-    acts = acts[acts["Id_Deuda"].isin(deudas_scope)].dropna(subset=["Fecha_Act"])
+    acts = _deduplicar_actualizaciones(actualizaciones_df)
+    if acts.empty:
+        return {}, []
+    acts = acts[acts["Id_Deuda"].isin(deudas_scope)]
     if acts.empty:
         return {}, []
 
@@ -2123,27 +2262,35 @@ def _calcular_metricas_tradicional_masivas(
     pago_total = actualizado + agg["Trad_Ingreso_Actual"] * IVA + MONTO_ADICIONAL_DEPOSITO
     agg["Trad_Viable"] = pago_total <= (ahorro - por_cobrar)
 
-    agg["Trad_Deposito_Extra_Detalle"] = agg.apply(
-        lambda r: "Depósito requerido: ${:,.0f}; {:.2f} apartados netos.".format(
-            r["Trad_Deposito_Extra_Valor"],
-            (r["Trad_Deposito_Extra_Valor"] / r["Trad_Apartado_Neto"])
-            if r["Trad_Apartado_Neto"] > 0 else 0.0,
-        ),
-        axis=1,
-    )
-    agg["Trad_Contraoferta_Detalle"] = agg.apply(
-        lambda r: "Descuento requerido: {:.1%}; pago estimado: ${:,.0f}.".format(
-            r["Trad_Contraoferta_Valor"],
-            r["Trad_PaB_Origen_Total"] * (1 - r["Trad_Contraoferta_Valor"]),
-        ),
-        axis=1,
-    )
-    agg["Trad_Liq_Insta_Detalle"] = agg.apply(
-        lambda r: "Descuento actual: {:.1%}; descuento requerido: {:.1%}.".format(
-            r["Trad_Descuento_Actual"], r["Trad_Contraoferta_Valor"]
-        ),
-        axis=1,
-    )
+    agg["Trad_Deposito_Extra_Detalle"] = [
+        "Depósito requerido: ${:,.0f}; {:.2f} apartados netos.".format(
+            deposito_valor,
+            (deposito_valor / apartado_valor) if apartado_valor > 0 else 0.0,
+        )
+        for deposito_valor, apartado_valor in zip(
+            agg["Trad_Deposito_Extra_Valor"].to_numpy(),
+            agg["Trad_Apartado_Neto"].to_numpy(),
+        )
+    ]
+    agg["Trad_Contraoferta_Detalle"] = [
+        "Descuento requerido: {:.1%}; pago estimado: ${:,.0f}.".format(
+            contraoferta_valor,
+            origen_valor * (1 - contraoferta_valor),
+        )
+        for contraoferta_valor, origen_valor in zip(
+            agg["Trad_Contraoferta_Valor"].to_numpy(),
+            agg["Trad_PaB_Origen_Total"].to_numpy(),
+        )
+    ]
+    agg["Trad_Liq_Insta_Detalle"] = [
+        "Descuento actual: {:.1%}; descuento requerido: {:.1%}.".format(
+            descuento_actual, contraoferta_valor
+        )
+        for descuento_actual, contraoferta_valor in zip(
+            agg["Trad_Descuento_Actual"].to_numpy(),
+            agg["Trad_Contraoferta_Valor"].to_numpy(),
+        )
+    ]
     return agg[columnas]
 
 # Función Auxiliar para Calcular las Métricas de Crédito
@@ -2235,27 +2382,35 @@ def _calcular_metricas_credito_masivas(
         & (agg["Cred_Descuento_Actual"] != 0)
     )
 
-    agg["Cred_Deposito_Extra_Detalle"] = agg.apply(
-        lambda r: "Depósito requerido: ${:,.0f}; {:.2f} apartados netos.".format(
-            r["Cred_Deposito_Extra_Valor"],
-            (r["Cred_Deposito_Extra_Valor"] / r["Cred_Apartado_Neto"])
-            if r["Cred_Apartado_Neto"] > 0 else 0.0,
-        ),
-        axis=1,
-    )
-    agg["Cred_Contraoferta_Detalle"] = agg.apply(
-        lambda r: "Descuento requerido: {:.1%}; pago estimado: ${:,.0f}.".format(
-            r["Cred_Contraoferta_Valor"],
-            r["Cred_PaB_Origen_Total"] * (1 - r["Cred_Contraoferta_Valor"]),
-        ),
-        axis=1,
-    )
-    agg["Cred_Liq_Insta_Detalle"] = agg.apply(
-        lambda r: "Descuento actual: {:.1%}; descuento requerido: {:.1%}.".format(
-            r["Cred_Descuento_Actual"], r["Cred_Contraoferta_Valor"]
-        ),
-        axis=1,
-    )
+    agg["Cred_Deposito_Extra_Detalle"] = [
+        "Depósito requerido: ${:,.0f}; {:.2f} apartados netos.".format(
+            deposito_valor,
+            (deposito_valor / apartado_valor) if apartado_valor > 0 else 0.0,
+        )
+        for deposito_valor, apartado_valor in zip(
+            agg["Cred_Deposito_Extra_Valor"].to_numpy(),
+            agg["Cred_Apartado_Neto"].to_numpy(),
+        )
+    ]
+    agg["Cred_Contraoferta_Detalle"] = [
+        "Descuento requerido: {:.1%}; pago estimado: ${:,.0f}.".format(
+            contraoferta_valor,
+            origen_valor * (1 - contraoferta_valor),
+        )
+        for contraoferta_valor, origen_valor in zip(
+            agg["Cred_Contraoferta_Valor"].to_numpy(),
+            agg["Cred_PaB_Origen_Total"].to_numpy(),
+        )
+    ]
+    agg["Cred_Liq_Insta_Detalle"] = [
+        "Descuento actual: {:.1%}; descuento requerido: {:.1%}.".format(
+            descuento_actual, contraoferta_valor
+        )
+        for descuento_actual, contraoferta_valor in zip(
+            agg["Cred_Descuento_Actual"].to_numpy(),
+            agg["Cred_Contraoferta_Valor"].to_numpy(),
+        )
+    ]
     return agg[columnas]
 
 # --- Construcción de Unidades de Análisis (Portafolios) ---
@@ -2303,16 +2458,16 @@ def _resolver_pab_actualizado_actualizaciones(
         return resultado
 
     # Paso 1: Quedarnos con la Última Actualización de Cada Deuda
-    acts = actualizaciones_df.copy()
-    acts["Id_Deuda"] = acts["Id_Deuda"].apply(_normalizar_id_deuda)
-    acts["Fecha_Act"] = _normalizar_columna_fechas(acts["Fecha_Act"])
+    acts = _deduplicar_actualizaciones(actualizaciones_df)
+    if acts.empty:
+        return resultado
     acts["Etiqueta_Act"] = (
         acts["Etiqueta_Act"].fillna("").astype(str).str.strip().str.upper()
     )
     acts["PaB_Actualizado"] = pd.to_numeric(
         acts["PaB_Actualizado"], errors="coerce"
     )
-    acts = acts.dropna(subset=["Fecha_Act"]).sort_values(by="Fecha_Act")
+    acts = acts.sort_values(by="Fecha_Act", kind="stable")
     acts = acts.drop_duplicates(subset=["Id_Deuda"], keep="last")
 
     mapa_etiqueta = acts.set_index("Id_Deuda")["Etiqueta_Act"].to_dict()
@@ -2329,19 +2484,48 @@ def _resolver_pab_actualizado_actualizaciones(
         resultado["Id_Deuda"].map(mapa_pab), errors="coerce"
     ).fillna(resultado["PaB_Actualizado_Deuda"])
 
-    # Paso 2: Resolver ACTUALIZADO_ALIANZAS con el Cruce de Fuentes
+    # Paso 2: Resolver ACTUALIZADO_ALIANZAS con el Cruce de Fuentes.
+    # Precalculamos los mapas una sola vez para evitar recorrer Masivas y
+    # Solicitudes completas por cada actualización (O(n*m) -> O(n+m)).
     confiable = resultado["Etiqueta_Act_Deuda"].isin(ETIQUETAS_ACT_CONFIABLES)
     mask_alianzas = confiable & resultado["Etiqueta_Act_Deuda"].eq("ACTUALIZADO_ALIANZAS")
-    for indice in resultado.index[mask_alianzas]:
-        fila = resultado.loc[indice]
-        resultado.at[indice, "Pab_Fila_Deuda"] = _resolver_pab_actualizado_alianzas(
-            id_deuda=_normalizar_id_deuda(fila.get("Id_Deuda")),
-            pab_origen=_a_float(fila.get("PaB_Origen")),
-            fecha_actualizacion=_a_timestamp(fila.get("Fecha_Act_Deuda")),
-            pab_actualizado_fila=_a_float(fila.get("Pab_Fila_Deuda")),
-            masivas_df=masivas_df,
-            solicitudes_df=solicitudes_df,
-        )
+    if mask_alianzas.any():
+        mapa_masivas = _mapa_ultimo_descuento_masivas(masivas_df)
+        mapa_solicitudes = _mapa_ultima_solicitud_exitosa(solicitudes_df)
+        for indice in resultado.index[mask_alianzas]:
+            deuda = resultado.at[indice, "Id_Deuda"]
+            info_masiva = mapa_masivas.get(deuda)
+            info_solicitud = mapa_solicitudes.get(deuda)
+            if info_masiva is None and info_solicitud is None:
+                continue
+
+            pab_fila = _a_float(
+                resultado.at[indice, "Pab_Fila_Deuda"], default=0.0
+            )
+            candidatos = []
+            if info_masiva is not None:
+                candidatos.append({
+                    "pab": pab_fila if info_masiva["pab"] is None else info_masiva["pab"],
+                    "fecha": info_masiva["fecha"],
+                })
+            if info_solicitud is not None:
+                candidatos.append({
+                    "pab": pab_fila if info_solicitud["pab"] is None else info_solicitud["pab"],
+                    "fecha": info_solicitud["fecha"],
+                })
+
+            candidatos_con_fecha = [
+                candidato for candidato in candidatos
+                if candidato["fecha"] is not None
+                and not pd.isna(candidato["fecha"])
+            ]
+            if not candidatos_con_fecha:
+                # Sin fechas comparables se mantiene el valor de la fila.
+                continue
+            candidatos_con_fecha.sort(key=lambda c: c["fecha"], reverse=True)
+            resultado.at[indice, "Pab_Fila_Deuda"] = max(
+                candidatos_con_fecha[0]["pab"], 0.0
+            )
 
     # Paso 3: Aplicar las Reglas de Confianza y Acotar al Origen
     pab_fila = pd.to_numeric(resultado["Pab_Fila_Deuda"], errors="coerce")
@@ -2385,75 +2569,99 @@ def _construir_unidades_actualizaciones(
     resultado["Pago_Compartido"] = False
     if "Banco" not in resultado.columns:
         resultado["Banco"] = ""
+    if resultado.empty:
+        return resultado
 
-    for referencia, grupo in resultado.groupby("Referencia", sort=False):
-        # Paso 1: Detectar si el Cliente Tiene Actualizaciones
-        con_actualizacion = grupo[grupo["Fecha_Act_Deuda"].notna()]
+    referencia = resultado["Referencia"].astype(str)
+    banco_normalizado = resultado["Banco"].astype(str).str.strip()
 
-        if con_actualizacion.empty:
-            # Paso 2a: Sin Actualizaciones -> Agrupar por BANCOS_PORTAFOLIO
-            for banco in BANCOS_PORTAFOLIO:
-                subgrupo = grupo[
-                    grupo["Banco"].astype(str).str.strip() == banco
-                ]
-                if len(subgrupo) > 1:
-                    unidad = "BANCO::{}::{}".format(referencia, banco)
-                    resultado.loc[subgrupo.index, "Unidad_Id"] = unidad
-                    resultado.loc[subgrupo.index, "Tipo_Unidad"] = "Portafolio Banco"
-                    resultado.loc[subgrupo.index, "Etiqueta_Unidad"] = (
-                        "Portafolio {} (banco)".format(banco)
-                    )
-        else:
-            # Paso 2b: Con Actualizaciones -> Agrupar Actualizaciones Confiables
-            candidatas = con_actualizacion[
-                con_actualizacion["Pago_Confiable"]
-            ].copy()
-            if not candidatas.empty:
-                candidatas = candidatas.sort_values(
-                    by=["Etiqueta_Act_Deuda", "Fecha_Act_Deuda"]
-                )
-                candidatas["_Gap"] = candidatas.groupby(
-                    "Etiqueta_Act_Deuda"
-                )["Fecha_Act_Deuda"].diff().dt.total_seconds()
-                candidatas["_Nuevo"] = (
-                    candidatas["_Gap"].isna()
-                    | (candidatas["_Gap"] > float(ventana_segundos))
-                )
-                candidatas["_Grupo"] = candidatas.groupby(
-                    "Etiqueta_Act_Deuda"
-                )["_Nuevo"].cumsum()
+    # Paso 1: Detectar si el Cliente Tiene Actualizaciones
+    con_actualizacion = resultado["Fecha_Act_Deuda"].notna()
+    referencias_con_act = set(resultado.loc[con_actualizacion, "Referencia"])
 
-                for (etiqueta, numero_grupo), subgrupo in candidatas.groupby(
-                    ["Etiqueta_Act_Deuda", "_Grupo"], sort=False
-                ):
-                    if len(subgrupo) <= 1:
-                        continue
-                    unidad = "ACT::{}::{}::{}".format(
-                        referencia, etiqueta, int(numero_grupo)
-                    )
-                    resultado.loc[subgrupo.index, "Unidad_Id"] = unidad
-                    resultado.loc[subgrupo.index, "Tipo_Unidad"] = (
-                        "Portafolio Actualizaciones"
-                    )
-                    resultado.loc[subgrupo.index, "Etiqueta_Unidad"] = (
-                        "Portafolio {} · {}".format(
-                            str(etiqueta).title(),
-                            subgrupo["Fecha_Act_Deuda"].min().strftime("%d/%m %H:%M"),
-                        )
-                    )
+    # Paso 2a: Sin Actualizaciones -> Agrupar por BANCOS_PORTAFOLIO
+    sin_actualizacion = ~resultado["Referencia"].isin(referencias_con_act)
+    candidatas_banco = sin_actualizacion & banco_normalizado.isin(BANCOS_PORTAFOLIO)
+    if candidatas_banco.any():
+        grupos_banco = pd.DataFrame({
+            "Referencia": referencia[candidatas_banco],
+            "Banco": banco_normalizado[candidatas_banco],
+        })
+        conteos_banco = grupos_banco.groupby(
+            ["Referencia", "Banco"], sort=False
+        )["Referencia"].transform("size")
+        indices_banco = conteos_banco.index[conteos_banco > 1]
+        if len(indices_banco) > 0:
+            refs_banco = referencia[indices_banco]
+            bancos_grupo = banco_normalizado[indices_banco]
+            resultado.loc[indices_banco, "Unidad_Id"] = (
+                "BANCO::" + refs_banco + "::" + bancos_grupo
+            )
+            resultado.loc[indices_banco, "Tipo_Unidad"] = "Portafolio Banco"
+            resultado.loc[indices_banco, "Etiqueta_Unidad"] = (
+                "Portafolio " + bancos_grupo + " (banco)"
+            )
 
-        # Paso 3: Las Deudas que No Quedaron en un Portafolio son Individuales
-        indices_grupo = resultado.loc[grupo.index]
-        mascara_individual = indices_grupo["Unidad_Id"] == ""
-        indices_individuales = indices_grupo.index[mascara_individual]
-        resultado.loc[indices_individuales, "Unidad_Id"] = [
-            "DEUDA::{}".format(_normalizar_id_deuda(deuda))
-            for deuda in resultado.loc[indices_individuales, "Id_Deuda"]
-        ]
-        resultado.loc[indices_individuales, "Etiqueta_Unidad"] = [
-            "Deuda {}".format(_normalizar_id_deuda(deuda))
-            for deuda in resultado.loc[indices_individuales, "Id_Deuda"]
-        ]
+    # Paso 2b: Con Actualizaciones -> Agrupar Actualizaciones Confiables
+    pago_confiable = (
+        resultado["Pago_Confiable"].fillna(False).astype(bool)
+        if "Pago_Confiable" in resultado.columns
+        else pd.Series(False, index=resultado.index)
+    )
+    indices_confiables = resultado.index[
+        (~sin_actualizacion) & pago_confiable
+    ]
+    if len(indices_confiables) > 0:
+        candidatas = resultado.loc[indices_confiables].copy()
+        claves_act = ["Referencia", "Etiqueta_Act_Deuda"]
+        candidatas = candidatas.sort_values(
+            by=claves_act + ["Fecha_Act_Deuda"], kind="stable"
+        )
+        candidatas["_Gap"] = candidatas.groupby(
+            claves_act
+        )["Fecha_Act_Deuda"].diff().dt.total_seconds()
+        candidatas["_Nuevo"] = (
+            candidatas["_Gap"].isna()
+            | (candidatas["_Gap"] > float(ventana_segundos))
+        )
+        candidatas["_Grupo"] = candidatas.groupby(
+            claves_act
+        )["_Nuevo"].cumsum()
+        tamanos_grupo = candidatas.groupby(
+            claves_act + ["_Grupo"], sort=False
+        )["Referencia"].transform("size")
+        candidatas = candidatas[tamanos_grupo > 1]
+        if not candidatas.empty:
+            fecha_minima = candidatas.groupby(
+                claves_act + ["_Grupo"], sort=False
+            )["Fecha_Act_Deuda"].transform("min")
+            resultado.loc[candidatas.index, "Unidad_Id"] = (
+                "ACT::" + candidatas["Referencia"].astype(str)
+                + "::" + candidatas["Etiqueta_Act_Deuda"].astype(str)
+                + "::" + candidatas["_Grupo"].astype(int).astype(str)
+            )
+            resultado.loc[candidatas.index, "Tipo_Unidad"] = (
+                "Portafolio Actualizaciones"
+            )
+            resultado.loc[candidatas.index, "Etiqueta_Unidad"] = (
+                "Portafolio "
+                + candidatas["Etiqueta_Act_Deuda"].astype(str).str.title()
+                + " · "
+                + fecha_minima.dt.strftime("%d/%m %H:%M")
+            )
+
+    # Paso 3: Las Deudas que No Quedaron en un Portafolio son Individuales
+    indices_individuales = resultado.index[resultado["Unidad_Id"] == ""]
+    if len(indices_individuales) > 0:
+        ids_individuales = resultado.loc[
+            indices_individuales, "Id_Deuda"
+        ].apply(_normalizar_id_deuda)
+        resultado.loc[indices_individuales, "Unidad_Id"] = (
+            "DEUDA::" + ids_individuales
+        )
+        resultado.loc[indices_individuales, "Etiqueta_Unidad"] = (
+            "Deuda " + ids_individuales
+        )
 
     return resultado
 
@@ -2517,84 +2725,121 @@ def _aplicar_pago_unidades(
         resultado["PaB_Portafolio"] = np.nan
     if "Portafolio_Completo" not in resultado.columns:
         resultado["Portafolio_Completo"] = False
+    if resultado.empty:
+        return resultado
 
-    for _, grupo in resultado.groupby("Unidad_Id", sort=False):
-        indices = grupo.index
-        origen = pd.to_numeric(grupo["PaB_Origen"], errors="coerce").fillna(0.0)
-        total_origen = float(origen.sum())
-        tipo_unidad = str(grupo["Tipo_Unidad"].iloc[0])
-        valores_actuales = pd.to_numeric(
-            grupo["PaB_Actualizado_Deuda_Original"], errors="coerce"
-        ).fillna(0.0)
+    # Trabajamos con Series alineadas al índice para evitar un bucle por unidad.
+    unidad = resultado["Unidad_Id"]
+    origen = pd.to_numeric(resultado["PaB_Origen"], errors="coerce").fillna(0.0)
+    valores_actuales = pd.to_numeric(
+        resultado["PaB_Actualizado_Deuda_Original"], errors="coerce"
+    ).fillna(0.0)
+    tipo_unidad = resultado.groupby(
+        "Unidad_Id", sort=False
+    )["Tipo_Unidad"].transform("first")
+    total_origen = origen.groupby(unidad, sort=False).transform("sum")
+    num_deudas = origen.groupby(unidad, sort=False).transform("size")
+    total = valores_actuales.groupby(unidad, sort=False).transform("first")
+    pago_compartido = pd.Series(False, index=resultado.index)
 
-        # Paso 1: Determinar el Total y si el Pago es Compartido
-        if solo_masivas:
-            if tipo_unidad == "Portafolio Masivas":
-                pab_portafolio = pd.to_numeric(
-                    grupo["PaB_Portafolio"], errors="coerce"
-                ).dropna()
-                portafolio_completo = bool(
-                    grupo["Portafolio_Completo"].fillna(False).astype(bool).all()
-                )
-                usar_total_portafolio = (
-                    not pab_portafolio.empty
-                    and float(pab_portafolio.iloc[0]) > 0
-                    and portafolio_completo
-                )
-                if usar_total_portafolio:
-                    total = float(pab_portafolio.iloc[0])
-                    pago_compartido = True
-                else:
-                    total = float(
-                        pd.to_numeric(grupo["PaB_Masiva"], errors="coerce")
-                        .fillna(0.0).sum()
-                    )
-                    pago_compartido = False
-            else:
-                total = float(valores_actuales.iloc[0])
-                pago_compartido = False
-        else:
-            if tipo_unidad == "Portafolio Actualizaciones":
-                valores_redondeados = valores_actuales.round(2)
-                valores_iguales = valores_redondeados.nunique() == 1
-                if valores_iguales and float(valores_actuales.iloc[0]) > 0:
-                    total = float(valores_actuales.iloc[0])
-                    pago_compartido = True
-                else:
-                    total = float(valores_actuales.sum())
-                    pago_compartido = False
-            elif tipo_unidad == "Portafolio Banco":
-                total = total_origen
-                pago_compartido = False
-            else:
-                total = float(valores_actuales.iloc[0])
-                pago_compartido = False
+    # Paso 1: Determinar el Total y si el Pago es Compartido
+    if solo_masivas:
+        es_portafolio = tipo_unidad == "Portafolio Masivas"
+        pab_portafolio = pd.to_numeric(
+            resultado["PaB_Portafolio"], errors="coerce"
+        )
+        pab_portafolio_grupo = pab_portafolio.groupby(
+            unidad, sort=False
+        ).transform("first")
+        portafolio_completo = (
+            resultado["Portafolio_Completo"].fillna(False).astype(bool)
+            .groupby(unidad, sort=False).transform("min").astype(bool)
+        )
+        usar_total_portafolio = (
+            es_portafolio
+            & pab_portafolio_grupo.notna()
+            & (pab_portafolio_grupo > 0)
+            & portafolio_completo
+        )
+        pab_masiva = pd.to_numeric(
+            resultado["PaB_Masiva"], errors="coerce"
+        ).fillna(0.0).groupby(unidad, sort=False).transform("sum")
+        total = pd.Series(
+            np.where(
+                es_portafolio,
+                np.where(
+                    usar_total_portafolio,
+                    pab_portafolio_grupo.fillna(0.0),
+                    pab_masiva,
+                ),
+                total,
+            ),
+            index=resultado.index,
+        )
+        pago_compartido = usar_total_portafolio
+    else:
+        es_actualizaciones = tipo_unidad == "Portafolio Actualizaciones"
+        es_banco = tipo_unidad == "Portafolio Banco"
+        valores_redondeados = valores_actuales.round(2)
+        valores_iguales = valores_redondeados.groupby(
+            unidad, sort=False
+        ).transform("nunique") == 1
+        usa_pago_unico = es_actualizaciones & valores_iguales & (total > 0)
+        suma_valores = valores_actuales.groupby(
+            unidad, sort=False
+        ).transform("sum")
+        total = pd.Series(
+            np.select(
+                [usa_pago_unico, es_actualizaciones, es_banco],
+                [total, suma_valores, total_origen],
+                default=total,
+            ),
+            index=resultado.index,
+        )
+        pago_compartido = usa_pago_unico
 
-        total = max(total, 0.0)
-        if total_origen > 0:
-            total = min(total, total_origen)
+    total = pd.to_numeric(total, errors="coerce").fillna(0.0).clip(lower=0.0)
+    total = pd.Series(
+        np.where(total_origen > 0, np.minimum(total, total_origen), total),
+        index=resultado.index,
+    )
 
-        # Paso 2: Distribuir el Total por Deuda
-        if pago_compartido and total_origen > 0:
-            pagos = total * (origen / total_origen)
-        else:
-            pagos = valores_actuales.copy()
+    # Paso 2: Distribuir el Total por Deuda
+    denominador_origen = total_origen.where(total_origen > 0, np.nan)
+    pagos_por_origen = (total * origen / denominador_origen).fillna(0.0)
+    pagos = pd.Series(
+        np.where(
+            pago_compartido & (total_origen > 0),
+            pagos_por_origen,
+            valores_actuales,
+        ),
+        index=resultado.index,
+    )
 
-        # Garantizar que la suma por deuda coincida con el total de la unidad
-        suma_pagos = float(pagos.sum())
-        if suma_pagos > 0 and not np.isclose(suma_pagos, total):
-            pagos = pagos * (total / suma_pagos)
-        elif suma_pagos <= 0 and total > 0:
-            if total_origen > 0:
-                pagos = total * (origen / total_origen)
-            else:
-                pagos = pd.Series(
-                    total / max(len(grupo), 1), index=grupo.index
-                )
+    # Garantizar que la suma por deuda coincida con el total de la unidad
+    suma_pagos = pagos.groupby(unidad, sort=False).transform("sum")
+    requiere_ajuste = (suma_pagos > 0) & ~np.isclose(suma_pagos, total)
+    factor_ajuste = (
+        total / suma_pagos.where(suma_pagos > 0, np.nan)
+    ).fillna(1.0)
+    pagos = pd.Series(
+        np.where(requiere_ajuste, pagos * factor_ajuste, pagos),
+        index=resultado.index,
+    )
+    requiere_distribucion = (suma_pagos <= 0) & (total > 0)
+    pagos_iguales = (total / num_deudas.where(num_deudas > 0, np.nan)).fillna(0.0)
+    pagos = pd.Series(
+        np.where(
+            requiere_distribucion,
+            np.where(total_origen > 0, pagos_por_origen, pagos_iguales),
+            pagos,
+        ),
+        index=resultado.index,
+    )
 
-        resultado.loc[indices, "PaB_Actualizado"] = pagos
-        resultado.loc[indices, "_PaB_Actualizado_Unidad"] = total
-        resultado.loc[indices, "Pago_Compartido"] = pago_compartido
+    resultado["PaB_Actualizado"] = pagos.to_numpy()
+    resultado["_PaB_Actualizado_Unidad"] = total.to_numpy()
+    resultado["Pago_Compartido"] = pago_compartido.to_numpy()
 
     return resultado
 
@@ -2644,9 +2889,18 @@ def _construir_tabla_unidades(*, deudas: pd.DataFrame) -> pd.DataFrame:
     unidades["Descuento_Esperado_Ponderado"] = (
         pd.Series(unidades["Descuento_Esperado_Ponderado"]).fillna(0.0)
     )
-    deudas_por_unidad = df.groupby("Unidad_Id")["Id_Deuda"].apply(
-        lambda serie: sorted(set(_normalizar_id_deuda(d) for d in serie))
-    ).to_dict()
+    df["_Id_Deuda_Norm"] = df["Id_Deuda"].apply(_normalizar_id_deuda)
+    deudas_por_unidad: dict[str, list[str]] = {}
+    for unidad, id_deuda in zip(
+        df["Unidad_Id"].to_numpy(), df["_Id_Deuda_Norm"].to_numpy()
+    ):
+        deudas_unidad = deudas_por_unidad.get(unidad)
+        if deudas_unidad is None:
+            deudas_por_unidad[unidad] = [id_deuda]
+        elif id_deuda not in deudas_unidad:
+            deudas_unidad.append(id_deuda)
+    for deudas_unidad in deudas_por_unidad.values():
+        deudas_unidad.sort()
     unidades["Deudas"] = unidades["Unidad_Id"].map(deudas_por_unidad)
     unidades["Deudas"] = unidades["Deudas"].apply(
         lambda valor: valor if isinstance(valor, list) else []
@@ -2661,43 +2915,92 @@ def _agregar_detalle_unidades(
 ) -> pd.DataFrame:
     """Agrega ``Deudas_Detalle`` a la tabla de unidades."""
     df = deudas.copy()
+    columnas_default = {
+        "Banco": "",
+        "PaB_Ideal": 0.0,
+        "Prospecto": "N/A",
+        "Prob_Liq": 0.0,
+        "Tiene_Masiva": False,
+        "Casa_Cobro": "",
+        "Fecha_Limite_Uso": pd.NaT,
+        "Usa_Tradicional": False,
+        "Usa_Credito": False,
+        "PaB_Actualizado_Deuda_Original": 0.0,
+        "_PaB_Actualizado_Unidad": 0.0,
+        "Pago_Compartido": False,
+    }
+    for columna, valor_default in columnas_default.items():
+        if columna not in df.columns:
+            df[columna] = valor_default
 
-    def _detalle(fila: pd.Series) -> dict[str, Any]:
-        pab_origen = _a_float(fila.get("PaB_Origen"))
-        pab_actualizado = _a_float(fila.get("PaB_Actualizado"))
-        descuento = (
-            1 - (pab_actualizado / pab_origen) if pab_origen > 0 else 0.0
-        )
-        return {
-            "Id_Deuda": _normalizar_id_deuda(fila.get("Id_Deuda")),
-            "Banco": str(fila.get("Banco") or ""),
-            "PaB_Origen": pab_origen,
-            "PaB_Actualizado": pab_actualizado,
-            "PaB_Actualizado_Original": _a_float(
-                fila.get("PaB_Actualizado_Deuda_Original")
-            ),
-            "Descuento_Deuda": min(max(descuento, 0.0), 1.0),
-            "PaB_Ideal": _a_float(fila.get("PaB_Ideal")),
-            "Prospecto": str(fila.get("Prospecto") or "N/A"),
-            "Prob_Liq": _a_float(fila.get("Prob_Liq")),
-            "Tiene_Masiva": _a_bool(fila.get("Tiene_Masiva")),
-            "Casa_Cobro": str(fila.get("Casa_Cobro") or ""),
-            "Fecha_Limite_Uso": fila.get("Fecha_Limite_Uso"),
-            "Usa_Tradicional": _a_bool(fila.get("Usa_Tradicional")),
-            "Usa_Credito": _a_bool(fila.get("Usa_Credito")),
-            "Unidad_Id": str(fila.get("Unidad_Id") or ""),
-            "Etiqueta_Unidad": str(fila.get("Etiqueta_Unidad") or ""),
-            "Tipo_Unidad": str(fila.get("Tipo_Unidad") or ""),
-            "PaB_Actualizado_Unidad": _a_float(
-                fila.get("_PaB_Actualizado_Unidad")
-            ),
-            "Pago_Compartido": _a_bool(fila.get("Pago_Compartido")),
+    pab_origen = pd.to_numeric(df["PaB_Origen"], errors="coerce").fillna(0.0)
+    pab_actualizado = pd.to_numeric(df["PaB_Actualizado"], errors="coerce").fillna(0.0)
+    descuento = np.where(
+        pab_origen > 0,
+        1 - (pab_actualizado / pab_origen.replace(0, np.nan)),
+        0.0,
+    )
+    descuento = np.clip(descuento, 0.0, 1.0)
+
+    registros = [
+        {
+            "Id_Deuda": id_deuda,
+            "Banco": banco,
+            "PaB_Origen": origen,
+            "PaB_Actualizado": actualizado,
+            "PaB_Actualizado_Original": actualizado_original,
+            "Descuento_Deuda": descuento_deuda,
+            "PaB_Ideal": pab_ideal,
+            "Prospecto": prospecto,
+            "Prob_Liq": prob_liq,
+            "Tiene_Masiva": tiene_masiva,
+            "Casa_Cobro": casa_cobro,
+            "Fecha_Limite_Uso": fecha_limite,
+            "Usa_Tradicional": usa_tradicional,
+            "Usa_Credito": usa_credito,
+            "Unidad_Id": unidad_id,
+            "Etiqueta_Unidad": etiqueta_unidad,
+            "Tipo_Unidad": tipo_unidad,
+            "PaB_Actualizado_Unidad": pab_unidad,
+            "Pago_Compartido": pago_compartido,
         }
+        for (
+            id_deuda, banco, origen, actualizado, actualizado_original,
+            descuento_deuda, pab_ideal, prospecto, prob_liq, tiene_masiva,
+            casa_cobro, fecha_limite, usa_tradicional, usa_credito,
+            unidad_id, etiqueta_unidad, tipo_unidad, pab_unidad,
+            pago_compartido,
+        ) in zip(
+            df["Id_Deuda"].apply(_normalizar_id_deuda).to_numpy(),
+            df["Banco"].fillna("").astype(str).to_numpy(),
+            pab_origen.to_numpy(),
+            pab_actualizado.to_numpy(),
+            pd.to_numeric(
+                df["PaB_Actualizado_Deuda_Original"], errors="coerce"
+            ).fillna(0.0).to_numpy(),
+            descuento,
+            pd.to_numeric(df["PaB_Ideal"], errors="coerce").fillna(0.0).to_numpy(),
+            df["Prospecto"].fillna("N/A").replace("", "N/A").astype(str).to_numpy(),
+            pd.to_numeric(df["Prob_Liq"], errors="coerce").fillna(0.0).to_numpy(),
+            df["Tiene_Masiva"].fillna(False).astype(bool).to_numpy(),
+            df["Casa_Cobro"].fillna("").astype(str).to_numpy(),
+            df["Fecha_Limite_Uso"].to_numpy(),
+            df["Usa_Tradicional"].fillna(False).astype(bool).to_numpy(),
+            df["Usa_Credito"].fillna(False).astype(bool).to_numpy(),
+            df["Unidad_Id"].fillna("").astype(str).to_numpy(),
+            df["Etiqueta_Unidad"].fillna("").astype(str).to_numpy(),
+            df["Tipo_Unidad"].fillna("").astype(str).to_numpy(),
+            pd.to_numeric(
+                df["_PaB_Actualizado_Unidad"], errors="coerce"
+            ).fillna(0.0).to_numpy(),
+            df["Pago_Compartido"].fillna(False).astype(bool).to_numpy(),
+        )
+    ]
 
-    df["_Detalle_Deuda"] = df.apply(_detalle, axis=1)
-    detalles_por_unidad = df.groupby("Unidad_Id")["_Detalle_Deuda"].apply(
-        list
-    ).to_dict()
+    detalles_por_unidad: dict[str, list[dict[str, Any]]] = {}
+    for unidad, registro in zip(df["Unidad_Id"].to_numpy(), registros):
+        detalles_por_unidad.setdefault(unidad, []).append(registro)
+
     resultado = unidades.copy()
     resultado["Deudas_Detalle"] = resultado["Unidad_Id"].map(detalles_por_unidad)
     resultado["Deudas_Detalle"] = resultado["Deudas_Detalle"].apply(
@@ -3422,17 +3725,24 @@ def calcular_oportunidades_masivas_datos(
     ia_por_ref = deudas.groupby("Referencia")["Prob_Liq"].max().to_dict()
     ia_detalle_por_ref: dict[str, str] = {}
     ia_ids_por_ref: dict[str, list[str]] = {}
-    ia_deudas = deudas[deudas["Prob_Liq"] >= UMBRAL_PROB_LIQ_IA]
-    for ref, grupo in ia_deudas.groupby("Referencia"):
-        ia_detalle_por_ref[ref] = "; ".join(
-            "ID_Deuda: {} - {:.0%} Prob Liq.".format(
-                _normalizar_id_deuda(row["Id_Deuda"]), row["Prob_Liq"]
-            )
-            for _, row in grupo.iterrows()
+    ia_deudas = deudas[deudas["Prob_Liq"] >= UMBRAL_PROB_LIQ_IA].copy()
+    if not ia_deudas.empty:
+        ia_deudas["_Id_Deuda_Norm"] = ia_deudas["Id_Deuda"].apply(
+            _normalizar_id_deuda
         )
-        ia_ids_por_ref[ref] = [
-            _normalizar_id_deuda(deuda) for deuda in grupo["Id_Deuda"]
-        ]
+        ia_deudas["_Prob_Texto"] = ia_deudas["Prob_Liq"].map(
+            lambda valor: "{:.0%}".format(valor)
+        )
+        ia_deudas["_Detalle"] = (
+            "ID_Deuda: " + ia_deudas["_Id_Deuda_Norm"]
+            + " - " + ia_deudas["_Prob_Texto"] + " Prob Liq."
+        )
+        ia_detalle_por_ref = ia_deudas.groupby(
+            "Referencia", sort=False
+        )["_Detalle"].agg("; ".join).to_dict()
+        ia_ids_por_ref = ia_deudas.groupby(
+            "Referencia", sort=False
+        )["_Id_Deuda_Norm"].agg(list).to_dict()
     base["IA_Liquidadora_Valor"] = base["Referencia"].map(ia_por_ref).fillna(0.0)
     base["IA_Liquidadora_Aplica"] = base["IA_Liquidadora_Valor"] >= UMBRAL_PROB_LIQ_IA
     base["IA_Liquidadora_Detalle"] = base["Referencia"].map(
@@ -3484,46 +3794,52 @@ def calcular_oportunidades_masivas_datos(
         _oportunidades_generales, axis=1
     )
 
-    def _resumen_oportunidades(row: pd.Series) -> pd.Series:
+    portafolios_array = base["Portafolios_Detalle"].to_numpy()
+    generales_array = base["Oportunidades_Generales"].to_numpy()
+    oportunidades_lista: list[list[str]] = []
+    num_calculadas_lista: list[int] = []
+    num_generales_lista: list[int] = []
+    for portafolios_cliente, generales_cliente in zip(
+        portafolios_array, generales_array
+    ):
         nombres = []
         num_calculadas = 0
-        for portafolio in row["Portafolios_Detalle"]:
+        for portafolio in portafolios_cliente:
             for oportunidad in (
                 portafolio.get("Trad_Oportunidades", [])
                 + portafolio.get("Cred_Oportunidades", [])
             ):
                 nombres.append(oportunidad.get("nombre"))
                 num_calculadas += 1
-        generales = row["Oportunidades_Generales"]
-        for oportunidad in generales:
+        for oportunidad in generales_cliente:
             nombres.append(oportunidad.get("nombre"))
-        oportunidades = [
-            nombre for nombre in OPORTUNIDADES if nombre in set(nombres)
-        ]
-        return pd.Series({
-            "Oportunidades": oportunidades,
-            "Num_Oportunidades": num_calculadas + len(generales),
-            "Num_Oportunidades_Calculadas": num_calculadas,
-            "Num_Oportunidades_Generales": len(generales),
-        })
+        nombres_set = set(nombres)
+        oportunidades_lista.append([
+            nombre for nombre in OPORTUNIDADES if nombre in nombres_set
+        ])
+        num_calculadas_lista.append(num_calculadas)
+        num_generales_lista.append(len(generales_cliente))
 
-    base = pd.concat(
-        [base, base.apply(_resumen_oportunidades, axis=1)], axis=1
+    base["Oportunidades"] = oportunidades_lista
+    base["Num_Oportunidades_Calculadas"] = num_calculadas_lista
+    base["Num_Oportunidades_Generales"] = num_generales_lista
+    base["Num_Oportunidades"] = (
+        base["Num_Oportunidades_Calculadas"] + base["Num_Oportunidades_Generales"]
     )
 
-    def _detalles_cliente(row: pd.Series) -> list[dict[str, Any]]:
+    detalles_lista: list[list[dict[str, Any]]] = []
+    for portafolios_cliente in portafolios_array:
         detalles = []
-        for portafolio in row["Portafolios_Detalle"]:
+        for portafolio in portafolios_cliente:
             detalles.extend(portafolio.get("Deudas_Detalle", []))
-        return sorted(
-            detalles,
+        detalles.sort(
             key=lambda detalle: (
                 str(detalle.get("Banco") or ""),
                 str(detalle.get("Id_Deuda") or ""),
-            ),
+            )
         )
-
-    base["Deudas_Detalle"] = base.apply(_detalles_cliente, axis=1)
+        detalles_lista.append(detalles)
+    base["Deudas_Detalle"] = detalles_lista
 
     # Paso 13: Completar Columnas Faltantes y Normalizar Tipos
     base = _asegurar_columnas_resultado_masivo(base)

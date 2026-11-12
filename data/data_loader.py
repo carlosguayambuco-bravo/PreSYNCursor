@@ -1824,6 +1824,11 @@ def load_actualizacines_negos() -> DataFrame[ActualizacionesSchema]:
     # Quitamos datos donde el correo no sea relevante
     actsDF = actsDF[~actsDF['Correo'].isin(CORREOS_NO_RELEVANTES)]
 
+    # Eliminamos duplicados de la misma deuda en el mismo instante: la hoja
+    # puede repetir la gestión por reintentos de escritura o cargas parciales.
+    # Se conserva la última fila escrita, que es la más reciente.
+    actsDF = actsDF.drop_duplicates(subset=["Id_Deuda", "Fecha_Act"], keep="last")
+
     # Cargamos datos del Headcount
     hc_df = load_headcount_negociacion()
 

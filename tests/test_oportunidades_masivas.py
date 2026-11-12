@@ -1,11 +1,16 @@
 # Estándar usando Pep8
 # Librerías de Python
+import time
 import unittest
 # Librerías de Terceros
 import pandas as pd
 # Librerías Locales
 from modules.oportunidades import (
+    _aplicar_pago_unidades,
     _construir_fechas_metabase_acuerdos,
+    _construir_unidades_actualizaciones,
+    _deduplicar_actualizaciones,
+    _resolver_pab_actualizado_actualizaciones,
     calcular_oportunidades_masivas_datos,
     seleccionar_descuentos_masivas,
 )
@@ -956,6 +961,201 @@ class TestPortafolioActualizacionesCalculo(unittest.TestCase):
         self.assertEqual(len(fila["Portafolios_Detalle"]), 2)
         self.assertAlmostEqual(float(fila["PaB_Actualizado_Total"]), 150_000_000)
         self.assertAlmostEqual(float(fila["Descuento_Actual"]), 0.0)
+
+
+class TestActualizacionesDuplicadas(unittest.TestCase):
+    def test_deduplica_mismo_id_y_fecha_conservando_ultima_fila(self):
+        ts_1 = pd.Timestamp("2026-11-01 10:00:00")
+        ts_2 = pd.Timestamp("2026-11-02 10:00:00")
+        acts = pd.DataFrame([
+            {
+                "Id_Deuda": "D1", "Fecha_Act": ts_1,
+                "Etiqueta_Act": "ACUERDO", "PaB_Actualizado": 20_000_000.0,
+                "Correo": "a@x.com",
+            },
+            {
+                "Id_Deuda": "D1", "Fecha_Act": ts_1,
+                "Etiqueta_Act": "ACUERDO", "PaB_Actualizado": 30_000_000.0,
+                "Correo": "a@x.com",
+            },
+            {
+                "Id_Deuda": "D1", "Fecha_Act": ts_2,
+                "Etiqueta_Act": "DEPOSITO", "PaB_Actualizado": 25_000_000.0,
+                "Correo": "a@x.com",
+            },
+        ])
+
+        dedup = _deduplicar_actualizaciones(acts)
+
+        self.assertEqual(len(dedup), 2)
+        fila_duplicada = dedup[dedup["Fecha_Act"] == ts_1].iloc[0]
+        self.assertAlmostEqual(
+            float(fila_duplicada["PaB_Actualizado"]), 30_000_000.0
+        )
+
+    def test_calculo_masivo_usa_la_ultima_fila_duplicada(self):
+        asignacion = pd.DataFrame([{
+            "Referencia": "REF-DUP", "Nombre_Cliente": "Cliente Duplicado",
+            "Banco": "BBVA Colombia", "Id_Deuda": "D1",
+            "PaB_Origen": 100_000_000.0, "Negociador": "Nego D",
+            "Descuento_Esperado": 0.5, "Apartado_Neto": 10_000_000.0,
+            "Pricing": 0.15,
+        }])
+        acts = pd.DataFrame([
+            {
+                "Id_Deuda": "D1",
+                "Fecha_Act": pd.Timestamp("2026-11-01 10:00:00"),
+                "Etiqueta_Act": "ACUERDO",
+                "PaB_Actualizado": 20_000_000.0,
+                "Correo": "a@x.com",
+            },
+            {
+                "Id_Deuda": "D1",
+                "Fecha_Act": pd.Timestamp("2026-11-01 10:00:00"),
+                "Etiqueta_Act": "ACUERDO",
+                "PaB_Actualizado": 30_000_000.0,
+                "Correo": "a@x.com",
+            },
+        ])
+
+        resultado = _calcular(
+            asignacion=asignacion,
+            masivas=pd.DataFrame(),
+            actualizaciones_df=acts,
+            solicitudes_df=pd.DataFrame(),
+            solo_masivas=False,
+            incluir_acuerdos_robo=False,
+        )
+        fila = resultado.iloc[0]
+
+        self.assertEqual(int(fila["Deudas_Analizadas"]), 1)
+        self.assertAlmostEqual(
+            float(fila["PaB_Actualizado_Total"]), 30_000_000.0
+        )
+        self.assertEqual(len(fila["Portafolios_Detalle"]), 1)
+
+
+class TestRendimientoPortafoliosActualizaciones(unittest.TestCase):
+    """Comparación de tiempo del pipeline de portafolios con Actualizaciones.
+
+    Antes de la vectorización, 10k deudas + 4k actualizaciones + 300
+    solicitudes tardaban ~64 s: 37,9 s en ``_construir_unidades_actualizaciones``,
+    21,7 s en ``_aplicar_pago_unidades`` y 4,3 s en resolver Actualizaciones.
+    El umbral de 20 s falla si vuelve una implementación con bucles por cliente
+    o por deuda.
+    """
+
+    N_DEUDAS = 10_000
+    N_ACTUALIZACIONES = 4_000
+    N_SOLICITUDES = 300
+
+    def _datos(self):
+        bancos = [
+            "BBVA Colombia", "Itaú", "Banco de Occidente",
+            "Banco Popular", "Bancolombia",
+        ]
+        etiquetas = [
+            "ACUERDO", "DEPOSITO", "CAMBIO DE PAB",
+            "ACTUALIZADO_ALIANZAS", "LLAMADA",
+        ]
+        deudas = pd.DataFrame([
+            {
+                "Referencia": "REF-{:05d}".format(i // 4),
+                "Nombre_Cliente": "Cliente {}".format(i // 4),
+                "Banco": bancos[i % len(bancos)],
+                "Id_Deuda": "D{:06d}".format(i),
+                "PaB_Origen": float(1_000_000 + (i % 97) * 1_000_000),
+                "Negociador": "Nego {}".format(i % 20),
+                "Descuento_Esperado": float((i % 8) + 1) / 10,
+                "Apartado_Neto": float((i % 5) * 1_000_000),
+                "Pricing": [0.15, 0.20, 0.25][i % 3],
+            }
+            for i in range(self.N_DEUDAS)
+        ])
+
+        base_fecha = pd.Timestamp("2026-10-01")
+        registros_acts = [
+            {
+                "Correo": "correo{}@x.com".format(i % 20),
+                "Id_Deuda": "D{:06d}".format((i * 37) % self.N_DEUDAS),
+                "Fecha_Act": base_fecha + pd.Timedelta(
+                    minutes=(i * 7) % 40_000
+                ),
+                "Etiqueta_Act": etiquetas[i % len(etiquetas)],
+                "PaB_Actualizado": float(1_000_000 + (i % 90) * 1_000_000),
+            }
+            for i in range(self.N_ACTUALIZACIONES)
+        ]
+        # Duplicados de la misma deuda en el mismo instante.
+        registros_acts.extend(registros_acts[:800])
+        actualizaciones = pd.DataFrame(registros_acts)
+
+        masivas = pd.DataFrame([
+            {
+                "Id_Deuda": "D{:06d}".format((i * 11) % self.N_DEUDAS),
+                "PaB_Propuesta": float(1_000_000 + (i % 80) * 1_000_000),
+                "Fecha_Masiva": pd.Timestamp("2026-11-01"),
+                "Fila_Sheets": i + 2,
+                "Casa_Cobro": "ALIADO",
+                "Es_Portafolio": False,
+                "Metadata": {"Fecha_Limite_Uso": pd.Timestamp("2026-12-31")},
+            }
+            for i in range(2_500)
+        ])
+
+        solicitudes = pd.DataFrame([
+            {
+                "Estado_Solicitud": "Exitosa",
+                "Fecha_Respuesta": base_fecha + pd.Timedelta(days=i % 30),
+                "Timestamp": pd.Timestamp("2026-09-01"),
+                "Datos_Solicitud": [
+                    {
+                        "Id_Deuda": "D{:06d}".format(
+                            (i * 13 + j) % self.N_DEUDAS
+                        ),
+                        "Monto_Propuesto": float(
+                            1_000_000 + ((i + j) % 90) * 1_000_000
+                        ),
+                    }
+                    for j in range(3)
+                ],
+                "JSON_Respuesta": [],
+                "Es_Historico": False,
+            }
+            for i in range(self.N_SOLICITUDES)
+        ])
+        return deudas, actualizaciones, masivas, solicitudes
+
+    def test_identifica_unidades_en_menos_de_20_segundos(self):
+        deudas, actualizaciones, masivas, solicitudes = self._datos()
+
+        inicio = time.perf_counter()
+        resueltas = _resolver_pab_actualizado_actualizaciones(
+            deudas=deudas,
+            actualizaciones_df=actualizaciones,
+            masivas_df=masivas,
+            solicitudes_df=solicitudes,
+        )
+        unidades = _construir_unidades_actualizaciones(deudas=resueltas)
+        pagos = _aplicar_pago_unidades(deudas=unidades, solo_masivas=False)
+        duracion = time.perf_counter() - inicio
+
+        self.assertLess(
+            duracion,
+            20.0,
+            "El pipeline de portafolios/unidades tardó {:.2f}s; antes de la "
+            "vectorización tardaba ~64s con 10k deudas.".format(duracion),
+        )
+        self.assertEqual(len(pagos), len(deudas))
+        self.assertTrue((pagos["Unidad_Id"].astype(str) != "").all())
+        self.assertGreater(pagos["Unidad_Id"].nunique(), 0)
+
+        suma_pagos = pagos.groupby("Unidad_Id")["PaB_Actualizado"].sum()
+        total_unidad = pagos.groupby(
+            "Unidad_Id"
+        )["_PaB_Actualizado_Unidad"].first()
+        diferencia_maxima = (suma_pagos - total_unidad).abs().max()
+        self.assertLess(diferencia_maxima, 1e-6)
 
 
 class TestReglaBancos(unittest.TestCase):
