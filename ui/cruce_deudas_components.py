@@ -1224,13 +1224,6 @@ def _fechas_status_detalle(mtdt: dict) -> dict[str, Optional[pd.Timestamp]]:
     # Copiamos el Diccionario para no Mutar la Metadata Original
     crudo = dict(crudo) if isinstance(crudo, dict) else {}
 
-    # Compatibilidad con el Esquema Anterior
-    status_legado = mtdt.get('Cruce_Status')
-    if status_legado in statuses:
-        fecha_legado = _parsear_fecha_detalle(mtdt.get('Fecha_Identificacion'))
-        if fecha_legado is not None:
-            crudo.setdefault(status_legado, fecha_legado)
-
     return {
         status: _parsear_fecha_detalle(crudo.get(status))
         for status in statuses

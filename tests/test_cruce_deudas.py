@@ -374,10 +374,6 @@ class TestPagosYStatusCruce(unittest.TestCase):
             }
         }
         self.assertEqual(obtener_ultimo_status_cruce(metadata), "Subido Alianzas")
-        self.assertEqual(
-            obtener_ultimo_status_cruce({"Cruce_Status": "Reconocido"}),
-            "Reconocido",
-        )
         self.assertEqual(obtener_ultimo_status_cruce({}), "Sin Reconocer")
         self.assertEqual(
             obtener_ultimo_status_cruce({"Ultima_Actualizacion": {"Sin Reconocer": "2026-10-01"}}),

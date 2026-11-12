@@ -545,10 +545,9 @@ def obtener_ultimo_status_cruce(mtdt: dict) -> str:
     statuses = list(get_args(TIPOS_STATUS))
     fechas = mtdt.get('Ultima_Actualizacion')
 
-    # Compatibilidad con el Esquema Anterior (Cruce_Status)
+    # Si no hay Fechas por Status, el Registro aún no se ha Reconocido
     if not isinstance(fechas, dict):
-        status_legacy = mtdt.get('Cruce_Status')
-        return status_legacy if status_legacy in statuses else 'Sin Reconocer'
+        return 'Sin Reconocer'
 
     mejor_status = 'Sin Reconocer'
     mejor_fecha = None

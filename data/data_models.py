@@ -379,7 +379,7 @@ FechasStatusCruce = TypedDict(
 class MetadataPendienteCruce(TypedDict):
     Id_Registro: str
     Archivo_Origen: str
-    # Los Pagos_Cuotas incluyen siempre el Pago a 1 Cuota (el antiguo Monto_Propuesto)
+    # Los Pagos_Cuotas incluyen siempre el Pago a 1 Cuota
     Pagos_Cuotas: List[PagosCuotasCruce]
     Fecha_Limite_Pago: datetime
     Etiqueta: TIPOS_ETIQUETAS
@@ -394,7 +394,7 @@ class MetadataPendienteCruce(TypedDict):
     Id_Definitivo: NotRequired[str]
     Portafolio_Ids: NotRequired[str]
     Monto_Actual_Original: NotRequired[float]
-    # Fecha de Actualización por cada Status (reemplaza a Cruce_Status y Ultima_Actualizacion escalar)
+    # Fecha de Actualización por cada Status del Cruce
     Ultima_Actualizacion: FechasStatusCruce
 
 class PendienteCruceSchema(pa.DataFrameModel):
