@@ -172,7 +172,7 @@ QUALIFY
 
 # Query de dbId = 12
 QUERY_TOTAL_REPARADORAS = """
-SELECT
+SELECT DISTINCT ON (bcrd.id)
     bcrd.id AS Id_Deuda,
     pi.document_number AS Cedula,
     bcr.bank_reference AS Referencia,
@@ -186,11 +186,12 @@ SELECT
 FROM credit_repair_debts AS bcrd
 
 INNER JOIN credit_repairs AS bcr
-    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit')
+    ON bcr.id = bcrd.credit_repair_id AND bcr.country = 'co' AND bcr.status IN ('active','partial_credit','drop')
 LEFT JOIN catalog_financial_entities AS cfe
     ON cfe.id = bcrd.financial_entity_id
 LEFT JOIN personal_information AS pi
     ON pi.credit_repair_id = bcr.id
+ORDER BY bcrd.id, bcrd.inserted_at DESC
 """
 
 # Query de dbId = 12
