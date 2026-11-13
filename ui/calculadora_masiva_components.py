@@ -1,7 +1,7 @@
 # Estándar usando PEP8
 # Librerías de Python
 import math
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 # Librerías de Terceros
 import numpy as np
 import pandas as pd
@@ -79,6 +79,8 @@ LLAVE_RESULTADO_MASIVO = "calc_masiva_resultado"
 LLAVE_PAGINA_MASIVA = "calc_masiva_pagina"
 LLAVE_PAGINA_INPUT_MASIVA = "calc_masiva_pagina_input"
 PREFIJO_FILTROS_MASIVOS = "calc_masiva_filtro_"
+PREFIJO_FILTROS_RESUMEN = "calc_resumen_filtro_"
+LLAVE_FILTROS_COMPARTIDOS = "calc_opps_filtros_compartidos"
 ALTO_MAXIMO_DETALLE_PORTAFOLIOS = 420
 
 # --- Funciones Puras de Paginación y Formato ---
@@ -175,10 +177,118 @@ def _reiniciar_pagina_masiva() -> None:
 def _limpiar_filtros_masivos() -> None:
     """Elimina los filtros y la paginación de un cálculo anterior."""
     for key in list(st.session_state.keys()):
-        if key.startswith(PREFIJO_FILTROS_MASIVOS):
+        if key.startswith(PREFIJO_FILTROS_MASIVOS) or key.startswith(
+            PREFIJO_FILTROS_RESUMEN
+        ):
             del st.session_state[key]
+    st.session_state.pop(LLAVE_FILTROS_COMPARTIDOS, None)
     st.session_state.pop(LLAVE_PAGINA_MASIVA, None)
     st.session_state.pop(LLAVE_PAGINA_INPUT_MASIVA, None)
+
+# --- Estado Compartido de Filtros entre las Pestañas Masiva y Resumen ---
+def _clave_filtro(prefijo: str, nombre: str) -> str:
+    """Devuelve la clave de Session State de un filtro."""
+    return "{}{}".format(prefijo, nombre)
+
+def _filtros_compartidos() -> dict[str, Any]:
+    """Recupera el diccionario de filtros compartidos."""
+    valor = st.session_state.get(LLAVE_FILTROS_COMPARTIDOS, {})
+    return valor if isinstance(valor, dict) else {}
+
+def _valor_filtro_compartido(nombre: str, default: Any) -> Any:
+    """Recupera un filtro compartido o su valor por defecto."""
+    return _filtros_compartidos().get(nombre, default)
+
+def _preparar_texto(
+    *, prefijo: str, nombre: str, default: str
+) -> tuple[str, Optional[str]]:
+    """Devuelve la clave y el valor inicial de un text_input."""
+    clave = _clave_filtro(prefijo, nombre)
+    if clave in st.session_state:
+        return clave, None
+    valor = _valor_filtro_compartido(nombre, default)
+    return clave, str(valor) if valor is not None else default
+
+def _preparar_selectbox(
+    *, prefijo: str, nombre: str, opciones: list[str], default: str
+) -> tuple[str, Optional[int]]:
+    """Devuelve la clave y el índice inicial de un selectbox."""
+    clave = _clave_filtro(prefijo, nombre)
+    if clave in st.session_state:
+        return clave, None
+    valor = _valor_filtro_compartido(nombre, default)
+    if valor not in opciones:
+        valor = default
+    return clave, opciones.index(valor)
+
+def _preparar_multiselect(
+    *, prefijo: str, nombre: str, opciones: list[str], default: list[str]
+) -> tuple[str, Optional[list[str]]]:
+    """Devuelve la clave y la selección inicial de un multiselect."""
+    clave = _clave_filtro(prefijo, nombre)
+    if clave in st.session_state:
+        return clave, None
+    valor = _valor_filtro_compartido(nombre, default)
+    if not isinstance(valor, (list, tuple, set)):
+        valor = default
+    seleccion = [opcion for opcion in valor if opcion in opciones]
+    if valor and not seleccion:
+        # Si ninguna de las opciones guardadas sigue vigente, volvemos a todas.
+        seleccion = list(default)
+    return clave, seleccion
+
+def _preparar_rango(
+    *,
+    prefijo: str,
+    nombre: str,
+    minimo: float,
+    maximo: float,
+    default: tuple[float, float],
+    cast_int: bool = False,
+) -> tuple[str, Optional[tuple[float, float]]]:
+    """Devuelve la clave y el rango inicial de un slider."""
+    clave = _clave_filtro(prefijo, nombre)
+    if clave in st.session_state:
+        return clave, None
+    valor = _valor_filtro_compartido(nombre, default)
+    try:
+        if not isinstance(valor, (list, tuple)) or len(valor) != 2:
+            raise ValueError
+        inferior = min(max(float(valor[0]), float(minimo)), float(maximo))
+        superior = min(max(float(valor[1]), float(minimo)), float(maximo))
+        if inferior > superior:
+            inferior, superior = superior, inferior
+        if cast_int:
+            inferior, superior = int(round(inferior)), int(round(superior))
+        return clave, (inferior, superior)
+    except (TypeError, ValueError):
+        return clave, default
+
+def _preparar_bool(
+    *, prefijo: str, nombre: str, default: bool
+) -> tuple[str, Optional[bool]]:
+    """Devuelve la clave y el valor inicial de un checkbox o toggle."""
+    clave = _clave_filtro(prefijo, nombre)
+    if clave in st.session_state:
+        return clave, None
+    return clave, bool(_valor_filtro_compartido(nombre, default))
+
+def _opciones_lista(df: pd.DataFrame, columna: str) -> list[str]:
+    """Extrae las opciones únicas de una columna que contiene listas."""
+    if columna not in df.columns:
+        return []
+    valores = set()
+    for lista in df[columna].dropna():
+        if isinstance(lista, (list, tuple, set)):
+            for valor in lista:
+                texto = str(valor).strip()
+                if texto:
+                    valores.add(texto)
+        else:
+            texto = str(lista).strip()
+            if texto:
+                valores.add(texto)
+    return sorted(valores)
 
 # --- Filtros de Tipo de Análisis ---
 def _nombres_oportunidades_de_tipo(portafolios: Any, prefijo: str) -> set[str]:
@@ -254,6 +364,19 @@ def _mascara_oportunidades_generales(
             mascara |= df[columna].fillna(False).astype(bool)
     return mascara
 
+def _mascara_lista(
+    df: pd.DataFrame,
+    columna: str,
+    valores: list[str],
+) -> pd.Series:
+    """Marca los clientes que tienen al menos un valor de la lista."""
+    if columna not in df.columns:
+        return pd.Series(True, index=df.index)
+    valores_set = set(valores)
+    return df[columna].apply(
+        lambda lista: bool(set(_normalizar_lista(lista)) & valores_set)
+    )
+
 # --- Filtros de Oportunidades Masivas ---
 def filtrar_oportunidades_masivas(
     df: pd.DataFrame,
@@ -261,6 +384,11 @@ def filtrar_oportunidades_masivas(
     busqueda: str = "",
     negociadores: Optional[list[str]] = None,
     prospectos: Optional[list[str]] = None,
+    prospectos_tradicionales: Optional[list[str]] = None,
+    estados_actualizacion: Optional[list[str]] = None,
+    estados_pipeline: Optional[list[str]] = None,
+    bancos: Optional[list[str]] = None,
+    casas_cobro: Optional[list[str]] = None,
     tipo_analisis: str = OPCION_TODOS,
     oportunidades: Optional[list[str]] = None,
     solo_con_oportunidades: bool = True,
@@ -280,6 +408,15 @@ def filtrar_oportunidades_masivas(
         busqueda (str): Texto a buscar en Referencia o Nombre_Cliente.
         negociadores (Optional[list[str]]): Negociadores seleccionados.
         prospectos (Optional[list[str]]): Prospectos de Crédito seleccionados.
+        prospectos_tradicionales (Optional[list[str]]): Prospectos de
+            Tradicional seleccionados.
+        estados_actualizacion (Optional[list[str]]): Últimas etiquetas de
+            actualización que debe tener al menos una deuda del cliente.
+        estados_pipeline (Optional[list[str]]): Estados del Pipeline de Crédito
+            seleccionados. El valor vacío se trata como "Sin registro en Pipeline".
+        bancos (Optional[list[str]]): Bancos que debe tener al menos una deuda.
+        casas_cobro (Optional[list[str]]): Casas de cobro que debe tener al
+            menos una deuda.
         tipo_analisis (str): Tradicional, Crédito, ambos o Todos. Con
             ``solo_con_oportunidades`` activo se combina con las oportunidades
             para exigir que existan en el bloque del tipo elegido; sin
@@ -327,6 +464,57 @@ def filtrar_oportunidades_masivas(
         prospectos_validos = [p for p in prospectos if str(p).strip()]
         if prospectos_validos:
             resultado = resultado[resultado["Prospecto_Credito"].isin(prospectos_validos)]
+
+    if prospectos_tradicionales:
+        tradicionales_validos = [
+            p for p in prospectos_tradicionales if str(p).strip()
+        ]
+        if (
+            tradicionales_validos
+            and "Prospecto_Tradicional" in resultado.columns
+        ):
+            resultado = resultado[
+                resultado["Prospecto_Tradicional"].isin(tradicionales_validos)
+            ]
+
+    if estados_pipeline:
+        estados_validos = [e for e in estados_pipeline if str(e).strip()]
+        if estados_validos and "Estado_Credito" in resultado.columns:
+            estado = (
+                resultado["Estado_Credito"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+            )
+            estado = estado.where(
+                estado.ne(""), "Sin registro en Pipeline"
+            )
+            resultado = resultado[estado.isin(estados_validos)]
+
+    if estados_actualizacion:
+        estados_validos = [
+            e for e in estados_actualizacion if str(e).strip()
+        ]
+        if estados_validos:
+            resultado = resultado[
+                _mascara_lista(
+                    resultado, "Estados_Actualizacion", estados_validos
+                )
+            ]
+
+    if bancos:
+        bancos_validos = [b for b in bancos if str(b).strip()]
+        if bancos_validos:
+            resultado = resultado[
+                _mascara_lista(resultado, "Bancos", bancos_validos)
+            ]
+
+    if casas_cobro:
+        casas_validas = [c for c in casas_cobro if str(c).strip()]
+        if casas_validas:
+            resultado = resultado[
+                _mascara_lista(resultado, "Casas_Cobro", casas_validas)
+            ]
 
     # Paso 3: Oportunidades Seleccionadas
     seleccionadas = [o for o in (oportunidades or []) if o in OPORTUNIDADES]
@@ -444,14 +632,50 @@ def filtrar_oportunidades_masivas(
     ).reset_index(drop=True)
 
 # --- Render de Filtros ---
-def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
-    """Renderiza los filtros y devuelve sus valores actuales."""
-    negociadores = sorted(
-        df["Negociador"].dropna().astype(str).replace("", "Sin Negociador Asignado").unique().tolist()
-    )
-    prospectos = sorted(df["Prospecto_Credito"].dropna().astype(str).unique().tolist())
+def _mostrar_filtros_masivos(
+    df: pd.DataFrame,
+    *,
+    prefijo: str = PREFIJO_FILTROS_MASIVOS,
+    incluir_orden: bool = True,
+    on_change: Optional[Callable[[], None]] = None,
+) -> dict[str, Any]:
+    """Renderiza los filtros compartidos y devuelve sus valores actuales.
 
-    dum_valores = pd.to_numeric(df["PaB_Origen_Total"], errors="coerce").dropna()
+    Los filtros se comparten entre la pestaña masiva y la de resumen. Cada
+    pestaña usa su propio prefijo de widgets, pero los valores se sincronizan
+    en ``LLAVE_FILTROS_COMPARTIDOS`` para que cambiar de pestaña no los pierda.
+    """
+    negociadores = sorted(
+        df["Negociador"].dropna().astype(str)
+        .replace("", "Sin Negociador Asignado").unique().tolist()
+    )
+    prospectos = sorted(
+        df["Prospecto_Credito"].dropna().astype(str).unique().tolist()
+    )
+    if "Prospecto_Tradicional" in df.columns:
+        prospectos_tradicionales = sorted(
+            df["Prospecto_Tradicional"].dropna().astype(str).str.strip()
+            .replace("", "N/A").unique().tolist()
+        )
+    else:
+        prospectos_tradicionales = []
+    if "Estado_Credito" in df.columns:
+        estados_pipeline = sorted(
+            df["Estado_Credito"].fillna("").astype(str).str.strip()
+            .replace("", "Sin registro en Pipeline").unique().tolist()
+        )
+    else:
+        estados_pipeline = []
+    estados_actualizacion = _opciones_lista(df, "Estados_Actualizacion")
+    bancos = _opciones_lista(df, "Bancos")
+    casas_cobro = _opciones_lista(df, "Casas_Cobro")
+
+    if "PaB_Origen_Total" in df.columns:
+        dum_valores = pd.to_numeric(
+            df["PaB_Origen_Total"], errors="coerce"
+        ).dropna()
+    else:
+        dum_valores = pd.Series(dtype=float)
     dum_min = int(np.floor(dum_valores.min())) if not dum_valores.empty else 0
     dum_max = int(np.ceil(dum_valores.max())) if not dum_valores.empty else 1
     if dum_max <= dum_min:
@@ -459,37 +683,87 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
     dum_paso = max(1, int((dum_max - dum_min) / 100))
 
     st.markdown("### 🔎 Filtros de Oportunidades")
-    colBusqueda, colNegociador, colProspecto, colTipo = st.columns([2, 1.3, 1.7, 1.2])
+    colBusqueda, colNegociador, colProspecto, colProspectoTrad = st.columns(
+        [2, 1.3, 1.5, 1.5]
+    )
     with colBusqueda:
+        clave, valor_inicial = _preparar_texto(
+            prefijo=prefijo, nombre="busqueda", default=""
+        )
+        opciones_busqueda: dict[str, Any] = {
+            "key": clave,
+            "placeholder": "Ej. REF-123 o Nombre",
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_busqueda["value"] = valor_inicial
         busqueda = st.text_input(
-            "**Buscar Referencia o Cliente**",
-            key="{}busqueda".format(PREFIJO_FILTROS_MASIVOS),
-            placeholder="Ej. REF-123 o Nombre",
-            on_change=_reiniciar_pagina_masiva,
+            "**Buscar Referencia o Cliente**", **opciones_busqueda
         )
     with colNegociador:
-        negociador = st.selectbox(
-            "**Negociador**",
-            options=[OPCION_TODOS] + negociadores,
-            index=0,
-            key="{}negociador".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+        clave, indice_inicial = _preparar_selectbox(
+            prefijo=prefijo,
+            nombre="negociador",
+            opciones=[OPCION_TODOS] + negociadores,
+            default=OPCION_TODOS,
         )
+        opciones_negociador: dict[str, Any] = {
+            "options": [OPCION_TODOS] + negociadores,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if indice_inicial is not None:
+            opciones_negociador["index"] = indice_inicial
+        negociador = st.selectbox("**Negociador**", **opciones_negociador)
     with colProspecto:
-        prospectos_sel = st.multiselect(
-            "**Prospecto de Crédito**",
-            options=prospectos,
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="prospecto",
+            opciones=prospectos,
             default=prospectos,
-            key="{}prospecto".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
         )
+        opciones_prospecto: dict[str, Any] = {
+            "options": prospectos,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_prospecto["default"] = seleccion_inicial
+        prospectos_sel = st.multiselect(
+            "**Prospecto de Crédito**", **opciones_prospecto
+        )
+    with colProspectoTrad:
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="prospecto_tradicional",
+            opciones=prospectos_tradicionales,
+            default=prospectos_tradicionales,
+        )
+        opciones_prospecto_trad: dict[str, Any] = {
+            "options": prospectos_tradicionales,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_prospecto_trad["default"] = seleccion_inicial
+        prospectos_trad_sel = st.multiselect(
+            "**Prospecto de Tradicional**", **opciones_prospecto_trad
+        )
+
+    colTipo, colOportunidad, colEstadoPipe, colEstadoAct = st.columns(
+        [1.3, 1.8, 1.4, 1.4]
+    )
     with colTipo:
-        tipo_analisis = st.selectbox(
-            "**Tipo de Análisis**",
-            options=OPCIONES_TIPO_ANALISIS,
-            index=0,
-            key="{}tipo_analisis".format(PREFIJO_FILTROS_MASIVOS),
-            help=(
+        clave, indice_inicial = _preparar_selectbox(
+            prefijo=prefijo,
+            nombre="tipo_analisis",
+            opciones=OPCIONES_TIPO_ANALISIS,
+            default=OPCION_TODOS,
+        )
+        opciones_tipo: dict[str, Any] = {
+            "options": OPCIONES_TIPO_ANALISIS,
+            "key": clave,
+            "help": (
                 "Con 'Solo con oportunidades' activo se combina con la "
                 "Oportunidad: muestra los clientes que la tienen por el tipo "
                 "elegido. Sin oportunidad elegida, exige al menos una "
@@ -498,96 +772,275 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
                 "Ingreso Estimado se calcula solo con las oportunidades de "
                 "este tipo."
             ),
-            on_change=_reiniciar_pagina_masiva,
+            "on_change": on_change,
+        }
+        if indice_inicial is not None:
+            opciones_tipo["index"] = indice_inicial
+        tipo_analisis = st.selectbox(
+            "**Tipo de Análisis**", **opciones_tipo
         )
-
-    colOportunidad, colOrden, colDescuento, colDum = st.columns([2, 1.4, 2, 2])
     with colOportunidad:
-        oportunidades = st.multiselect(
-            "**Oportunidad**",
-            options=OPORTUNIDADES,
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="oportunidad",
+            opciones=OPORTUNIDADES,
             default=[],
-            key="{}oportunidad".format(PREFIJO_FILTROS_MASIVOS),
-            help=(
+        )
+        opciones_oportunidad: dict[str, Any] = {
+            "options": OPORTUNIDADES,
+            "key": clave,
+            "help": (
                 "Sin selección se muestran todas las oportunidades. Al "
                 "combinar con un Tipo de Análisis, la oportunidad debe existir "
                 "en el bloque Tradicional o Crédito elegido. El Ingreso "
                 "Estimado se calcula con las oportunidades seleccionadas."
             ),
-            on_change=_reiniciar_pagina_masiva,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_oportunidad["default"] = seleccion_inicial
+        oportunidades = st.multiselect(
+            "**Oportunidad**", **opciones_oportunidad
         )
-    with colOrden:
-        orden = st.selectbox(
-            "**Ordenar por**",
-            options=OPCIONES_ORDEN_MASIVA,
-            index=0,
-            key="{}orden".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+    with colEstadoPipe:
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="estado_pipeline",
+            opciones=estados_pipeline,
+            default=estados_pipeline,
         )
-        invertir_orden = st.toggle(
-            "**Invertir orden**",
-            value=False,
-            key="{}invertir_orden".format(PREFIJO_FILTROS_MASIVOS),
-            help=(
-                "Cada criterio conserva su orden natural: los montos de mayor a "
-                "menor y las Referencias de A a Z. Actívalo para invertirlo."
-            ),
-            on_change=_reiniciar_pagina_masiva,
+        opciones_estado_pipe: dict[str, Any] = {
+            "options": estados_pipeline,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_estado_pipe["default"] = seleccion_inicial
+        estados_pipeline_sel = st.multiselect(
+            "**Estado del Pipeline**", **opciones_estado_pipe
         )
-    with colDescuento:
-        descuento_min, descuento_max = st.slider(
-            "**Descuento Actual (%)**",
-            min_value=0.0,
-            max_value=100.0,
-            value=(0.0, 100.0),
-            step=0.5,
-            key="{}descuento".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+    with colEstadoAct:
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="estado_actualizacion",
+            opciones=estados_actualizacion,
+            default=estados_actualizacion,
         )
-    with colDum:
-        dum_rango = st.slider(
-            "**DUM Total (COP)**",
-            min_value=int(dum_min),
-            max_value=int(dum_max),
-            value=(int(dum_min), int(dum_max)),
-            step=int(dum_paso),
-            key="{}dum".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+        opciones_estado_act: dict[str, Any] = {
+            "options": estados_actualizacion,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_estado_act["default"] = seleccion_inicial
+        estados_actualizacion_sel = st.multiselect(
+            "**Última Actualización**", **opciones_estado_act
         )
 
-    colSoloOportunidades, colSoloViables, colExcluirLiquidados, colEspacio = st.columns([1.3, 1, 1.5, 2.2])
+    colBanco, colCasa, colDescuento, colDum = st.columns([1.5, 1.5, 2, 2])
+    with colBanco:
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="banco",
+            opciones=bancos,
+            default=bancos,
+        )
+        opciones_banco: dict[str, Any] = {
+            "options": bancos,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_banco["default"] = seleccion_inicial
+        bancos_sel = st.multiselect("**Banco**", **opciones_banco)
+    with colCasa:
+        clave, seleccion_inicial = _preparar_multiselect(
+            prefijo=prefijo,
+            nombre="casa_cobro",
+            opciones=casas_cobro,
+            default=casas_cobro,
+        )
+        opciones_casa: dict[str, Any] = {
+            "options": casas_cobro,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if seleccion_inicial is not None:
+            opciones_casa["default"] = seleccion_inicial
+        casas_sel = st.multiselect(
+            "**Casa de Cobro**", **opciones_casa
+        )
+    with colDescuento:
+        clave, valor_inicial = _preparar_rango(
+            prefijo=prefijo,
+            nombre="descuento",
+            minimo=0.0,
+            maximo=100.0,
+            default=(0.0, 100.0),
+        )
+        opciones_descuento: dict[str, Any] = {
+            "min_value": 0.0,
+            "max_value": 100.0,
+            "step": 0.5,
+            "key": clave,
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_descuento["value"] = valor_inicial
+        descuento_min, descuento_max = st.slider(
+            "**Descuento Actual (%)**", **opciones_descuento
+        )
+    with colDum:
+        clave, valor_inicial = _preparar_rango(
+            prefijo=prefijo,
+            nombre="dum",
+            minimo=float(dum_min),
+            maximo=float(dum_max),
+            default=(float(dum_min), float(dum_max)),
+            cast_int=True,
+        )
+        opciones_dum: dict[str, Any] = {
+            "min_value": int(dum_min),
+            "max_value": int(dum_max),
+            "step": int(dum_paso),
+            "key": clave,
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_dum["value"] = valor_inicial
+        dum_rango = st.slider(
+            "**DUM Total (COP)**", **opciones_dum
+        )
+
+    colSoloOportunidades, colSoloViables, colExcluirLiquidados, colEspacio = (
+        st.columns([1.3, 1, 1.5, 2.2])
+    )
     with colSoloOportunidades:
-        solo_con_oportunidades = st.checkbox(
-            "**Solo con oportunidades**",
-            value=True,
-            key="{}solo_oportunidades".format(PREFIJO_FILTROS_MASIVOS),
-            help=(
+        clave, valor_inicial = _preparar_bool(
+            prefijo=prefijo,
+            nombre="solo_oportunidades",
+            default=True,
+        )
+        opciones_solo_oportunidades: dict[str, Any] = {
+            "key": clave,
+            "help": (
                 "Si está activo, el Tipo de Análisis filtra por las "
                 "oportunidades del bloque Tradicional o Crédito. Si lo "
                 "desactivas, el Tipo de Análisis vuelve a filtrar por "
                 "viabilidad del análisis."
             ),
-            on_change=_reiniciar_pagina_masiva,
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_solo_oportunidades["value"] = valor_inicial
+        solo_con_oportunidades = st.checkbox(
+            "**Solo con oportunidades**", **opciones_solo_oportunidades
         )
     with colSoloViables:
+        clave, valor_inicial = _preparar_bool(
+            prefijo=prefijo,
+            nombre="solo_viables",
+            default=False,
+        )
+        opciones_solo_viables: dict[str, Any] = {
+            "key": clave,
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_solo_viables["value"] = valor_inicial
         solo_viables = st.checkbox(
-            "**Solo viables**",
-            value=False,
-            key="{}solo_viables".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+            "**Solo viables**", **opciones_solo_viables
         )
     with colExcluirLiquidados:
-        excluir_liquidados = st.checkbox(
-            "**Excluir clientes con deudas liquidadas**",
-            value=False,
-            key="{}excluir_liquidados".format(PREFIJO_FILTROS_MASIVOS),
-            on_change=_reiniciar_pagina_masiva,
+        clave, valor_inicial = _preparar_bool(
+            prefijo=prefijo,
+            nombre="excluir_liquidados",
+            default=False,
         )
+        opciones_excluir: dict[str, Any] = {
+            "key": clave,
+            "on_change": on_change,
+        }
+        if valor_inicial is not None:
+            opciones_excluir["value"] = valor_inicial
+        excluir_liquidados = st.checkbox(
+            "**Excluir clientes con deudas liquidadas**", **opciones_excluir
+        )
+
+    if incluir_orden:
+        colOrden, colInvertir, colEspacioOrden = st.columns([1.5, 1, 2.5])
+        with colOrden:
+            clave, indice_inicial = _preparar_selectbox(
+                prefijo=prefijo,
+                nombre="orden",
+                opciones=OPCIONES_ORDEN_MASIVA,
+                default=OPCIONES_ORDEN_MASIVA[0],
+            )
+            opciones_orden: dict[str, Any] = {
+                "options": OPCIONES_ORDEN_MASIVA,
+                "key": clave,
+                "on_change": on_change,
+            }
+            if indice_inicial is not None:
+                opciones_orden["index"] = indice_inicial
+            orden = st.selectbox("**Ordenar por**", **opciones_orden)
+        with colInvertir:
+            clave, valor_inicial = _preparar_bool(
+                prefijo=prefijo,
+                nombre="invertir_orden",
+                default=False,
+            )
+            opciones_invertir: dict[str, Any] = {
+                "key": clave,
+                "help": (
+                    "Cada criterio conserva su orden natural: los montos de "
+                    "mayor a menor y las Referencias de A a Z. Actívalo para "
+                    "invertirlo."
+                ),
+                "on_change": on_change,
+            }
+            if valor_inicial is not None:
+                opciones_invertir["value"] = valor_inicial
+            invertir_orden = st.toggle(
+                "**Invertir orden**", **opciones_invertir
+            )
+    else:
+        compartidos = _filtros_compartidos()
+        orden = compartidos.get("orden", OPCIONES_ORDEN_MASIVA[0])
+        if orden not in OPCIONES_ORDEN_MASIVA:
+            orden = OPCIONES_ORDEN_MASIVA[0]
+        invertir_orden = bool(compartidos.get("invertir_orden", False))
+
+    # Guardamos los valores para que la otra pestaña los recupere
+    st.session_state[LLAVE_FILTROS_COMPARTIDOS] = {
+        "busqueda": busqueda,
+        "negociador": negociador,
+        "prospecto": prospectos_sel,
+        "prospecto_tradicional": prospectos_trad_sel,
+        "tipo_analisis": tipo_analisis,
+        "oportunidad": oportunidades,
+        "estado_pipeline": estados_pipeline_sel,
+        "estado_actualizacion": estados_actualizacion_sel,
+        "banco": bancos_sel,
+        "casa_cobro": casas_sel,
+        "orden": orden,
+        "invertir_orden": invertir_orden,
+        "descuento": (descuento_min, descuento_max),
+        "dum": (dum_rango[0], dum_rango[1]),
+        "solo_oportunidades": solo_con_oportunidades,
+        "solo_viables": solo_viables,
+        "excluir_liquidados": excluir_liquidados,
+    }
 
     return {
         "busqueda": busqueda,
         "negociadores": [negociador] if negociador != OPCION_TODOS else [],
         "prospectos": prospectos_sel,
+        "prospectos_tradicionales": prospectos_trad_sel,
+        "estados_pipeline": estados_pipeline_sel,
+        "estados_actualizacion": estados_actualizacion_sel,
+        "bancos": bancos_sel,
+        "casas_cobro": casas_sel,
         "tipo_analisis": tipo_analisis,
         "oportunidades": oportunidades,
         "solo_con_oportunidades": solo_con_oportunidades,
@@ -901,6 +1354,16 @@ def _mostrar_detalle_deudas(*, cliente: pd.Series) -> None:
                 fecha_limite = ""
         else:
             fecha_limite = ""
+        fecha_actualizacion = deuda.get("Fecha_Actualizacion")
+        if fecha_actualizacion is not None and not pd.isna(fecha_actualizacion):
+            try:
+                fecha_actualizacion = pd.Timestamp(
+                    fecha_actualizacion
+                ).strftime("%d/%m/%Y")
+            except (TypeError, ValueError):
+                fecha_actualizacion = ""
+        else:
+            fecha_actualizacion = ""
         filas.append({
             "Id_Deuda": deuda.get("Id_Deuda", ""),
             "Banco": str(deuda.get("Banco") or ""),
@@ -915,6 +1378,10 @@ def _mostrar_detalle_deudas(*, cliente: pd.Series) -> None:
             "Crédito": "✅" if _es_verdadero(deuda.get("Usa_Credito")) else "❌",
             "Unidad": str(deuda.get("Etiqueta_Unidad") or ""),
             "Casa de Cobro": str(deuda.get("Casa_Cobro") or ""),
+            "Última Actualización": str(
+                deuda.get("Etiqueta_Actualizacion") or "Sin actualización"
+            ),
+            "Fecha Actualización": fecha_actualizacion,
             "Vigente Hasta": fecha_limite,
         })
 
@@ -1399,6 +1866,56 @@ def _mostrar_paginacion_masiva(*, total_registros: int) -> tuple[int, int, int]:
     )
     return int(pagina_actual), int(inicio), int(fin)
 
+# --- Cálculo Compartido entre las Pestañas Masiva y Resumen ---
+def calcular_y_guardar_resultado_masivo(
+    *,
+    solo_masivas: bool,
+) -> Optional[pd.DataFrame]:
+    """Ejecuta el cálculo masivo y guarda el resultado en Session State.
+
+    Args:
+        solo_masivas (bool): Si True, el descuento sale de Masivas; si False,
+            sale de Actualizaciones.
+
+    Returns:
+        Optional[pd.DataFrame]: Resultado calculado o None si falló.
+    """
+    st.session_state.pop(LLAVE_RESULTADO_MASIVO, None)
+    _limpiar_filtros_masivos()
+    barra = st.progress(0.0, text="Iniciando cálculo masivo...")
+
+    def _actualizar_progreso(avance: float, mensaje: str) -> None:
+        barra.progress(float(avance), text=str(mensaje))
+
+    try:
+        with st.spinner("Calculando oportunidades de toda la cartera..."):
+            resultado = calcular_oportunidades_masivas(
+                solo_masivas=bool(solo_masivas),
+                incluir_acuerdos_robo=True,
+                progreso_callback=_actualizar_progreso,
+            )
+    except Exception as exc:
+        barra.empty()
+        st.error(
+            "No se pudo completar el cálculo masivo. Intenta de nuevo o reduce el "
+            "alcance. Detalle: {}".format(exc),
+            icon="❌",
+        )
+        return None
+
+    barra.progress(1.0, text="Cálculo masivo completado.")
+    st.session_state[LLAVE_RESULTADO_MASIVO] = resultado
+    st.session_state["calc_masiva_solo_masivas_aplicado"] = bool(solo_masivas)
+    st.session_state[LLAVE_PAGINA_MASIVA] = 1
+    st.session_state.pop(LLAVE_PAGINA_INPUT_MASIVA, None)
+    st.success(
+        "Cálculo completado: **{}** Referencias analizadas.".format(
+            len(resultado)
+        ),
+        icon="✅",
+    )
+    return resultado
+
 # --- Vista Principal de la Calculadora Masiva ---
 def mostrar_calculadora_masiva() -> None:
     """Muestra la calculadora de oportunidades para toda la cartera habilitada."""
@@ -1441,38 +1958,10 @@ def mostrar_calculadora_masiva() -> None:
             )
 
     if calcular:
-        st.session_state.pop(LLAVE_RESULTADO_MASIVO, None)
-        _limpiar_filtros_masivos()
-        barra = st.progress(0.0, text="Iniciando cálculo masivo...")
-
-        def _actualizar_progreso(avance: float, mensaje: str) -> None:
-            barra.progress(float(avance), text=str(mensaje))
-
-        try:
-            with st.spinner("Calculando oportunidades de toda la cartera..."):
-                resultado = calcular_oportunidades_masivas(
-                    solo_masivas=bool(solo_masivas),
-                    incluir_acuerdos_robo=True,
-                    progreso_callback=_actualizar_progreso,
-                )
-        except Exception as exc:
-            barra.empty()
-            st.error(
-                "No se pudo completar el cálculo masivo. Intenta de nuevo o reduce el "
-                "alcance. Detalle: {}".format(exc),
-                icon="❌",
-            )
+        if calcular_y_guardar_resultado_masivo(
+            solo_masivas=bool(solo_masivas)
+        ) is None:
             return
-
-        barra.progress(1.0, text="Cálculo masivo completado.")
-        st.session_state[LLAVE_RESULTADO_MASIVO] = resultado
-        st.session_state["calc_masiva_solo_masivas_aplicado"] = bool(solo_masivas)
-        st.session_state[LLAVE_PAGINA_MASIVA] = 1
-        st.session_state.pop(LLAVE_PAGINA_INPUT_MASIVA, None)
-        st.success(
-            "Cálculo completado: **{}** Referencias analizadas.".format(len(resultado)),
-            icon="✅",
-        )
 
     resultado = st.session_state.get(LLAVE_RESULTADO_MASIVO)
     if resultado is None:
@@ -1494,6 +1983,9 @@ def mostrar_calculadora_masiva() -> None:
     if (
         "Portafolios_Detalle" not in resultado.columns
         or "Ingreso_Estimado" not in resultado.columns
+        or "Estados_Actualizacion" not in resultado.columns
+        or "Bancos" not in resultado.columns
+        or "Casas_Cobro" not in resultado.columns
     ):
         st.session_state.pop(LLAVE_RESULTADO_MASIVO, None)
         st.warning(
@@ -1535,7 +2027,9 @@ def mostrar_calculadora_masiva() -> None:
 
     # Paso 2: Filtros
     with st.container(border=True):
-        filtros = _mostrar_filtros_masivos(resultado)
+        filtros = _mostrar_filtros_masivos(
+            resultado, on_change=_reiniciar_pagina_masiva
+        )
     filtrado = filtrar_oportunidades_masivas(resultado, **filtros)
 
     st.caption(

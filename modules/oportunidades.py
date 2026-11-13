@@ -1695,6 +1695,9 @@ def _columnas_resultado_masivo() -> list[str]:
         "Es_Viable",
         "Portafolios_Detalle",
         "Deudas_Detalle",
+        "Estados_Actualizacion",
+        "Bancos",
+        "Casas_Cobro",
     ]
 
 # Función Auxiliar para Crear un Resultado Masivo Vacío
@@ -1708,7 +1711,8 @@ def _asegurar_columnas_resultado_masivo(df: pd.DataFrame) -> pd.DataFrame:
     columnas_lista = {
         "Tipos_Analisis", "Oportunidades", "Deudas_Detalle", "Viable_Por",
         "Deudas_Referencia", "Oportunidades_Generales", "Portafolios_Detalle",
-        "Acuerdo_Robo_IDs", "IA_Liquidadora_IDs",
+        "Acuerdo_Robo_IDs", "IA_Liquidadora_IDs", "Estados_Actualizacion",
+        "Bancos", "Casas_Cobro",
     }
     columnas_texto = {
         "Referencia", "Nombre_Cliente", "Negociador", "Prospecto_Credito",
@@ -1907,6 +1911,60 @@ def _deduplicar_actualizaciones(
     return df.drop_duplicates(
         subset=["Id_Deuda", "Fecha_Act"], keep="last"
     ).reset_index(drop=True)
+
+# Función Auxiliar para Mapear la Última Actualización por Deuda
+def _mapear_ultima_actualizacion(
+    *,
+    deudas: pd.DataFrame,
+    actualizaciones_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """Agrega la última etiqueta y fecha de actualización de cada deuda.
+
+    La calculadora masiva usa esta información para el panel de resumen y para
+    los filtros por estado, incluso cuando el Descuento Actual sale de Masivas.
+    No modifica ``PaB_Actualizado``: solo expone la gestión más reciente.
+
+    Args:
+        deudas (pd.DataFrame): Deudas con ``Id_Deuda``.
+        actualizaciones_df (Optional[pd.DataFrame]): Actualizaciones del MEC.
+
+    Returns:
+        pd.DataFrame: Copia de ``deudas`` con ``Etiqueta_Act_Deuda`` y
+        ``Fecha_Act_Deuda``. Las deudas sin actualización quedan vacías/NaT.
+    """
+    resultado = deudas.copy()
+    resultado["Etiqueta_Act_Deuda"] = ""
+    resultado["Fecha_Act_Deuda"] = pd.NaT
+
+    if actualizaciones_df is None or actualizaciones_df.empty:
+        return resultado
+    if not {"Id_Deuda", "Fecha_Act", "Etiqueta_Act"}.issubset(
+        set(actualizaciones_df.columns)
+    ):
+        return resultado
+
+    acts = _deduplicar_actualizaciones(actualizaciones_df)
+    if acts.empty:
+        return resultado
+
+    # Paso 1: Normalizar la etiqueta y quedarnos con la gestión más reciente
+    acts["Etiqueta_Act"] = (
+        acts["Etiqueta_Act"].fillna("").astype(str).str.strip().str.upper()
+    )
+    acts = acts.sort_values(by="Fecha_Act", kind="stable")
+    acts = acts.drop_duplicates(subset=["Id_Deuda"], keep="last")
+
+    mapa_etiqueta = acts.set_index("Id_Deuda")["Etiqueta_Act"].to_dict()
+    mapa_fecha = acts.set_index("Id_Deuda")["Fecha_Act"].to_dict()
+
+    # Paso 2: Cruzar por deuda sin alterar el pago resuelto por Masivas
+    resultado["Etiqueta_Act_Deuda"] = (
+        resultado["Id_Deuda"].map(mapa_etiqueta).fillna("").astype(str)
+    )
+    resultado["Fecha_Act_Deuda"] = pd.to_datetime(
+        resultado["Id_Deuda"].map(mapa_fecha), errors="coerce"
+    )
+    return resultado
 
 # Función Auxiliar para Construir el Mapa del Último Descuento en Base
 def _mapa_ultimo_descuento_masivas(
@@ -2954,6 +3012,8 @@ def _agregar_detalle_unidades(
         "PaB_Actualizado_Deuda_Original": 0.0,
         "_PaB_Actualizado_Unidad": 0.0,
         "Pago_Compartido": False,
+        "Etiqueta_Act_Deuda": "",
+        "Fecha_Act_Deuda": pd.NaT,
     }
     for columna, valor_default in columnas_default.items():
         if columna not in df.columns:
@@ -2989,13 +3049,15 @@ def _agregar_detalle_unidades(
             "Tipo_Unidad": tipo_unidad,
             "PaB_Actualizado_Unidad": pab_unidad,
             "Pago_Compartido": pago_compartido,
+            "Etiqueta_Actualizacion": etiqueta_actualizacion,
+            "Fecha_Actualizacion": fecha_actualizacion,
         }
         for (
             id_deuda, banco, origen, actualizado, actualizado_original,
             descuento_deuda, pab_ideal, prospecto, prob_liq, tiene_masiva,
             casa_cobro, fecha_limite, usa_tradicional, usa_credito,
             unidad_id, etiqueta_unidad, tipo_unidad, pab_unidad,
-            pago_compartido,
+            pago_compartido, etiqueta_actualizacion, fecha_actualizacion,
         ) in zip(
             df["Id_Deuda"].apply(_normalizar_id_deuda).to_numpy(),
             df["Banco"].fillna("").astype(str).to_numpy(),
@@ -3020,6 +3082,8 @@ def _agregar_detalle_unidades(
                 df["_PaB_Actualizado_Unidad"], errors="coerce"
             ).fillna(0.0).to_numpy(),
             df["Pago_Compartido"].fillna(False).astype(bool).to_numpy(),
+            df["Etiqueta_Act_Deuda"].fillna("").astype(str).to_numpy(),
+            df["Fecha_Act_Deuda"].to_numpy(),
         )
     ]
 
@@ -3847,6 +3911,12 @@ def calcular_oportunidades_masivas_datos(
             pd.to_numeric(deudas["PaB_Masiva"], errors="coerce").fillna(0.0),
             deudas["PaB_Origen"],
         )
+        # La última actualización se expone para el panel de resumen y los
+        # filtros por estado, sin cambiar el pago que viene de Masivas.
+        deudas = _mapear_ultima_actualizacion(
+            deudas=deudas,
+            actualizaciones_df=actualizaciones_df,
+        )
         deudas = _construir_unidades_masivas(deudas=deudas)
     else:
         deudas = _resolver_pab_actualizado_actualizaciones(
@@ -4337,6 +4407,36 @@ def calcular_oportunidades_masivas_datos(
         )
         detalles_lista.append(detalles)
     base["Deudas_Detalle"] = detalles_lista
+
+    # Paso 12b: Listas de Estados, Bancos y Casas de Cobro para Filtros y Resumen
+    def _valores_unicos_detalle(
+        detalle: Any,
+        campo: str,
+        etiqueta_vacio: str,
+    ) -> list[str]:
+        if not isinstance(detalle, list) or not detalle:
+            return []
+        valores = set()
+        for deuda in detalle:
+            if not isinstance(deuda, dict):
+                continue
+            valor = str(deuda.get(campo) or "").strip()
+            valores.add(valor or etiqueta_vacio)
+        return sorted(valores)
+
+    base["Estados_Actualizacion"] = base["Deudas_Detalle"].apply(
+        lambda detalle: _valores_unicos_detalle(
+            detalle, "Etiqueta_Actualizacion", "Sin actualización"
+        )
+    )
+    base["Bancos"] = base["Deudas_Detalle"].apply(
+        lambda detalle: _valores_unicos_detalle(detalle, "Banco", "Sin banco")
+    )
+    base["Casas_Cobro"] = base["Deudas_Detalle"].apply(
+        lambda detalle: _valores_unicos_detalle(
+            detalle, "Casa_Cobro", "Sin casa de cobro"
+        )
+    )
 
     # Paso 13: Completar Columnas Faltantes y Normalizar Tipos
     base = _asegurar_columnas_resultado_masivo(base)

@@ -46,6 +46,24 @@ Los filtros de **Oportunidad** y **Tipo de Análisis** recalculan el máximo:
 
 Si un cliente no tiene oportunidades aplicables, su **Ingreso Estimado es 0**, aunque tenga descuento actual sobre sus deudas. El `Ingreso_Actual` se conserva como referencia del descuento actual total del cliente.
 
+## **Panel de Resumen de Oportunidades**
+La tercera pestaña de la calculadora presenta una vista agregada del último cálculo masivo. Reutiliza el resultado de **Oportunidades Masivas** y comparte sus filtros; si no existe un cálculo, permite ejecutarlo desde la misma pestaña.
+
+**Agregación del ingreso:**
+- **Ingreso Estimado Total:** suma del máximo ingreso de cada unidad/portafolio. Para un cliente con dos portafolios con oportunidad, el panel suma el máximo de ambos; la tarjeta del cliente muestra el mayor entre todas sus unidades. Por eso el total del panel puede ser mayor que la suma de las tarjetas.
+- **Ingreso Potencial Total:** suma del ingreso de todas las incidencias de oportunidad. No se suma al Ingreso Estimado porque una misma unidad puede tener varias oportunidades; se muestra como referencia.
+- En las tablas por oportunidad, el **Ingreso Estimado** se atribuye a la oportunidad que ganó el máximo de cada unidad y suma el total del panel. El **Ingreso Potencial** muestra cuánto aportaría cada oportunidad si se consideraran todas sus incidencias.
+- Para las dimensiones de banco y casa de cobro, el ingreso de cada incidencia se reparte entre sus deudas proporcionalmente al `PaB_Origen`, de modo que la suma por dimensión coincide con el total sin multiplicar el ingreso por el número de deudas.
+- El panel solo agrega las oportunidades que los filtros de **Oportunidad** y **Tipo de Análisis** dejaron incluidas en el Ingreso Estimado. Las oportunidades excluidas siguen visibles en las tarjetas de la pestaña masiva, pero no se cuentan en las distribuciones del resumen.
+
+**Dimensiones y estados:**
+- Se muestran oportunidades, clientes, deudas, unidades e ingreso por tipo de oportunidad, tipo de análisis, prospecto de crédito, prospecto de tradicional, negociador, banco, casa de cobro, tipo de unidad y rango de Descuento Actual.
+- Los estados se calculan solo sobre clientes y deudas con al menos una oportunidad. El Pipeline usa el último `Estado_Credito` por cliente; la última actualización usa la etiqueta más reciente por deuda. Los vacíos se muestran como `Sin registro en Pipeline` y `Sin actualización`.
+- En modo **Solo de Masivas**, la última actualización se expone desde Actualizaciones sin cambiar el `PaB_Actualizado` que viene de Masivas.
+- Los filtros de estado, banco y casa de cobro seleccionan clientes con al menos una deuda que cumple; el resumen conserva todas las oportunidades de esos clientes.
+
+**Filtros compartidos:** además de los filtros existentes, la pestaña masiva y el resumen incluyen Prospecto de Tradicional, Estado del Pipeline, Última Actualización, Banco y Casa de Cobro. Los valores se comparten entre pestañas y se guardan en `LLAVE_FILTROS_COMPARTIDOS`.
+
 ## **Depósito Extra**
 Un depósito extra hace referencia a una solicitud al cliente de conseguir un dinero adicional con el fin de liquidar una o más deudas. Estos depósitos se suelen medir en `Apartados Netos` del cliente con el fin de tener una medida estándar entre los 
 

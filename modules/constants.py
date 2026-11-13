@@ -556,5 +556,6 @@ VENTANA_PORTAFOLIO_SEGUNDOS = 45
 # --- Navegación de la Calculadora de Oportunidades ---
 ETIQUETA_TAB_CALCULADORA_INDIVIDUAL = "😁 Calculadora por Referencia"
 ETIQUETA_TAB_CALCULADORA_MASIVA = "🛠️ Oportunidades Masivas"
+ETIQUETA_TAB_CALCULADORA_RESUMEN = "📊 Resumen de Oportunidades"
 LLAVE_TAB_CALCULADORA = "calc_opps_tabs"
 LLAVE_REDIRECCION_CALCULADORA = "calc_opps_redir_pendiente"

@@ -69,7 +69,7 @@ Una respuesta exitosa se propaga automáticamente a las solicitudes espejo que c
 5. La app muestra las oportunidades aplicables: Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora. También permite enviar feedback.
 6. El resultado es informativo: no crea ni modifica solicitudes por sí solo.
 
-> **Estado actual:** la calculadora individual y la calculadora masiva están implementadas. Las fórmulas puras viven en `modules/oportunidades.py`, la UI individual en `ui/calculadora_components.py`, la UI masiva en `ui/calculadora_masiva_components.py` y los tests en `tests/test_oportunidades.py` y `tests/test_oportunidades_masivas.py`. La calculadora masiva usa Masivas cuando el toggle está activo y Actualizaciones cuando está inactivo, y calcula las oportunidades por portafolio/unidad de análisis. Ver sección 6.8.
+> **Estado actual:** la calculadora individual, la calculadora masiva y el panel de resumen están implementados. Las fórmulas puras viven en `modules/oportunidades.py`, la UI individual en `ui/calculadora_components.py`, la UI masiva en `ui/calculadora_masiva_components.py`, la UI del resumen en `ui/calculadora_resumen_components.py`, las agregaciones del resumen en `modules/resumen_oportunidades.py` y los tests en `tests/test_oportunidades.py`, `tests/test_oportunidades_masivas.py` y `tests/test_resumen_oportunidades.py`. La calculadora masiva usa Masivas cuando el toggle está activo y Actualizaciones cuando está inactivo, y calcula las oportunidades por portafolio/unidad de análisis. Ver secciones 6.8, 6.8.1 y 6.8.2.
 
 ### 1.4 Glosario de negocio
 
@@ -188,6 +188,7 @@ PreSYNCursor es una aplicación **Streamlit** que gestiona solicitudes de pago e
 - Consultar cartera, liquidaciones, logs y métricas.
 - Cruzar la cartera de un aliado contra la cartera interna para obtener el **Id Deuda interno** (pestaña "Agregar Cartera").
 - Calcular **oportunidades por Referencia** (Depósito Extra, ContraOferta Viable, Liquidación Instantánea, Acuerdo para Robo e IA Liquidadora) en la calculadora individual y en la **calculadora masiva vectorizada**. La masiva usa Masivas o Actualizaciones según el toggle, calcula por portafolio/unidad de análisis y presenta tarjetas paginadas por cliente; ver sección 6.8.
+- Consultar el **panel de resumen de oportunidades** con KPIs agregados, distribución por oportunidad, tipo de análisis, prospecto, negociador, banco, casa de cobro, tipo de unidad, rangos de descuento y estados de Actualizaciones/Pipeline; ver sección 6.8.2.
 - Cargar **Asignación de Cartera**, **Prospectos de Tradicional** y **Pipeline de Crédito** como fuentes nuevas de la calculadora.
 - Enviar **feedback de la app** a la hoja `Feedback` del spreadsheet de Configs.
 
@@ -307,11 +308,13 @@ Notas:
 | `modules/gest_sols.py` | Reglas de solicitud, comparación de descuentos, distribución de montos, PDFs y notificaciones. |
 | `modules/forms.py` | Fórmulas del monto recomendado, descuento óptimo y validaciones del formulario. |
 | `modules/oportunidades.py` | Acceso a Asignación/Headcount/Prospectos/Pipeline, fórmulas puras de oportunidades y agregador `calcular_oportunidades_referencia`. |
+| `modules/resumen_oportunidades.py` | Agregaciones puras del panel de resumen: detalle por unidad/deuda, KPIs, distribuciones por dimensión y cruces de estado. |
 | `modules/control_masivas.py` | Metadata y distribución de portafolios sobre la Base del Mes ya cargada. |
 | `modules/id_aut_deud/deuda_matcher.py` | Algoritmo de matching de cartera (etiquetas EXACTO/DUPLICADO/AMBIGUO/ADDENDUM/NULO). |
 | `modules/id_aut_deud/helpers.py` | Limpieza, índices, pagos a cuotas, portafolios y preparación de la base del mes. |
 | `ui/calculadora_components.py` | UI de la calculadora individual por Referencia: selección de deudas, simulación de PaB/descuento, viabilidad y oportunidades. |
 | `ui/calculadora_masiva_components.py` | UI de la calculadora masiva: filtros, tarjetas por cliente, oportunidades por portafolio/unidad, ingreso estimado, detalle por portafolio, redirección a la calculadora individual y paginación entera. |
+| `ui/calculadora_resumen_components.py` | UI del panel de resumen: KPIs, tablas, gráficos nativos, distribuciones, estados, detalle y descargas CSV. Comparte el resultado y los filtros con la calculadora masiva. |
 | `ui/forms_components.py` | Componentes del formulario de solicitudes y componente de feedback. |
 | `ui/` | Componentes de presentación y formularios reutilizables. |
 | `views/` | Páginas: subir solicitud, gestionar, ver solicitudes, cartera, calculadora, logs, cache y mando de operaciones. |
@@ -594,7 +597,7 @@ Filtros y panel de personas:
 
 ### 6.8 Cálculo de oportunidades (calculadora)
 
-> **Estado actual:** la **calculadora individual** y la **calculadora masiva** están implementadas. `modules/oportunidades.py` contiene las fórmulas puras (`calcular_*`, `evaluar_*`), el agregador individual `calcular_oportunidades_referencia`, el motor vectorizado `calcular_oportunidades_masivas_datos` y la envoltura de datos `calcular_oportunidades_masivas`. La UI individual vive en `ui/calculadora_components.py` y la masiva en `ui/calculadora_masiva_components.py`. Los tests están en `tests/test_oportunidades.py` y `tests/test_oportunidades_masivas.py`. La fuente de verdad de negocio es `docs/OPORTUNIDADES_DETALLADO.md`.
+> **Estado actual:** la **calculadora individual**, la **calculadora masiva** y el **panel de resumen** están implementados. `modules/oportunidades.py` contiene las fórmulas puras (`calcular_*`, `evaluar_*`), el agregador individual `calcular_oportunidades_referencia`, el motor vectorizado `calcular_oportunidades_masivas_datos` y la envoltura de datos `calcular_oportunidades_masivas`. La UI individual vive en `ui/calculadora_components.py`, la masiva en `ui/calculadora_masiva_components.py` y el resumen en `ui/calculadora_resumen_components.py`; las agregaciones puras del resumen están en `modules/resumen_oportunidades.py`. Los tests están en `tests/test_oportunidades.py`, `tests/test_oportunidades_masivas.py` y `tests/test_resumen_oportunidades.py`. La fuente de verdad de negocio es `docs/OPORTUNIDADES_DETALLADO.md`.
 
 **Fuentes y supuestos:**
 
@@ -739,7 +742,7 @@ La pestaña **🛠️ Oportunidades Masivas** de `views/calculadora_opps.py` eje
   - Métricas: DUM, PaB Actual (Masivas o Actualizaciones según la fuente), Descuento Actual, Ahorro Neto e Ingreso Estimado. Debajo del Ingreso Estimado se indica la unidad/portafolio, la oportunidad y el tipo de análisis que produjo el máximo.
   - Los bloques **Tradicional** y **Crédito lado a lado, con borde**, con una fila por unidad y oportunidad en 4 columnas: Oportunidad, Descripción, Valor y Deudas Involucradas. En la columna de la oportunidad se muestra el ingreso estimado de esa unidad/oportunidad; el máximo del cliente se resalta en verde. Las deudas muestran el nombre de la unidad y su cantidad como `st.caption` y los Ids como badges `🆔`; se inserta `st.divider()` entre oportunidades.
   - El bloque **Oportunidades Generales** con Robo/IA y sus deudas, con el mismo esquema de columnas, captions y separadores. El ingreso de Robo/IA se calcula solo con sus deudas y se muestra el máximo por unidad.
-  - El expander **🔎 Ver deudas analizadas**.
+  - El expander **🔎 Ver deudas analizadas**, que incluye la última actualización y su fecha además de los datos de la deuda.
   - El expander **📦 Detalle por portafolio / unidad de análisis**, con altura fija y scroll, que muestra cada unidad, su Ingreso Actual, su Ingreso Estimado con los filtros vigentes, sus deudas y sus oportunidades.
   - Un popover **🔁 Analizar en la calculadora individual** para escoger la unidad y el tipo de análisis. El botón deja la pestaña individual con la Referencia, las deudas del portafolio en `True`, las demás deudas del cliente en `False`, el tipo de análisis y `Continuar con Cálculo` listos. Limpia la simulación previa de PaB/descuento y el portafolio total.
 - La paginación es local y **siempre usa enteros**: `_normalizar_pagina_actual` convierte strings/floats y `_calcular_slice_pagina` devuelve inicio/fin enteros antes de `iloc`. Los clientes por página se configuran en 10/20/30/50.
@@ -749,6 +752,52 @@ La pestaña **🛠️ Oportunidades Masivas** de `views/calculadora_opps.py` eje
 
 - Validar con negocio si la regla de "sin gestión posterior" del Acuerdo para Robo debe excluir también actualizaciones que no sean de pago (hoy excluye cualquier actualización posterior al `ACUERDO`).
 - Validar el comportamiento de `ACTUALIZADO_ALIANZAS` cuando la metadata de masivas no trae `Fecha_Limite_Uso` y la solicitud exitosa tampoco tiene `Fecha_Respuesta`: hoy se usa el valor de la fila de actualización.
+
+### 6.8.2 Panel de resumen de oportunidades
+
+La tercera pestaña **📊 Resumen de Oportunidades** de `views/calculadora_opps.py` presenta una vista agregada del último cálculo masivo. La UI vive en `ui/calculadora_resumen_components.py` y las agregaciones puras en `modules/resumen_oportunidades.py`. Reutiliza `LLAVE_RESULTADO_MASIVO` y permite recalcular desde la misma pestaña; si no hay resultado, muestra el mismo toggle de fuente y el botón de cálculo.
+
+**Filtros compartidos:**
+
+- La pestaña masiva y la de resumen comparten los valores en `LLAVE_FILTROS_COMPARTIDOS`. Cada pestaña usa su propio prefijo de widgets (`calc_masiva_filtro_` y `calc_resumen_filtro_`) para que cambiar de pestaña no pierda la selección.
+- Filtros actuales: búsqueda por Referencia/Cliente, Negociador, Prospecto de Crédito, Tipo de Análisis, Oportunidad, Solo con oportunidades, Solo viables, rango de Descuento Actual, rango de DUM Total y exclusión de clientes con deudas liquidadas.
+- Filtros nuevos en ambas pestañas: **Prospecto de Tradicional**, **Estado del Pipeline de Crédito**, **Última Actualización**, **Banco** y **Casa de Cobro**.
+- Los filtros de estado, banco y casa de cobro seleccionan clientes con **al menos una** deuda que cumple; el resumen conserva después todas las oportunidades de esos clientes. La última actualización se toma por deuda.
+- La pestaña de resumen no muestra los controles de ordenamiento porque no afectan los agregados.
+
+**Datos nuevos del resultado masivo:**
+
+- `Estados_Actualizacion`: lista de etiquetas de la última actualización de las deudas analizadas del cliente; usa `Sin actualización` cuando no hay gestión.
+- `Bancos` y `Casas_Cobro`: listas de valores únicos de las deudas analizadas.
+- `Deudas_Detalle` agrega `Etiqueta_Actualizacion` y `Fecha_Actualizacion` por deuda.
+- Con **Solo de Masivas de Alianzas** activo, `_mapear_ultima_actualizacion` expone la gestión más reciente de Actualizaciones sin cambiar el `PaB_Actualizado` que viene de Masivas. La actualización nunca altera el pago resuelto por la fuente activa.
+
+**KPIs y tablas:**
+
+- KPIs generales: clientes filtrados, clientes con oportunidad, cobertura de clientes/deudas/unidades, incidencias, deudas con oportunidad, DUM con oportunidad, Ingreso Estimado, Ingreso Potencial, promedios por cliente y por oportunidad e Ingreso/DUM.
+- **Ingreso Estimado Total = suma de los máximos por unidad/portafolio**. Es distinto del `Ingreso_Estimado` de la tarjeta del cliente, que toma el mayor ingreso entre todas sus unidades: un cliente con dos portafolios con oportunidad aporta el máximo de cada uno al panel.
+- **Ingreso Potencial Total = suma de todas las incidencias de oportunidad**. Se muestra como referencia y no se suma al total porque una unidad puede tener varias oportunidades.
+- Tabla por oportunidad: incidencias, clientes, deudas, unidades, Ingreso Estimado (atribuido a la oportunidad que ganó el máximo de cada unidad), Ingreso Potencial y % del ingreso.
+- El resumen solo incluye las oportunidades que el filtro de **Oportunidad** y **Tipo de Análisis** dejó dentro del Ingreso Estimado. Las oportunidades excluidas siguen visibles en las tarjetas de la pestaña masiva, pero no contaminan las distribuciones del resumen.
+- Tabla por tipo de análisis: Tradicional, Crédito y General, con las mismas métricas.
+- Distribuciones: negociador, prospecto de crédito, prospecto de tradicional, banco, casa de cobro, tipo de unidad y rango de Descuento Actual.
+- Para banco y casa de cobro, el ingreso de cada incidencia se asigna proporcionalmente al `PaB_Origen` de sus deudas, de modo que la suma por dimensión coincide con el total sin multiplicar el ingreso por el número de deudas.
+
+**Estados:**
+
+- La población de estados son únicamente los clientes y deudas con al menos una oportunidad.
+- **Pipeline de Crédito:** último `Estado_Credito` por cliente; los vacíos se muestran como `Sin registro en Pipeline`.
+- **Última actualización:** etiqueta más reciente por deuda; los vacíos se muestran como `Sin actualización`.
+- Se muestran distribuciones por estado y cruces **Oportunidad × Pipeline (clientes)** y **Oportunidad × Última Actualización (deudas)**.
+
+**Visualización y descargas:**
+
+- Tablas y gráficos nativos de Streamlit (`st.bar_chart`), con tablas formateadas en COP y porcentajes.
+- Pestañas internas: General, Distribuciones, Estados y Detalle y descarga.
+- El detalle permite buscar por Referencia, cliente, negociador u oportunidad y descargar CSV del detalle por unidad/oportunidad, del detalle por deuda, del resumen por oportunidad y del resumen por negociador.
+- El feedback se guarda con `origin="Calculadora_Resumen_Opps"`.
+
+**Tests:** `tests/test_resumen_oportunidades.py` cubre la construcción del detalle, el máximo por unidad, la suma de máximos por unidad, la asignación de ingreso por deuda/banco, las tablas por dimensión, los cruces de estado, los filtros nuevos, la ausencia de columnas nuevas y la exposición de la última actualización en modo Masivas.
 
 ### 6.9 Carga y transformación de fuentes de la calculadora
 
@@ -884,6 +933,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 | `tests/test_viabilidad.py` | Unión de PDFs y PDFs encriptados. |
 | `tests/test_oportunidades.py` | Parseo de nombres de archivo/hoja de Asignación, prioridades, MEC desde `load_liquidaciones_mec` (`Fecha_Liq.min().normalize().replace(day=1)`) y fallback, alcance de Referencias (admin/líder/negociador), override por secreto, última actualización de deuda, fórmulas de Depósito Extra/ContraOferta/Liquidación Instantánea, descuento mínimo del 3% en Liquidación Instantánea Tradicional (sin aplicarlo a Crédito), Depósito Extra simulado como parte del ahorro, portafolio distribuido por `PaB_Origen`, PaB simulado mayor al Origen, umbrales, `PaB_Actualizado` con etiquetas confiables, fallback a `PaB_Origen` cuando el PaB es 0 y `ACTUALIZADO_ALIANZAS`, Acuerdos para Robo, IA Liquidadora y viabilidad del cliente. |
 | `tests/test_oportunidades_masivas.py` | Selección del mejor descuento vigente de Masivas (fechas vencidas, metadata ausente, empates), metadatos y completitud de portafolios, pago de portafolios de Masivas y de Actualizaciones (valores iguales vs. distintos), deduplicación de Actualizaciones por `Id_Deuda` + `Fecha_Act` conservando la última fila, regla de bancos, cálculo por unidad de Tradicional y Crédito, Crédito por portafolio (todas las deudas con PaB Ideal), `Cr Parcial`/`Tradicional` como restricción de tipo de pago, incidencias de oportunidades, ingreso estimado como máximo por unidad/oportunidad (incluidas Robo/IA con el descuento actual de sus deudas y ContraOferta con el descuento viable), recálculo por filtros de Oportunidad y Tipo de Análisis, origen del máximo (unidad, oportunidad y tipo), ingreso 0 sin oportunidades, orden por ingreso estimado, redirección a la calculadora individual, filtros de la vista masiva, escape de `$` en Markdown, paginación entera y benchmark de portafolios/unidades con 10k deudas (umbral 20 s). |
+| `tests/test_resumen_oportunidades.py` | Panel de resumen: detalle por unidad/oportunidad, máximo por unidad, suma de máximos por unidad, ingreso potencial, asignación de ingreso por deuda/banco, KPIs y coberturas, tablas por oportunidad/tipo/dimensión, cruces Oportunidad × Pipeline/Actualización, filtros por prospecto de tradicional, estado de pipeline, última actualización, banco y casa de cobro, tolerancia a columnas nuevas ausentes y exposición de la última actualización en modo Masivas sin alterar el PaB. |
 | `tests/test_control_masivas.py` | Distribución de portafolios en la Base del Mes (regla de pagos iguales, regla JCAP, portafolio ya distribuido con `PaB_Portafolio`, prioridad sobre la regla especial, uso del valor más reciente y alertas, protección del modo individual no proporcional, deuda nueva con el total repetido, pago faltante e idempotencia), distribución entre fechas distintas de una base subida por partes, separación por Referencia/Casa, detección de fechas con portafolios fuera del alcance, completado y preservación de metadata (incluida la misma configuración de aliado replicada a varias fechas), `Id_Portafolio`/`PaB_Portafolio`, construcción de cambios y log por base. |
 | `tests/test_cache_components.py` | Helper de reinicio de caches: limpia todas las funciones y llaves de `session_state` recibidas, ignora llaves inexistentes y tolera listas vacías. |
 | `tests/test_permisos_especiales.py` | Normalización de `Cargo_Interno` a roles permitidos, descarte de valores inválidos/vacíos, construcción del mapa de roles, tolerancia de la hoja `Usuarios` a columnas adicionales o a la ausencia de `Permisos`, prioridad del rol especial sobre el headcount, fallback al rol del headcount y carga del nombre de Google cuando el usuario no está en el headcount. |
@@ -967,6 +1017,8 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 32. **Rendimiento del cálculo masivo.** La identificación de portafolios/unidades con Actualizaciones está vectorizada por referencia, etiqueta y ventana; no vuelvas a introducir bucles `for referencia, grupo in ...` con `.loc` por grupo ni escaneos de Masivas/Solicitudes por cada actualización. El test `TestRendimientoPortafoliosActualizaciones` (10k deudas, 4k actualizaciones, 300 solicitudes) falla si el pipeline supera 20 s; antes de la optimización tardaba ~64 s.
 33. **Bases por lotes y `PaB_Portafolio`.** Cuando un portafolio ya fue distribuido, `PaB_Propuesta` ya no es el pago total sino la parte de cada deuda. Para poder redistribuirlo al llegar un lote nuevo, `distribuir_portafolios_masivas_con_alertas` usa el `PaB_Portafolio` más reciente del grupo como total y lo reparte entre todas las deudas por `PaB_Origen`. No cambies esa prioridad por la regla de pagos iguales: los pagos ya distribuidos dejarían de coincidir. La regla solo se aplica si los pagos previos son proporcionales a `PaB_Origen` o si una deuda nueva trae el total repetido; de lo contrario se asume `Monto Individual de Portafolio` y se reporta **Portafolio Individual**. Si hay varias fechas con portafolio y el alcance no las incluye todas, la vista solo advierte; el portafolio no se puede reconstruir completo.
 34. **Modo solo metadata del Mando.** El toggle **Distribuir Portafolios** desactivado debe limitarse a `completar_metadata_masivas` y `construir_cambios_masivas`. No agregues allí la consulta a Metabase, `distribuir_portafolios_masivas_con_alertas` ni `actualizar_metadata_portafolios`: el objetivo es no mover `PaB_Propuesta`, `Id_Portafolio` ni `PaB_Portafolio`. La elección del modo forma parte de `firma_actual` para invalidar comparaciones viejas.
+35. **El panel de resumen suma máximos por unidad, no el máximo del cliente.** `Ingreso_Estimado_Total` en `modules/resumen_oportunidades.py` suma el `Ingreso_Estimado` de cada unidad/portafolio. Para un cliente con dos portafolios con oportunidad, el panel puede mostrar más ingreso que la tarjeta del cliente, que toma el mayor entre todas sus unidades. No cambies esa agregación sin actualizar los tests y la sección 6.8.2. El **Ingreso Potencial** suma todas las incidencias y no debe usarse como total porque una unidad puede tener varias oportunidades.
+36. **Filtros compartidos entre masiva y resumen.** Los valores viven en `LLAVE_FILTROS_COMPARTIDOS`; cada pestaña usa su propio prefijo de widgets. No reutilices el mismo `key` de widget en ambas pestañas: Streamlit elimina el estado de los widgets no renderizados y la selección se perdería al cambiar de pestaña. Los filtros de estado/banco/casa seleccionan clientes con al menos una deuda que cumple, no recortan las deudas del cliente.
 
 ---
 
@@ -985,6 +1037,7 @@ La pestaña **🪭Mando de Operaciones** de `views/agregar_cartera.py` controla 
 - [ ] ¿Agregaste tests de la fórmula, los umbrales y los bordes (sin deudas, deuda liquidada, sin PaB Ideal, `Apartado_Neto = 0`, sin actualizaciones) antes de conectar una oportunidad a la UI?
 - [ ] ¿Si tocaste la calculadora masiva, probaste el toggle `Solo de Masivas`, la selección del mejor descuento vigente, la fuente de Actualizaciones con toggle inactivo, los portafolios de Masivas/Actualizaciones/Bancos, `Cr Parcial`/`Tradicional`, Crédito por unidad solo si todas las deudas tienen PaB Ideal, la combinación de Tipo de Análisis con Oportunidad, el Ingreso Estimado como máximo por unidad/oportunidad y su recálculo con los filtros (incluidas Robo/IA), el orden por ingreso y la paginación entera?
 - [ ] ¿Verificaste que la calculadora masiva use Masivas con el toggle activo y Actualizaciones con el toggle inactivo (nunca PaB simulado) y que calcule por portafolio/unidad?
+- [ ] ¿Si tocaste el panel de resumen, probaste que el Ingreso Estimado Total sume los máximos por unidad (no el máximo del cliente), que el Ingreso Potencial no se sume al total, que los filtros se compartan con la pestaña masiva, que los estados usen solo clientes/deudas con oportunidad y que la última actualización no altere el PaB de Masivas?
 - [ ] ¿Verificaste que la Asignación de Cartera tenga `Banco`, `Pricing` válido e `Id_Deuda` único?
 - [ ] ¿Verificaste que `load_liquidaciones_mec()` tenga `Fecha_Liq` válida para calcular el MEC?
 - [ ] ¿Verificaste que `PaB_Actualizado` se extraiga correctamente de `payment_to_bank` (centavos → COP) antes de usarlo en oportunidades?
