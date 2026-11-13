@@ -11,6 +11,7 @@ from modules.oportunidades import (
     _construir_unidades_actualizaciones,
     _deduplicar_actualizaciones,
     _resolver_pab_actualizado_actualizaciones,
+    calcular_ingreso_estimado_oportunidades,
     calcular_oportunidades_masivas_datos,
     seleccionar_descuentos_masivas,
 )
@@ -180,6 +181,54 @@ class TestCalculoMasivoTradicional(unittest.TestCase):
         self.assertEqual(int(fila["Num_Oportunidades"]), 3)
         self.assertEqual(len(fila["Deudas_Detalle"]), 1)
         self.assertIn("Prospecto Tradicional", fila["Credito_Detalle"])
+
+    def test_ingreso_estimado_toma_el_maximo_de_las_oportunidades(self):
+        asignacion, masivas, prospectos = self._datos()
+        resultado = _calcular(
+            asignacion=asignacion,
+            masivas=masivas,
+            saldos={"Saldos": {"REF-TRAD": 50_000_000}, "PorCobrar": {"REF-TRAD": 5_000_000}},
+            prospectos_credito={"REF-TRAD": "Tradicional"},
+            prospectos_tradicional=prospectos,
+        )
+        fila = resultado.iloc[0]
+
+        self.assertAlmostEqual(float(fila["Ingreso_Actual"]), 6_000_000)
+        ingreso_contraoferta = (
+            100_000_000 * float(fila["Trad_Contraoferta_Valor"]) * 0.15
+        )
+        self.assertAlmostEqual(
+            float(fila["Ingreso_Estimado"]), ingreso_contraoferta
+        )
+        self.assertGreater(
+            float(fila["Ingreso_Estimado"]), float(fila["Ingreso_Actual"])
+        )
+        detalle = fila["Ingreso_Estimado_Detalle"]
+        self.assertEqual(detalle["unidad"], "Deuda D1")
+        self.assertEqual(detalle["oportunidad"], "ContraOferta Viable")
+        self.assertEqual(detalle["tipo_analisis"], "Tradicional")
+
+        oportunidades = {
+            oportunidad["nombre"]: oportunidad
+            for oportunidad in fila["Portafolios_Detalle"][0]["Trad_Oportunidades"]
+        }
+        self.assertAlmostEqual(
+            oportunidades["ContraOferta Viable"]["ingreso_estimado"],
+            ingreso_contraoferta,
+        )
+        self.assertTrue(
+            oportunidades["ContraOferta Viable"]["es_ingreso_estimado_maximo"]
+        )
+        self.assertFalse(
+            oportunidades["Depósito Extra"]["es_ingreso_estimado_maximo"]
+        )
+        self.assertAlmostEqual(
+            float(fila["Portafolios_Detalle"][0]["Ingreso_Estimado"]),
+            ingreso_contraoferta,
+        )
+        general = fila["Oportunidades_Generales"][0]
+        self.assertAlmostEqual(float(general["ingreso_estimado"]), 6_000_000)
+        self.assertFalse(general["es_ingreso_estimado_maximo"])
 
     def test_liq_insta_tradicional_exige_descuento_minimo(self):
         asignacion, _, prospectos = self._datos()
@@ -1611,26 +1660,267 @@ class TestResumenOportunidadesPorUnidad(unittest.TestCase):
         self.assertEqual(fila["Oportunidades_Generales"][0]["deudas"], ["D1"])
 
 
+class TestIngresoEstimadoOportunidades(unittest.TestCase):
+    def _unidad(self) -> dict:
+        return {
+            "Unidad_Id": "U1",
+            "Etiqueta": "Portafolio U1",
+            "Tipo_Unidad": "Portafolio Masivas",
+            "Deudas": ["D1", "D2"],
+            "Num_Deudas": 2,
+            "PaB_Origen": 100_000_000.0,
+            "PaB_Actualizado": 70_000_000.0,
+            "Descuento_Actual": 0.3,
+            "Ingreso_Actual": 6_000_000.0,
+            "Pricing": 0.20,
+            "Usa_Tradicional": True,
+            "Usa_Credito": True,
+            "Trad_Oportunidades": [
+                {"nombre": "Depósito Extra", "valor": 1_000_000, "detalle": ""},
+                {"nombre": "ContraOferta Viable", "valor": 0.45, "detalle": ""},
+            ],
+            "Cred_Oportunidades": [
+                {"nombre": "Liquidación Instantánea", "valor": 0.3, "detalle": ""},
+            ],
+            "Oportunidades_Generales": [
+                {
+                    "nombre": "Acuerdo para Robo",
+                    "valor": "1 deuda(s)",
+                    "detalle": "",
+                    "deudas": ["D1"],
+                },
+            ],
+            "Deudas_Detalle": [
+                {
+                    "Id_Deuda": "D1",
+                    "PaB_Origen": 40_000_000.0,
+                    "PaB_Actualizado": 30_000_000.0,
+                },
+                {
+                    "Id_Deuda": "D2",
+                    "PaB_Origen": 60_000_000.0,
+                    "PaB_Actualizado": 40_000_000.0,
+                },
+            ],
+        }
+
+    def test_calcula_ingreso_por_oportunidad_y_toma_el_maximo(self):
+        unidades, ingreso, detalle = calcular_ingreso_estimado_oportunidades(
+            [self._unidad()]
+        )
+        unidad = unidades[0]
+        trad = {
+            oportunidad["nombre"]: oportunidad
+            for oportunidad in unidad["Trad_Oportunidades"]
+        }
+        cred = {
+            oportunidad["nombre"]: oportunidad
+            for oportunidad in unidad["Cred_Oportunidades"]
+        }
+        general = unidad["Oportunidades_Generales"][0]
+
+        self.assertAlmostEqual(
+            trad["Depósito Extra"]["ingreso_estimado"], 6_000_000
+        )
+        self.assertAlmostEqual(
+            trad["ContraOferta Viable"]["ingreso_estimado"], 9_000_000
+        )
+        self.assertAlmostEqual(
+            cred["Liquidación Instantánea"]["ingreso_estimado"], 6_000_000
+        )
+        self.assertAlmostEqual(general["ingreso_estimado"], 2_000_000)
+        self.assertAlmostEqual(ingreso, 9_000_000)
+        self.assertAlmostEqual(unidad["Ingreso_Estimado"], 9_000_000)
+        self.assertEqual(detalle["unidad"], "Portafolio U1")
+        self.assertEqual(detalle["oportunidad"], "ContraOferta Viable")
+        self.assertEqual(detalle["tipo_analisis"], "Tradicional")
+        self.assertTrue(
+            trad["ContraOferta Viable"]["es_ingreso_estimado_maximo"]
+        )
+        self.assertFalse(
+            trad["Depósito Extra"]["es_ingreso_estimado_maximo"]
+        )
+
+    def test_el_filtro_de_tipo_restringe_las_oportunidades(self):
+        _, ingreso, detalle = calcular_ingreso_estimado_oportunidades(
+            [self._unidad()], tipo_analisis="Crédito"
+        )
+        self.assertAlmostEqual(ingreso, 6_000_000)
+        self.assertEqual(detalle["tipo_analisis"], "Crédito")
+
+    def test_la_oportunidad_general_usa_solo_sus_deudas(self):
+        _, ingreso, detalle = calcular_ingreso_estimado_oportunidades(
+            [self._unidad()], oportunidades=["Acuerdo para Robo"]
+        )
+        self.assertAlmostEqual(ingreso, 2_000_000)
+        self.assertEqual(detalle["oportunidad"], "Acuerdo para Robo")
+        self.assertEqual(detalle["tipo_analisis"], "General")
+        self.assertEqual(detalle["deudas"], ["D1"])
+
+    def test_prioriza_liquidacion_instantanea_sobre_deposito_extra_en_empate(self):
+        unidad = self._unidad()
+        unidad["Trad_Oportunidades"] = [
+            {"nombre": "Depósito Extra", "valor": 1_000_000, "detalle": ""},
+            {"nombre": "Liquidación Instantánea", "valor": 0.3, "detalle": ""},
+        ]
+        unidad["Cred_Oportunidades"] = []
+        unidad["Oportunidades_Generales"] = []
+
+        _, ingreso, detalle = calcular_ingreso_estimado_oportunidades([unidad])
+
+        self.assertAlmostEqual(ingreso, 6_000_000)
+        self.assertEqual(detalle["oportunidad"], "Liquidación Instantánea")
+        self.assertEqual(detalle["tipo_analisis"], "Tradicional")
+
+    def test_varias_unidades_toman_el_maximo_y_no_la_suma(self):
+        unidad_1 = self._unidad()
+        unidad_2 = self._unidad()
+        unidad_2["Unidad_Id"] = "U2"
+        unidad_2["Etiqueta"] = "Portafolio U2"
+        unidad_2["Trad_Oportunidades"] = [{
+            "nombre": "Depósito Extra",
+            "valor": 1_000_000,
+            "detalle": "",
+            "ingreso_estimado": 4_000_000,
+        }]
+        unidad_2["Cred_Oportunidades"] = []
+        unidad_2["Oportunidades_Generales"] = []
+
+        unidades, ingreso, detalle = calcular_ingreso_estimado_oportunidades(
+            [unidad_1, unidad_2]
+        )
+
+        self.assertAlmostEqual(ingreso, 9_000_000)
+        self.assertEqual(detalle["unidad"], "Portafolio U1")
+        self.assertAlmostEqual(unidades[0]["Ingreso_Estimado"], 9_000_000)
+        self.assertAlmostEqual(unidades[1]["Ingreso_Estimado"], 4_000_000)
+
+    def test_sin_oportunidades_el_ingreso_es_cero(self):
+        unidad = self._unidad()
+        unidad["Trad_Oportunidades"] = []
+        unidad["Cred_Oportunidades"] = []
+        unidad["Oportunidades_Generales"] = []
+
+        _, ingreso, detalle = calcular_ingreso_estimado_oportunidades([unidad])
+        self.assertAlmostEqual(ingreso, 0.0)
+        self.assertEqual(detalle, {})
+
+    def test_no_modifica_el_portafolio_original(self):
+        unidad = self._unidad()
+        self.assertNotIn("ingreso_estimado", unidad["Trad_Oportunidades"][0])
+        self.assertNotIn(
+            "es_ingreso_estimado_maximo", unidad["Trad_Oportunidades"][1]
+        )
+
+        calcular_ingreso_estimado_oportunidades([unidad])
+
+        self.assertNotIn("ingreso_estimado", unidad["Trad_Oportunidades"][0])
+        self.assertNotIn(
+            "es_ingreso_estimado_maximo", unidad["Trad_Oportunidades"][1]
+        )
+
+
 class TestIngresoYOrden(unittest.TestCase):
-    def _resultado(self):
+    def _unidad(
+        self,
+        *,
+        referencia: str,
+        trad: list[tuple[str, float]] | None = None,
+        cred: list[tuple[str, float]] | None = None,
+        generales: list[tuple[str, float]] | None = None,
+        usa_tradicional: bool = True,
+        usa_credito: bool = True,
+    ) -> dict:
+        id_deuda = "D-{}".format(referencia)
+        return {
+            "Unidad_Id": "U-{}".format(referencia),
+            "Referencia": referencia,
+            "Etiqueta": "Deuda {}".format(referencia),
+            "Tipo_Unidad": "Deuda individual",
+            "Deudas": [id_deuda],
+            "Num_Deudas": 1,
+            "PaB_Origen": 100_000_000.0,
+            "PaB_Actualizado": 60_000_000.0,
+            "Descuento_Actual": 0.4,
+            "Ingreso_Actual": 6_000_000.0,
+            "Pricing": 0.15,
+            "Usa_Tradicional": usa_tradicional,
+            "Usa_Credito": usa_credito,
+            "Trad_Oportunidades": [
+                {
+                    "nombre": nombre,
+                    "valor": 0.4,
+                    "detalle": "",
+                    "ingreso_estimado": ingreso,
+                }
+                for nombre, ingreso in (trad or [])
+            ],
+            "Cred_Oportunidades": [
+                {
+                    "nombre": nombre,
+                    "valor": 0.4,
+                    "detalle": "",
+                    "ingreso_estimado": ingreso,
+                }
+                for nombre, ingreso in (cred or [])
+            ],
+            "Oportunidades_Generales": [
+                {
+                    "nombre": nombre,
+                    "valor": "1 deuda(s)",
+                    "detalle": "",
+                    "deudas": [id_deuda],
+                    "ingreso_estimado": ingreso,
+                }
+                for nombre, ingreso in (generales or [])
+            ],
+            "Deudas_Detalle": [{
+                "Id_Deuda": id_deuda,
+                "PaB_Origen": 100_000_000.0,
+                "PaB_Actualizado": 60_000_000.0,
+            }],
+        }
+
+    def _resultado(self) -> pd.DataFrame:
         return pd.DataFrame([
             {
                 "Referencia": "REF-A", "Nombre_Cliente": "Ana", "Negociador": "Nego A",
                 "Prospecto_Credito": "Batch 1", "Tradicional_Habilitado": True,
-                "Credito_Habilitado": True, "Num_Oportunidades": 2,
-                "Oportunidades": ["Depósito Extra", "IA Liquidadora"], "Es_Viable": True,
+                "Credito_Habilitado": True, "Num_Oportunidades": 3,
+                "Oportunidades": [
+                    "Depósito Extra", "ContraOferta Viable", "IA Liquidadora",
+                ], "Es_Viable": True,
                 "Descuento_Actual": 0.4, "PaB_Origen_Total": 100_000_000,
                 "Ahorro_Neto": 45_000_000, "Tiene_Deudas_Liquidaciones": False,
                 "Ingreso_Actual": 30_000_000,
+                "Portafolios_Detalle": [self._unidad(
+                    referencia="REF-A",
+                    trad=[
+                        ("Depósito Extra", 12_000_000),
+                        ("ContraOferta Viable", 15_000_000),
+                    ],
+                    cred=[("ContraOferta Viable", 8_000_000)],
+                    generales=[("IA Liquidadora", 4_000_000)],
+                )],
+                "Oportunidades_Generales": [{
+                    "nombre": "IA Liquidadora", "valor": 0.6,
+                    "detalle": "", "deudas": ["D-REF-A"],
+                }],
             },
             {
                 "Referencia": "REF-B", "Nombre_Cliente": "Bruno", "Negociador": "Nego B",
                 "Prospecto_Credito": "Tradicional", "Tradicional_Habilitado": True,
                 "Credito_Habilitado": False, "Num_Oportunidades": 1,
-                "Oportunidades": ["ContraOferta Viable"], "Es_Viable": False,
+                "Oportunidades": ["Liquidación Instantánea"], "Es_Viable": False,
                 "Descuento_Actual": 0.2, "PaB_Origen_Total": 50_000_000,
                 "Ahorro_Neto": 10_000_000, "Tiene_Deudas_Liquidaciones": True,
                 "Ingreso_Actual": 5_000_000,
+                "Portafolios_Detalle": [self._unidad(
+                    referencia="REF-B",
+                    trad=[("Liquidación Instantánea", 5_000_000)],
+                    usa_credito=False,
+                )],
+                "Oportunidades_Generales": [],
             },
             {
                 "Referencia": "REF-C", "Nombre_Cliente": "Carla", "Negociador": "Nego A",
@@ -1640,15 +1930,113 @@ class TestIngresoYOrden(unittest.TestCase):
                 "Descuento_Actual": 0.6, "PaB_Origen_Total": 150_000_000,
                 "Ahorro_Neto": 0, "Tiene_Deudas_Liquidaciones": False,
                 "Ingreso_Actual": 60_000_000,
+                "Portafolios_Detalle": [],
+                "Oportunidades_Generales": [],
             },
         ])
 
-    def test_ordena_por_ingreso_por_defecto(self):
+    def _fila(self, resultado: pd.DataFrame, referencia: str) -> pd.Series:
+        return resultado[resultado["Referencia"] == referencia].iloc[0]
+
+    def test_ordena_por_ingreso_estimado_por_defecto(self):
         resultado = filtrar_oportunidades_masivas(
             self._resultado(), solo_con_oportunidades=False
         )
         self.assertEqual(
-            resultado["Referencia"].tolist(), ["REF-C", "REF-A", "REF-B"]
+            resultado["Referencia"].tolist(), ["REF-A", "REF-B", "REF-C"]
+        )
+        self.assertAlmostEqual(
+            float(self._fila(resultado, "REF-A")["Ingreso_Estimado"]),
+            15_000_000,
+        )
+
+    def test_cliente_sin_oportunidades_tiene_ingreso_cero(self):
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(), solo_con_oportunidades=False
+        )
+        fila = self._fila(resultado, "REF-C")
+        self.assertAlmostEqual(float(fila["Ingreso_Estimado"]), 0.0)
+        self.assertEqual(fila["Ingreso_Estimado_Detalle"], {})
+        self.assertAlmostEqual(float(fila["Ingreso_Actual"]), 60_000_000)
+
+    def test_detalle_del_maximo_indica_unidad_oportunidad_y_tipo(self):
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(), solo_con_oportunidades=False
+        )
+        detalle = self._fila(resultado, "REF-A")["Ingreso_Estimado_Detalle"]
+        self.assertEqual(detalle["unidad"], "Deuda REF-A")
+        self.assertEqual(detalle["oportunidad"], "ContraOferta Viable")
+        self.assertEqual(detalle["tipo_analisis"], "Tradicional")
+        self.assertAlmostEqual(float(detalle["ingreso_estimado"]), 15_000_000)
+
+    def test_filtro_oportunidad_recalcula_el_maximo(self):
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(),
+            oportunidades=["Depósito Extra"],
+            solo_con_oportunidades=False,
+            orden="Referencia (A-Z)",
+        )
+        fila = self._fila(resultado, "REF-A")
+        self.assertAlmostEqual(float(fila["Ingreso_Estimado"]), 12_000_000)
+        self.assertEqual(
+            fila["Ingreso_Estimado_Detalle"]["oportunidad"],
+            "Depósito Extra",
+        )
+        trad = fila["Portafolios_Detalle"][0]["Trad_Oportunidades"]
+        self.assertEqual(len(trad), 2)
+        inclusiones = {
+            oportunidad["nombre"]: oportunidad["incluida_en_ingreso_estimado"]
+            for oportunidad in trad
+        }
+        self.assertTrue(inclusiones["Depósito Extra"])
+        self.assertFalse(inclusiones["ContraOferta Viable"])
+        general = fila["Oportunidades_Generales"][0]
+        self.assertAlmostEqual(float(general["ingreso_estimado"]), 0.0)
+        self.assertFalse(general["es_ingreso_estimado_maximo"])
+
+    def test_filtro_tipo_de_analisis_restringe_el_maximo(self):
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(),
+            tipo_analisis="Crédito",
+            solo_con_oportunidades=False,
+            orden="Referencia (A-Z)",
+        )
+        fila = self._fila(resultado, "REF-A")
+        self.assertAlmostEqual(float(fila["Ingreso_Estimado"]), 8_000_000)
+        self.assertEqual(
+            fila["Ingreso_Estimado_Detalle"]["tipo_analisis"], "Crédito"
+        )
+
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(),
+            tipo_analisis="Tradicional",
+            solo_con_oportunidades=False,
+            orden="Referencia (A-Z)",
+        )
+        fila = self._fila(resultado, "REF-A")
+        self.assertAlmostEqual(float(fila["Ingreso_Estimado"]), 15_000_000)
+        self.assertEqual(
+            fila["Ingreso_Estimado_Detalle"]["tipo_analisis"], "Tradicional"
+        )
+
+    def test_oportunidad_general_participa_con_su_ingreso(self):
+        resultado = filtrar_oportunidades_masivas(
+            self._resultado(),
+            oportunidades=["IA Liquidadora"],
+            solo_con_oportunidades=False,
+            orden="Referencia (A-Z)",
+        )
+        fila = self._fila(resultado, "REF-A")
+        self.assertAlmostEqual(float(fila["Ingreso_Estimado"]), 4_000_000)
+        self.assertEqual(
+            fila["Ingreso_Estimado_Detalle"]["oportunidad"],
+            "IA Liquidadora",
+        )
+        self.assertEqual(
+            fila["Ingreso_Estimado_Detalle"]["tipo_analisis"], "General"
+        )
+        self.assertTrue(
+            fila["Oportunidades_Generales"][0]["es_ingreso_estimado_maximo"]
         )
 
     def test_invertir_orden_numerico(self):

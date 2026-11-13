@@ -38,7 +38,7 @@ from modules.constants import (
     UMBRAL_PROB_LIQ_IA,
     VENTANA_PORTAFOLIO_SEGUNDOS,
 )
-from utils.helpers_general import replaceNaN
+from utils.helpers_general import clean_tildes, replaceNaN
 
 # Función Auxiliar para Normalizar un Id de Deuda
 def _normalizar_id_deuda(valor: Any) -> str:
@@ -91,6 +91,13 @@ def _a_bool(valor: Any, default: bool = False) -> bool:
     except (TypeError, ValueError):
         pass
     return bool(valor)
+
+# Función Auxiliar para Convertir un Valor a Lista
+def _a_lista(valor: Any) -> list[Any]:
+    """Devuelve una lista segura para valores que pueden venir como NaN."""
+    if isinstance(valor, (list, tuple, set)):
+        return list(valor)
+    return []
 
 # Función Auxiliar para Convertir un Valor a Timestamp sin Zona Horaria
 def _a_timestamp(valor: Any) -> Optional[pd.Timestamp]:
@@ -1615,6 +1622,8 @@ def _columnas_resultado_masivo() -> list[str]:
         "Descuento_Actual",
         "Pago_Actual",
         "Ingreso_Actual",
+        "Ingreso_Estimado",
+        "Ingreso_Estimado_Detalle",
         "Apartado_Neto",
         "Descuento_Esperado_Ponderado",
         "Deudas_Analizadas",
@@ -1710,6 +1719,7 @@ def _asegurar_columnas_resultado_masivo(df: pd.DataFrame) -> pd.DataFrame:
         "Cred_Contraoferta_Detalle", "Cred_Liq_Insta_Detalle",
         "Acuerdo_Robo_Valor", "Acuerdo_Robo_Detalle", "IA_Liquidadora_Detalle",
     }
+    columnas_dict = {"Ingreso_Estimado_Detalle"}
     columnas_bool = {
         "Tiene_Deudas_Liquidaciones", "Tiene_Pipeline_Credito",
         "No_Opta_Credito", "Rechazo_Credito", "Credito_Viable",
@@ -1729,6 +1739,8 @@ def _asegurar_columnas_resultado_masivo(df: pd.DataFrame) -> pd.DataFrame:
             df[columna] = False
         elif columna in columnas_texto:
             df[columna] = ""
+        elif columna in columnas_dict:
+            df[columna] = [{} for _ in range(len(df))]
         else:
             df[columna] = 0
     return df
@@ -3022,6 +3034,119 @@ def _agregar_detalle_unidades(
     )
     return resultado
 
+# Función Auxiliar para Obtener los Valores de Ingreso de una Unidad
+def _valores_ingreso_unidad(
+    *,
+    fila: Any,
+    prefijo: str,
+) -> tuple[float, float, float]:
+    """Devuelve ``(DUM, PaB Actual, Pricing)`` de una unidad y un tipo.
+
+    Se usan las columnas del bloque (``Trad_*`` o ``Cred_*``) y se cae a los
+    totales generales de la unidad cuando el bloque no las trae. Esto permite
+    reutilizar la función tanto con el registro interno del cálculo como con el
+    diccionario de ``Portafolios_Detalle`` que consume la UI.
+    """
+    pricing = _a_float(fila.get("Pricing"), default=0.0)
+    origen = _a_float(
+        fila.get("{}_PaB_Origen_Total".format(prefijo)), default=np.nan
+    )
+    actualizado = _a_float(
+        fila.get("{}_PaB_Actualizado_Total".format(prefijo)), default=np.nan
+    )
+    if pd.isna(origen):
+        origen = _a_float(fila.get("PaB_Origen_Total"), default=np.nan)
+    if pd.isna(origen):
+        origen = _a_float(fila.get("PaB_Origen"), default=np.nan)
+    if pd.isna(actualizado):
+        actualizado = _a_float(
+            fila.get("PaB_Actualizado_Total"), default=np.nan
+        )
+    if pd.isna(actualizado):
+        actualizado = _a_float(fila.get("PaB_Actualizado"), default=np.nan)
+    return (
+        0.0 if pd.isna(origen) else float(origen),
+        0.0 if pd.isna(actualizado) else float(actualizado),
+        max(float(pricing), 0.0),
+    )
+
+# Función Auxiliar para Calcular el Ingreso de una Oportunidad Calculada
+def _ingreso_estimado_oportunidad(
+    *,
+    fila: Any,
+    prefijo: str,
+    nombre: str,
+    valor: Any,
+) -> float:
+    """Calcula el ingreso de una oportunidad de una unidad.
+
+    ``Depósito Extra`` y ``Liquidación Instantánea`` usan el Descuento Actual
+    de la unidad. ``ContraOferta Viable`` usa el descuento viable calculado
+    (``DUM * contraoferta * Pricing``), que equivale a
+    ``(DUM - pago viable) * Pricing``. Siempre se calcula sin IVA.
+    """
+    origen, actualizado, pricing = _valores_ingreso_unidad(
+        fila=fila, prefijo=prefijo
+    )
+    if nombre == "ContraOferta Viable":
+        descuento_viable = min(max(_a_float(valor), 0.0), 1.0)
+        return max(origen * descuento_viable * pricing, 0.0)
+    return max((origen - actualizado) * pricing, 0.0)
+
+# Función Auxiliar para Calcular el Ingreso de una Oportunidad General
+def _ingreso_estimado_oportunidad_general(
+    *,
+    fila: Any,
+    deudas: Any,
+) -> float:
+    """Calcula el ingreso de Robo/IA con el Descuento Actual de sus deudas.
+
+    A diferencia de las oportunidades por unidad, una oportunidad general
+    cubre solo algunas deudas. Por eso el ingreso se calcula únicamente sobre
+    las deudas involucradas y no sobre el total de la unidad.
+    """
+    pricing = max(_a_float(fila.get("Pricing"), default=0.0), 0.0)
+    detalles = fila.get("Deudas_Detalle")
+    if not isinstance(detalles, list) or not detalles:
+        return 0.0
+    mapa_detalles: dict[str, dict[str, Any]] = {}
+    for detalle in detalles:
+        if not isinstance(detalle, dict):
+            continue
+        id_deuda = _normalizar_id_deuda(detalle.get("Id_Deuda"))
+        if id_deuda:
+            mapa_detalles[id_deuda] = detalle
+    total = 0.0
+    for deuda in _a_lista(deudas):
+        detalle = mapa_detalles.get(_normalizar_id_deuda(deuda))
+        if detalle is None:
+            continue
+        origen = _a_float(detalle.get("PaB_Origen"), default=0.0)
+        actualizado = _a_float(detalle.get("PaB_Actualizado"), default=0.0)
+        total += max(origen - actualizado, 0.0)
+    return max(total * pricing, 0.0)
+
+# Función Auxiliar para Etiquetar el Tipo de Análisis de una Oportunidad
+def _etiqueta_tipo_analisis(prefijo: str) -> str:
+    """Traduce el prefijo interno al nombre del tipo de análisis."""
+    return "Tradicional" if prefijo == "Trad" else "Crédito"
+
+# Prioridad para Desempatar el Ingreso Estimado
+PRIORIDAD_INGRESO_ESTIMADO = {
+    "Liquidación Instantánea": 0,
+    "ContraOferta Viable": 1,
+    "Depósito Extra": 2,
+    "Acuerdo para Robo": 3,
+    "IA Liquidadora": 4,
+}
+
+# Función Auxiliar para Obtener la Prioridad de una Oportunidad
+def _prioridad_ingreso(oportunidad: dict[str, Any]) -> int:
+    """Devuelve la prioridad de desempate de una oportunidad."""
+    return PRIORIDAD_INGRESO_ESTIMADO.get(
+        str(oportunidad.get("nombre") or ""), 99
+    )
+
 # Función Auxiliar para Construir las Oportunidades de una Unidad
 def _oportunidades_de_unidad(
     *,
@@ -3052,10 +3177,18 @@ def _oportunidades_de_unidad(
         config = configuracion[nombre]
         if not _a_bool(fila.get(config["aplica"].format(prefijo), False)):
             continue
+        valor = fila.get(config["valor"].format(prefijo), 0.0)
         resultado.append({
             "nombre": nombre,
-            "valor": fila.get(config["valor"].format(prefijo), 0.0),
+            "valor": valor,
             "detalle": str(fila.get(config["detalle"].format(prefijo), "")),
+            "ingreso_estimado": _ingreso_estimado_oportunidad(
+                fila=fila,
+                prefijo=prefijo,
+                nombre=nombre,
+                valor=valor,
+            ),
+            "tipo_analisis": _etiqueta_tipo_analisis(prefijo),
         })
     return resultado
 
@@ -3116,6 +3249,11 @@ def _construir_portafolios_detalle(
                     for deuda, fecha in robo_items
                 ),
                 "deudas": [deuda for deuda, _ in robo_items],
+                "ingreso_estimado": _ingreso_estimado_oportunidad_general(
+                    fila=registro,
+                    deudas=[deuda for deuda, _ in robo_items],
+                ),
+                "tipo_analisis": "General",
             })
         ia_deudas = [
             deuda for deuda in ia_ids_por_ref.get(referencia, [])
@@ -3135,6 +3273,11 @@ def _construir_portafolios_detalle(
                     for deuda in ia_deudas
                 ),
                 "deudas": ia_deudas,
+                "ingreso_estimado": _ingreso_estimado_oportunidad_general(
+                    fila=registro,
+                    deudas=ia_deudas,
+                ),
+                "tipo_analisis": "General",
             })
 
         # Paso 2: Lista Única de Oportunidades para los Badges
@@ -3162,6 +3305,9 @@ def _construir_portafolios_detalle(
             ),
             "Descuento_Actual": _a_float(registro.get("Descuento_Actual")),
             "Ingreso_Actual": _a_float(registro.get("Ingreso_Actual")),
+            "Ingreso_Estimado": 0.0,
+            "Ingreso_Estimado_Detalle": {},
+            "Pricing": _a_float(registro.get("Pricing")),
             "Pago_Compartido": _a_bool(registro.get("Pago_Compartido")),
             "Tiene_Todas_PaB_Ideal": _a_bool(
                 registro.get("Tiene_Todas_PaB_Ideal")
@@ -3176,6 +3322,337 @@ def _construir_portafolios_detalle(
             "Oportunidades": oportunidades,
             "Deudas_Detalle": registro.get("Deudas_Detalle", []),
         })
+    return resultado
+
+
+# --- Cálculo del Ingreso Estimado por Oportunidad ---
+
+def _normalizar_tipos_ingreso(tipo_analisis: str) -> tuple[set[str], str]:
+    """Traduce el tipo de análisis a los prefijos y al contexto del cálculo.
+
+    Returns:
+        tuple[set[str], str]: Prefijos habilitados (``Trad``/``Cred``) y el
+        contexto para etiquetar las oportunidades generales: ``tradicional``,
+        ``credito`` o ``general``.
+    """
+    texto = clean_tildes(str(tipo_analisis or "")).casefold()
+    if "tradicional" in texto and "credito" in texto:
+        return {"Trad", "Cred"}, "general"
+    if "credito" in texto:
+        return {"Cred"}, "credito"
+    if "tradicional" in texto:
+        return {"Trad"}, "tradicional"
+    return {"Trad", "Cred"}, "general"
+
+# Función Auxiliar para Construir el Detalle del Ingreso Estimado
+def _construir_detalle_ingreso(
+    *,
+    unidad: dict[str, Any],
+    oportunidad: dict[str, Any],
+) -> dict[str, Any]:
+    """Construye el diccionario que explica de dónde sale el ingreso."""
+    deudas = oportunidad.get("deudas")
+    if not isinstance(deudas, list) or not deudas:
+        deudas = _a_lista(unidad.get("Deudas"))
+    return {
+        "unidad": str(
+            unidad.get("Etiqueta") or unidad.get("Unidad_Id") or "Unidad"
+        ),
+        "unidad_id": str(unidad.get("Unidad_Id") or ""),
+        "tipo_unidad": str(unidad.get("Tipo_Unidad") or ""),
+        "oportunidad": str(oportunidad.get("nombre") or ""),
+        "tipo_analisis": str(oportunidad.get("tipo_analisis") or ""),
+        "ingreso_estimado": _a_float(oportunidad.get("ingreso_estimado")),
+        "deudas": list(deudas),
+    }
+
+# Función para Calcular el Ingreso Estimado de un Cliente
+def calcular_ingreso_estimado_oportunidades(
+    portafolios: Any,
+    *,
+    tipo_analisis: str = "Todos",
+    oportunidades: Optional[list[str]] = None,
+) -> tuple[list[dict[str, Any]], float, dict[str, Any]]:
+    """Calcula el ingreso estimado como el máximo entre las oportunidades.
+
+    El ingreso se calcula por unidad/portafolio y por oportunidad, no sobre
+    todas las deudas del cliente. Las oportunidades generales (Acuerdo para
+    Robo e IA Liquidadora) usan el Descuento Actual de las deudas que cubren.
+
+    Args:
+        portafolios (Any): Lista de unidades de ``Portafolios_Detalle``.
+        tipo_analisis (str): ``Todos``, ``Tradicional``, ``Crédito`` o
+            ``Tradicional y Crédito``. Siempre restringe el cálculo.
+        oportunidades (Optional[list[str]]): Nombres seleccionados en el filtro
+            de Oportunidad. Si está vacío, se usan todas.
+
+    Returns:
+        tuple[list[dict], float, dict]: Unidades copiadas y enriquecidas con el
+        ingreso de cada oportunidad, el máximo ingreso del cliente y el detalle
+        del origen de ese máximo.
+    """
+    prefijos_permitidos, contexto_tipo = _normalizar_tipos_ingreso(
+        tipo_analisis
+    )
+    nombres_permitidos = {
+        str(nombre).strip()
+        for nombre in (oportunidades or [])
+        if str(nombre).strip()
+    }
+    filtrar_por_nombre = bool(nombres_permitidos)
+
+    unidades_resultado: list[dict[str, Any]] = []
+    mejor_ingreso = 0.0
+    mejor_oportunidad: Optional[dict[str, Any]] = None
+    mejor_detalle: dict[str, Any] = {}
+
+    for unidad in portafolios or []:
+        if not isinstance(unidad, dict):
+            continue
+        unidad_copia = dict(unidad)
+        candidatos: list[dict[str, Any]] = []
+        usa_tradicional = _a_bool(unidad.get("Usa_Tradicional"))
+        usa_credito = _a_bool(unidad.get("Usa_Credito"))
+
+        # Paso 1: Oportunidades Calculadas (Tradicional y Crédito)
+        for prefijo, etiqueta in (("Trad", "Tradicional"), ("Cred", "Crédito")):
+            clave_lista = "{}_Oportunidades".format(prefijo)
+            habilitado = (
+                usa_tradicional if prefijo == "Trad" else usa_credito
+            )
+            incluye_tipo = prefijo in prefijos_permitidos and habilitado
+            oportunidades_unidad = []
+            for oportunidad in _a_lista(unidad.get(clave_lista, [])):
+                if not isinstance(oportunidad, dict):
+                    continue
+                nombre = str(oportunidad.get("nombre") or "").strip()
+                copia = dict(oportunidad)
+                copia["tipo_analisis"] = etiqueta
+                copia["es_ingreso_estimado_maximo"] = False
+                ingreso = (
+                    _a_float(copia.get("ingreso_estimado"), default=np.nan)
+                    if "ingreso_estimado" in copia else np.nan
+                )
+                if pd.isna(ingreso):
+                    ingreso = _ingreso_estimado_oportunidad(
+                        fila=unidad,
+                        prefijo=prefijo,
+                        nombre=nombre,
+                        valor=copia.get("valor", 0.0),
+                    )
+                copia["ingreso_estimado"] = max(float(ingreso), 0.0)
+                incluida = incluye_tipo and (
+                    not filtrar_por_nombre or nombre in nombres_permitidos
+                )
+                copia["incluida_en_ingreso_estimado"] = bool(incluida)
+                oportunidades_unidad.append(copia)
+                if incluida:
+                    candidatos.append(copia)
+            unidad_copia[clave_lista] = oportunidades_unidad
+
+        # Paso 2: Oportunidades Generales (Robo e IA)
+        generales_habilitadas = (
+            (contexto_tipo == "tradicional" and usa_tradicional)
+            or (contexto_tipo == "credito" and usa_credito)
+            or (
+                contexto_tipo == "general"
+                and (usa_tradicional or usa_credito)
+            )
+        )
+        generales = []
+        for oportunidad in _a_lista(unidad.get("Oportunidades_Generales", [])):
+            if not isinstance(oportunidad, dict):
+                continue
+            nombre = str(oportunidad.get("nombre") or "").strip()
+            copia = dict(oportunidad)
+            copia["tipo_analisis"] = (
+                "Tradicional" if contexto_tipo == "tradicional"
+                else "Crédito" if contexto_tipo == "credito"
+                else "General"
+            )
+            copia["es_ingreso_estimado_maximo"] = False
+            ingreso = (
+                _a_float(copia.get("ingreso_estimado"), default=np.nan)
+                if "ingreso_estimado" in copia else np.nan
+            )
+            if pd.isna(ingreso):
+                ingreso = _ingreso_estimado_oportunidad_general(
+                    fila=unidad,
+                    deudas=copia.get("deudas", []),
+                )
+            copia["ingreso_estimado"] = max(float(ingreso), 0.0)
+            incluida = generales_habilitadas and (
+                not filtrar_por_nombre or nombre in nombres_permitidos
+            )
+            copia["incluida_en_ingreso_estimado"] = bool(incluida)
+            generales.append(copia)
+            if incluida:
+                candidatos.append(copia)
+        unidad_copia["Oportunidades_Generales"] = generales
+
+        # Paso 3: Máximo de la Unidad y del Cliente
+        candidatos.sort(
+            key=lambda candidato: (
+                -_a_float(candidato.get("ingreso_estimado")),
+                _prioridad_ingreso(candidato),
+            )
+        )
+        ingreso_unidad = 0.0
+        detalle_unidad: dict[str, Any] = {}
+        for candidato in candidatos:
+            ingreso = _a_float(candidato.get("ingreso_estimado"))
+            if ingreso <= 0:
+                continue
+            detalle = _construir_detalle_ingreso(
+                unidad=unidad, oportunidad=candidato
+            )
+            if ingreso > ingreso_unidad:
+                ingreso_unidad = ingreso
+                detalle_unidad = detalle
+            if ingreso > mejor_ingreso:
+                mejor_ingreso = ingreso
+                mejor_oportunidad = candidato
+                mejor_detalle = detalle
+        unidad_copia["Ingreso_Estimado"] = float(ingreso_unidad)
+        unidad_copia["Ingreso_Estimado_Detalle"] = detalle_unidad
+        unidades_resultado.append(unidad_copia)
+
+    if mejor_oportunidad is not None:
+        mejor_oportunidad["es_ingreso_estimado_maximo"] = True
+    return unidades_resultado, float(mejor_ingreso), mejor_detalle
+
+# Función Auxiliar para Sincronizar las Oportunidades Generales del Cliente
+def _sincronizar_oportunidades_generales(
+    *,
+    generales: Any,
+    unidades: list[dict[str, Any]],
+    detalle_maximo: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Actualiza el ingreso y el máximo de las oportunidades generales.
+
+    La lista del cliente agrupa Robo/IA por nombre. El ingreso que se muestra
+    es el **máximo por unidad**, igual que el cálculo del Ingreso Estimado, y
+    no la suma de todas las unidades. Así el valor coincide con la oportunidad
+    que compite por el máximo del cliente.
+    """
+    base = [dict(op) for op in _a_lista(generales) if isinstance(op, dict)]
+    if not base:
+        return []
+    por_nombre: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for unidad in unidades:
+        for oportunidad in _a_lista(unidad.get("Oportunidades_Generales", [])):
+            if not isinstance(oportunidad, dict):
+                continue
+            nombre = str(oportunidad.get("nombre") or "").strip()
+            por_nombre.setdefault(nombre, []).append((unidad, oportunidad))
+    for oportunidad in base:
+        nombre = str(oportunidad.get("nombre") or "").strip()
+        candidatos = [
+            (unidad, candidata)
+            for unidad, candidata in por_nombre.get(nombre, [])
+            if _a_bool(candidata.get("incluida_en_ingreso_estimado", True))
+        ]
+        if not candidatos:
+            oportunidad["ingreso_estimado"] = 0.0
+            oportunidad["tipo_analisis"] = "General"
+            oportunidad["unidad"] = ""
+            oportunidad["unidad_id"] = ""
+            oportunidad["es_ingreso_estimado_maximo"] = False
+            continue
+        unidad_max, oportunidad_max = max(
+            candidatos,
+            key=lambda par: _a_float(par[1].get("ingreso_estimado")),
+        )
+        ingreso = _a_float(oportunidad_max.get("ingreso_estimado"))
+        unidad_id = str(unidad_max.get("Unidad_Id") or "")
+        oportunidad["ingreso_estimado"] = ingreso
+        oportunidad["tipo_analisis"] = str(
+            oportunidad_max.get("tipo_analisis") or "General"
+        )
+        oportunidad["unidad"] = str(
+            unidad_max.get("Etiqueta") or unidad_id or "Unidad"
+        )
+        oportunidad["unidad_id"] = unidad_id
+        oportunidad["es_ingreso_estimado_maximo"] = bool(
+            detalle_maximo
+            and str(detalle_maximo.get("oportunidad") or "") == nombre
+            and str(detalle_maximo.get("unidad_id") or "") == unidad_id
+            and np.isclose(
+                _a_float(detalle_maximo.get("ingreso_estimado")), ingreso
+            )
+        )
+    return base
+
+# Función para Calcular el Ingreso Estimado en el Resultado Masivo
+def calcular_ingreso_estimado_masivo(
+    df: pd.DataFrame,
+    *,
+    tipo_analisis: str = "Todos",
+    oportunidades: Optional[list[str]] = None,
+) -> pd.DataFrame:
+    """Agrega ``Ingreso_Estimado`` y su detalle al DataFrame masivo.
+
+    Se recalcula con los filtros vigentes de la vista. Los clientes sin
+    oportunidades aplicables quedan con ingreso 0 y detalle vacío.
+    """
+    if df is None:
+        return pd.DataFrame({
+            "Ingreso_Estimado": pd.Series(dtype=float),
+            "Ingreso_Estimado_Detalle": pd.Series(dtype=object),
+        })
+    resultado = df.copy()
+    if resultado.empty:
+        resultado["Ingreso_Estimado"] = pd.Series(dtype=float)
+        resultado["Ingreso_Estimado_Detalle"] = pd.Series(dtype=object)
+        return resultado
+
+    portafolios_lista = (
+        resultado["Portafolios_Detalle"].tolist()
+        if "Portafolios_Detalle" in resultado.columns
+        else [None] * len(resultado)
+    )
+    generales_lista = (
+        resultado["Oportunidades_Generales"].tolist()
+        if "Oportunidades_Generales" in resultado.columns
+        else [None] * len(resultado)
+    )
+    portafolios_nuevos: list[list[dict[str, Any]]] = []
+    generales_nuevas: list[list[dict[str, Any]]] = []
+    ingresos: list[float] = []
+    detalles: list[dict[str, Any]] = []
+    for portafolios, generales in zip(portafolios_lista, generales_lista):
+        if not isinstance(portafolios, (list, tuple)):
+            portafolios = []
+        nuevas, ingreso, detalle = calcular_ingreso_estimado_oportunidades(
+            portafolios,
+            tipo_analisis=tipo_analisis,
+            oportunidades=oportunidades,
+        )
+        portafolios_nuevos.append(nuevas)
+        generales_nuevas.append(
+            _sincronizar_oportunidades_generales(
+                generales=generales,
+                unidades=nuevas,
+                detalle_maximo=detalle,
+            )
+        )
+        ingresos.append(float(ingreso))
+        detalles.append(detalle)
+
+    if "Portafolios_Detalle" in resultado.columns:
+        resultado["Portafolios_Detalle"] = pd.Series(
+            portafolios_nuevos, dtype=object
+        ).to_numpy()
+    if "Oportunidades_Generales" in resultado.columns:
+        resultado["Oportunidades_Generales"] = pd.Series(
+            generales_nuevas, dtype=object
+        ).to_numpy()
+    resultado["Ingreso_Estimado"] = pd.to_numeric(
+        pd.Series(ingresos), errors="coerce"
+    ).fillna(0.0).to_numpy()
+    resultado["Ingreso_Estimado_Detalle"] = pd.Series(
+        detalles, dtype=object
+    ).to_numpy()
     return resultado
 
 
@@ -3808,6 +4285,12 @@ def calcular_oportunidades_masivas_datos(
         _oportunidades_generales, axis=1
     )
 
+    # Calculamos el Ingreso Estimado con todas las oportunidades. La vista lo
+    # recalcula según los filtros de Oportunidad y Tipo de Análisis.
+    base = calcular_ingreso_estimado_masivo(
+        base, tipo_analisis="Todos", oportunidades=None
+    )
+
     portafolios_array = base["Portafolios_Detalle"].to_numpy()
     generales_array = base["Oportunidades_Generales"].to_numpy()
     oportunidades_lista: list[list[str]] = []
@@ -3860,7 +4343,7 @@ def calcular_oportunidades_masivas_datos(
     columnas_numericas = [
         "Pricing", "Ahorro", "Por_Cobrar", "Ahorro_Neto", "PaB_Origen_Total",
         "PaB_Actualizado_Total", "Descuento_Actual", "Pago_Actual",
-        "Ingreso_Actual", "Apartado_Neto", "Descuento_Esperado_Ponderado",
+        "Ingreso_Actual", "Ingreso_Estimado", "Apartado_Neto", "Descuento_Esperado_Ponderado",
         "Deudas_Analizadas", "Deudas_Masivas", "Deudas_Con_PaB_Ideal",
         "Deudas_Sin_PaB_Ideal", "Trad_PaB_Origen_Total",
         "Trad_PaB_Actualizado_Total", "Trad_Descuento_Actual", "Trad_Pago_Actual",

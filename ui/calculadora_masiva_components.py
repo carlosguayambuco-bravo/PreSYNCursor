@@ -14,7 +14,10 @@ from modules.constants import (
     LLAVE_REDIRECCION_CALCULADORA,
     OPORTUNIDADES,
 )
-from modules.oportunidades import calcular_oportunidades_masivas
+from modules.oportunidades import (
+    calcular_ingreso_estimado_masivo,
+    calcular_oportunidades_masivas,
+)
 from ui.forms_components import mostrar_componente_feedback
 from utils.helpers_general import clean_tildes, escapar_dolar_markdown, formatNumber
 
@@ -396,15 +399,23 @@ def filtrar_oportunidades_masivas(
     if excluir_clientes_con_liquidaciones:
         resultado = resultado[~resultado["Tiene_Deudas_Liquidaciones"].astype(bool)]
 
+    # Recalculamos el Ingreso Estimado con los filtros vigentes. El máximo se
+    # toma por unidad/oportunidad y no sobre todas las deudas del cliente.
+    resultado = calcular_ingreso_estimado_masivo(
+        resultado,
+        tipo_analisis=tipo_analisis,
+        oportunidades=seleccionadas,
+    )
+
     # Paso 7: Ordenamiento
     if resultado.empty:
         return resultado.reset_index(drop=True)
 
-    if "Ingreso_Actual" not in resultado.columns:
-        resultado["Ingreso_Actual"] = 0.0
+    if "Ingreso_Estimado" not in resultado.columns:
+        resultado["Ingreso_Estimado"] = 0.0
 
     if orden == "Mayor Ingreso Estimado":
-        columnas_orden = ["Ingreso_Actual", "Num_Oportunidades", "Referencia"]
+        columnas_orden = ["Ingreso_Estimado", "Num_Oportunidades", "Referencia"]
         ascendente = [False, False, True]
     elif orden == "Mayor Descuento Actual":
         columnas_orden = ["Descuento_Actual", "Num_Oportunidades", "Referencia"]
@@ -483,7 +494,9 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
                 "Oportunidad: muestra los clientes que la tienen por el tipo "
                 "elegido. Sin oportunidad elegida, exige al menos una "
                 "oportunidad de ese tipo. Si desactivas 'Solo con "
-                "oportunidades', filtra por viabilidad del análisis."
+                "oportunidades', filtra por viabilidad del análisis. El "
+                "Ingreso Estimado se calcula solo con las oportunidades de "
+                "este tipo."
             ),
             on_change=_reiniciar_pagina_masiva,
         )
@@ -498,7 +511,8 @@ def _mostrar_filtros_masivos(df: pd.DataFrame) -> dict[str, Any]:
             help=(
                 "Sin selección se muestran todas las oportunidades. Al "
                 "combinar con un Tipo de Análisis, la oportunidad debe existir "
-                "en el bloque Tradicional o Crédito elegido."
+                "en el bloque Tradicional o Crédito elegido. El Ingreso "
+                "Estimado se calcula con las oportunidades seleccionadas."
             ),
             on_change=_reiniciar_pagina_masiva,
         )
@@ -642,6 +656,32 @@ def _formatear_valor_oportunidad_unidad(*, nombre: str, valor: Any) -> str:
     """Formatea el valor de una oportunidad para las filas por unidad."""
     return _formatear_valor_oportunidad_masiva(nombre=nombre, valor=valor)
 
+def _mostrar_ingreso_oportunidad(oportunidad: dict[str, Any]) -> None:
+    """Muestra el ingreso estimado de una oportunidad y resalta el máximo.
+
+    Se usa en la columna de la oportunidad para que el negociador vea cuánto
+    aporta cada unidad/oportunidad y cuál define el Ingreso Estimado del
+    cliente.
+    """
+    if "ingreso_estimado" not in oportunidad:
+        return
+    try:
+        ingreso = float(oportunidad.get("ingreso_estimado"))
+    except (TypeError, ValueError):
+        return
+    if pd.isna(ingreso):
+        return
+    texto = _md(_formatear_monto(ingreso))
+    if _es_verdadero(oportunidad.get("es_ingreso_estimado_maximo")):
+        st.markdown("💸 **{}** :green[**MÁXIMO**]".format(texto))
+    else:
+        st.caption("💸 {}".format(texto))
+    if (
+        "incluida_en_ingreso_estimado" in oportunidad
+        and not _es_verdadero(oportunidad.get("incluida_en_ingreso_estimado"))
+    ):
+        st.caption("Fuera del filtro de ingreso.")
+
 def _mostrar_fila_oportunidad_unidad(
     *,
     unidad: dict[str, Any],
@@ -659,6 +699,7 @@ def _mostrar_fila_oportunidad_unidad(
             color=COLORES_OPORTUNIDADES.get(nombre, "gray"),
             icon=ICONOS_OPORTUNIDADES.get(nombre, "🔅"),
         )
+        _mostrar_ingreso_oportunidad(oportunidad)
     with colDescripcion:
         if mostrar_descripcion:
             st.markdown(_md(DESCRIPCION_OPORTUNIDADES.get(nombre, "")))
@@ -783,6 +824,7 @@ def _mostrar_oportunidades_de_unidad(
                 color=COLORES_OPORTUNIDADES.get(nombre, "gray"),
                 icon=ICONOS_OPORTUNIDADES.get(nombre, "🔅"),
             )
+            _mostrar_ingreso_oportunidad(oportunidad)
         with colDescripcion:
             st.markdown(_md(DESCRIPCION_OPORTUNIDADES.get(nombre, "")))
             detalle = str(oportunidad.get("detalle", "") or "").strip()
@@ -818,6 +860,14 @@ def _mostrar_oportunidades_generales(*, cliente: pd.Series) -> None:
                 color=COLORES_OPORTUNIDADES.get(nombre, "gray"),
                 icon=ICONOS_OPORTUNIDADES.get(nombre, "🔅"),
             )
+            _mostrar_ingreso_oportunidad(oportunidad)
+            unidad_oportunidad = str(
+                oportunidad.get("unidad", "") or ""
+            ).strip()
+            if unidad_oportunidad:
+                st.caption(
+                    _md("Unidad del máximo: {}".format(unidad_oportunidad))
+                )
         with colDescripcion:
             if nombre not in vistos:
                 st.markdown(_md(DESCRIPCION_OPORTUNIDADES.get(nombre, "")))
@@ -909,11 +959,16 @@ def _mostrar_detalle_portafolios(*, cliente: pd.Series) -> None:
 
                     _mostrar_badges_deudas(deudas=unidad.get("Deudas", []))
                     st.caption(
-                        "DUM: **{}** | PaB Actual: **{}** | Descuento: **{}** | Ingreso: **{}**".format(
+                        "DUM: **{}** | PaB Actual: **{}** | Descuento: **{}**".format(
                             _md(_formatear_monto(unidad.get("PaB_Origen", 0))),
                             _md(_formatear_monto(unidad.get("PaB_Actualizado", 0))),
                             _md(_formatear_porcentaje(unidad.get("Descuento_Actual", 0))),
+                        )
+                    )
+                    st.caption(
+                        "Ingreso Actual: **{}** | Ingreso Estimado (filtros): **{}**".format(
                             _md(_formatear_monto(unidad.get("Ingreso_Actual", 0))),
+                            _md(_formatear_monto(unidad.get("Ingreso_Estimado", 0))),
                         )
                     )
                     if _es_verdadero(unidad.get("Pago_Compartido")):
@@ -1106,11 +1161,17 @@ def _mostrar_tarjeta_cliente(*, cliente: pd.Series) -> None:
     portafolios = _normalizar_lista(cliente.get("Portafolios_Detalle", []))
     fuente_descuento = str(cliente.get("Fuente_Descuento", "Masivas") or "Masivas")
     try:
-        ingreso_actual = float(cliente.get("Ingreso_Actual", 0) or 0)
+        ingreso_estimado = float(cliente.get("Ingreso_Estimado", 0) or 0)
     except (TypeError, ValueError):
-        ingreso_actual = 0.0
-    if pd.isna(ingreso_actual):
-        ingreso_actual = 0.0
+        ingreso_estimado = 0.0
+    if pd.isna(ingreso_estimado):
+        ingreso_estimado = 0.0
+    detalle_ingreso = cliente.get("Ingreso_Estimado_Detalle")
+    if not isinstance(detalle_ingreso, dict):
+        detalle_ingreso = {}
+    ingreso_oportunidad = str(detalle_ingreso.get("oportunidad") or "").strip()
+    ingreso_unidad = str(detalle_ingreso.get("unidad") or "").strip()
+    ingreso_tipo = str(detalle_ingreso.get("tipo_analisis") or "").strip()
 
     with st.container(border=True):
         # Paso 1: Encabezado y Badges
@@ -1169,8 +1230,36 @@ def _mostrar_tarjeta_cliente(*, cliente: pd.Series) -> None:
         with colIngreso:
             st.metric(
                 "**💸 Ingreso Estimado**",
-                _formatear_monto(ingreso_actual),
-                help="Ingreso estimado con el descuento actual, sin IVA.",
+                _formatear_monto(ingreso_estimado),
+                help=(
+                    "Máximo ingreso estimado entre las oportunidades aplicables "
+                    "de las unidades analizadas, sin IVA. Cambia con los filtros "
+                    "de Oportunidad y Tipo de Análisis."
+                ),
+            )
+
+        if ingreso_estimado > 0 and ingreso_oportunidad:
+            st.caption(
+                _md(
+                    "💸 Máximo desde **{}** en **{}** ({}).".format(
+                        ingreso_oportunidad,
+                        ingreso_unidad or "Unidad",
+                        ingreso_tipo or "General",
+                    )
+                )
+            )
+        elif ingreso_estimado > 0:
+            st.caption(
+                "💸 Ingreso estimado máximo de las oportunidades aplicables."
+            )
+        elif oportunidades:
+            st.caption(
+                "💸 Con los filtros actuales, las oportunidades no generan un "
+                "ingreso estimado mayor a cero."
+            )
+        else:
+            st.caption(
+                _md("💸 Sin oportunidades aplicables: Ingreso Estimado **$ 0**.")
             )
 
         st.caption(
@@ -1195,8 +1284,10 @@ def _mostrar_tarjeta_cliente(*, cliente: pd.Series) -> None:
         st.caption(
             _md(
                 "💸 El **Ingreso Estimado** no incluye IVA. Con IVA: **{}**. "
-                "Se calcula como (DUM - PaB Actual) × Pricing.".format(
-                    _formatear_monto(ingreso_actual * 1.19)
+                "Se toma el mayor ingreso entre las oportunidades de las unidades; "
+                "la ContraOferta Viable usa el descuento viable y las demás el "
+                "Descuento Actual.".format(
+                    _formatear_monto(ingreso_estimado * 1.19)
                 )
             )
         )
@@ -1400,7 +1491,10 @@ def mostrar_calculadora_masiva() -> None:
         )
         return
 
-    if "Portafolios_Detalle" not in resultado.columns:
+    if (
+        "Portafolios_Detalle" not in resultado.columns
+        or "Ingreso_Estimado" not in resultado.columns
+    ):
         st.session_state.pop(LLAVE_RESULTADO_MASIVO, None)
         st.warning(
             "El resultado guardado pertenece a una versión anterior de la calculadora. "
